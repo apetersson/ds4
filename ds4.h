@@ -59,6 +59,17 @@ typedef struct {
 typedef struct ds4_engine ds4_engine;
 typedef struct ds4_session ds4_session;
 
+/* One contiguous run of caller-supplied prefill hidden states.  The prompt's
+ * token ids remain authoritative for routing; rows only replace the embedding
+ * lookup at [start, start + count).  This is intentionally vision-neutral so
+ * other prefix adapters can use the same narrow API. */
+typedef struct {
+    const float *rows;          /* row-major F32 [count, width] */
+    uint32_t start;             /* absolute token position in prompt */
+    uint32_t count;
+    uint32_t width;
+} ds4_embedding_span;
+
 typedef void (*ds4_session_progress_fn)(void *ud, const char *event, int current, int total);
 typedef bool (*ds4_session_cancel_fn)(void *ud);
 
@@ -358,6 +369,14 @@ typedef enum {
  * state is refilled from scratch. */
 #define DS4_SESSION_SYNC_INTERRUPTED 2
 int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen);
+/* Cold-prefill a GLM/DeepSeek session while replacing one contiguous token
+ * span with external hidden states.  The standard sync/decode path is
+ * unchanged.  The rows only need to remain valid until this call returns. */
+int ds4_session_sync_embedding_span(ds4_session *s,
+                                    const ds4_tokens *prompt,
+                                    const ds4_embedding_span *span,
+                                    char *err,
+                                    size_t errlen);
 bool ds4_session_rewrite_requires_rebuild(int live_len, int canonical_len, int common);
 ds4_session_rewrite_result ds4_session_rewrite_from_common(
         ds4_session *s, const ds4_tokens *prompt, int common,
