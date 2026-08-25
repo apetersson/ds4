@@ -164,6 +164,10 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
     }
     if (tool == DS4_HELP_SERVER) {
         opt(fp, c, "-n, --tokens N", "Default max output tokens when clients omit a limit.");
+        opt(fp, c, "--vision-python FILE", "Python interpreter for standard OpenAI image_url encoding.");
+        opt(fp, c, "--vision-encoder FILE", "DeepEncoderV2 DS4VEMB1 encoder script.");
+        opt(fp, c, "--vision-tower FILE", "BF16 DeepEncoderV2 tower weights.");
+        opt(fp, c, "--vision-adapter FILE", "BF16 receiver projector weights.");
     }
     opt(fp, c, "-t, --threads N", "CPU helper threads for host-side/reference work.");
     opt(fp, c, "--power N", "GPU duty-cycle target, 1..100. Default: 100");
