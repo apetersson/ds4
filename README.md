@@ -1063,14 +1063,40 @@ Supported endpoints:
 - `GET /v1/models`
 - `GET /v1/models/deepseek-v4-flash`
 - `GET /v1/models/deepseek-v4-pro`
+- `GET /v1/models/deepseek-chat`
+- `GET /v1/models/deepseek-reasoner`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 - `POST /v1/completions`
 - `POST /v1/messages`
 
-The Flash and PRO model endpoints are compatibility aliases. They both report
-the model currently loaded from the GGUF passed with `-m`; the endpoint name does
-not select a different model.
+These model endpoints are compatibility aliases. They all report the model
+currently loaded from the GGUF passed with `-m`; the endpoint name does not
+select a different model. `deepseek-chat` disables thinking by default and
+`deepseek-reasoner` enables it.
+
+This fork can attach a DeepEncoderV2 sidecar directly to OpenAI chat requests:
+
+```sh
+./ds4-server --model model.gguf --metal \
+  --vision-python /path/to/venv/bin/python \
+  --vision-encoder /path/to/encode_flycockpit.py \
+  --vision-tower /path/to/DeepEncoderV2-BF16.safetensors \
+  --vision-adapter /path/to/Projector-BF16.safetensors
+```
+
+All four flags are required together. The server accepts one standard
+`image_url` content part, invokes the encoder as a short-lived child, validates
+the resulting DS4VEMB1 payload, expands the exact image-token run, and injects
+the external rows during cold prefill. Visual requests bypass token-only KV
+reuse. Keep this mode bound to localhost when the encoder accepts `file://` or
+server-local image paths.
+
+Only the encoder is out of process. That boundary releases PyTorch/MPS tower
+and activation allocations before receiver prefill and isolates encoder
+failures. A true single-process implementation requires a native DS4 backend
+for the complete vision tower and projector; embedding Python would keep a
+second runtime and allocator resident in the server.
 
 `/v1/chat/completions` accepts the usual OpenAI-style `messages`,
 `max_tokens`/`max_completion_tokens`, `temperature`, `top_p`, `top_k`, `min_p`,
