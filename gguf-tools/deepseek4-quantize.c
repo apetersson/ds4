@@ -1254,6 +1254,81 @@ static ds4q_type policy_type(const quant_policy *p, const char *name, const tens
     return tmpl->type;
 }
 
+static void policy_add_exact_override(quant_policy *p, const char *name, ds4q_type type) {
+    p->overrides = xrealloc(
+        p->overrides,
+        (size_t)(p->n_overrides + 1) * sizeof(p->overrides[0]));
+    p->overrides[p->n_overrides++] = (type_override){xstrdup(name), type};
+}
+
+/* The published checkpoint stores routed experts as packed E2M1 codes plus
+ * UE8M0 scales, which map exactly to GGUF MXFP4 after a layout-only repack.
+ * DS4 has no block-scaled FP8 GGUF weight type, so regular E4M3+UE8M0 tensors
+ * are expanded to BF16. Every represented FP8 value has only three mantissa
+ * bits and a power-of-two scale, making BF16 an exact storage expansion. */
+static ds4q_type native_preserving_type(st_db *db, const char *gguf_name) {
+    expert_tensor expert = parse_expert_tensor(gguf_name);
+    if (expert.is_expert) {
+        char prefix[256];
+        const char *wid = expert_part_name(expert.part);
+        if (expert.scope == EXP_SCOPE_MTP) {
+            snprintf(prefix, sizeof(prefix), "mtp.%d.ffn.experts.0.%s", expert.layer, wid);
+        } else {
+            snprintf(prefix, sizeof(prefix), "layers.%d.ffn.experts.0.%s", expert.layer, wid);
+        }
+        char weight_name[320];
+        char scale_name[320];
+        snprintf(weight_name, sizeof(weight_name), "%s.weight", prefix);
+        snprintf(scale_name, sizeof(scale_name), "%s.scale", prefix);
+        tensor_entry *weight = db_tensor(db, weight_name, NULL);
+        tensor_entry *scale = db_tensor(db, scale_name, NULL);
+        if (strcmp(weight->info.dtype, "I8") != 0 ||
+            strcmp(scale->info.dtype, "F8_E8M0") != 0) {
+            fprintf(stderr,
+                    "error: native-preserving expert %s is not packed I8 + F8_E8M0\n",
+                    gguf_name);
+            exit(1);
+        }
+        return DS4Q_TYPE_MXFP4;
+    }
+
+    char *hf_name = hf_name_for_regular(gguf_name);
+    tensor_entry *source = db_tensor(db, hf_name, NULL);
+    ds4q_type type = DS4Q_TYPE_COUNT;
+    if (strcmp(source->info.dtype, "F8_E4M3") == 0 ||
+        strcmp(source->info.dtype, "BF16") == 0) {
+        type = DS4Q_TYPE_BF16;
+    } else if (strcmp(source->info.dtype, "F16") == 0) {
+        type = DS4Q_TYPE_F16;
+    } else if (strcmp(source->info.dtype, "F32") == 0) {
+        type = DS4Q_TYPE_F32;
+    } else if (strcmp(source->info.dtype, "I64") == 0) {
+        type = DS4Q_TYPE_I32;
+    } else {
+        fprintf(stderr,
+                "error: unsupported native-preserving source dtype %s for %s (%s)\n",
+                source->info.dtype,
+                gguf_name,
+                hf_name);
+        exit(1);
+    }
+    free(hf_name);
+    return type;
+}
+
+static void apply_native_preserving_policy(st_db *db,
+                                           const tensor_meta *tensors,
+                                           uint64_t tensor_count,
+                                           quant_policy *policy) {
+    for (uint64_t i = 0; i < tensor_count; i++) {
+        const tensor_meta *tensor = &tensors[i];
+        policy_add_exact_override(
+            policy,
+            tensor->name,
+            native_preserving_type(db, tensor->name));
+    }
+}
+
 static ds4q_type parse_type(const char *raw) {
     char wanted[64];
     size_t n = 0;
@@ -1420,6 +1495,25 @@ static byte_buf generate_regular_hf(st_db *db, const char *gguf_name, const char
         imat = imatrix_find(imatrix, names, 2, tmpl->ne[0], -1, 0);
     }
     byte_buf b = f32_to_type(f32, n, target, tmpl->ne[0], imat);
+    if (target == DS4Q_TYPE_BF16 &&
+        (strcmp(te->info.dtype, "F8_E4M3") == 0 ||
+         strcmp(te->info.dtype, "BF16") == 0)) {
+        for (int64_t i = 0; i < n; i++) {
+            const uint16_t stored = load_u16_le(b.data + (size_t)i * 2);
+            const float roundtrip = bf16_to_f32_bits(stored);
+            uint32_t source_bits = 0;
+            uint32_t roundtrip_bits = 0;
+            memcpy(&source_bits, &f32[i], sizeof(source_bits));
+            memcpy(&roundtrip_bits, &roundtrip, sizeof(roundtrip_bits));
+            if (source_bits != roundtrip_bits) {
+                fprintf(stderr,
+                        "error: BF16 expansion is not exact for %s at element %" PRId64 "\n",
+                        gguf_name,
+                        i);
+                exit(1);
+            }
+        }
+    }
     free(f32);
     return b;
 }
@@ -2012,6 +2106,7 @@ typedef struct {
     char *out_gguf;
     char *compare_gguf;
     char *compare_tensor;
+    char *compare_all_gguf;
     char *imatrix_file;
     quant_policy policy;
     int n_experts;
@@ -2019,6 +2114,7 @@ typedef struct {
     bool dry_run;
     bool overwrite;
     bool imatrix_strict;
+    bool native_preserving;
     bool dspark_manifest;
     bool dspark_support;
     dspark_support_options dspark;
@@ -2780,6 +2876,7 @@ static void usage(const char *argv0) {
     printf("  --out FILE             output GGUF path\n");
     printf("  --compare-gguf FILE    reference GGUF for --compare-tensor; normal mode defaults to template\n");
     printf("  --compare-tensor NAME  regenerate one tensor, checksum, optionally byte-compare, and exit\n");
+    printf("  --compare-all-gguf FILE regenerate and byte-compare every planned tensor, then exit\n");
     printf("  --overwrite            replace --out if it already exists\n");
     printf("  --dry-run              print output plan; DSpark support mode reads shard headers only\n");
     printf("  --dspark-manifest      print DSpark HF->GGUF tensor-name manifest and exit\n");
@@ -2790,6 +2887,7 @@ static void usage(const char *argv0) {
     printf("  --dspark-target-layers CSV DSpark target layer ids metadata, default 40,41,42\n");
     printf("  --imatrix FILE         legacy .dat imatrix from ds4 --imatrix-out\n");
     printf("  --imatrix-strict       fail if a quantized tensor has no matching imatrix vector\n");
+    printf("  --native-preserving    losslessly repack routed MXFP4; expand block-scaled FP8 to exact BF16; preserve BF16/F32\n");
     printf("  --experts TYPE         set routed w1/w2/w3 expert tensors to TYPE\n");
     printf("  --routed-w1 TYPE       routed gate expert tensor type\n");
     printf("  --routed-w2 TYPE       routed down expert tensor type\n");
@@ -2882,6 +2980,8 @@ static params parse_args(int argc, char **argv) {
             p.compare_gguf = need_value(argc, argv, &i, arg);
         } else if (strcmp(arg, "--compare-tensor") == 0) {
             p.compare_tensor = need_value(argc, argv, &i, arg);
+        } else if (strcmp(arg, "--compare-all-gguf") == 0) {
+            p.compare_all_gguf = need_value(argc, argv, &i, arg);
         } else if (strcmp(arg, "--overwrite") == 0) {
             p.overwrite = true;
         } else if (strcmp(arg, "--dry-run") == 0) {
@@ -2902,6 +3002,8 @@ static params parse_args(int argc, char **argv) {
             p.imatrix_file = need_value(argc, argv, &i, arg);
         } else if (strcmp(arg, "--imatrix-strict") == 0) {
             p.imatrix_strict = true;
+        } else if (strcmp(arg, "--native-preserving") == 0) {
+            p.native_preserving = true;
         } else if (strcmp(arg, "--experts") == 0 || strcmp(arg, "--routed") == 0) {
             ds4q_type t = parse_type(need_value(argc, argv, &i, arg));
             p.policy.routed_w1 = p.policy.routed_w2 = p.policy.routed_w3 = t;
@@ -2940,6 +3042,22 @@ static params parse_args(int argc, char **argv) {
         }
     }
     if (!p.hf_dir) die("--hf is required");
+    if (p.compare_tensor && p.compare_all_gguf) {
+        die("--compare-tensor and --compare-all-gguf are mutually exclusive");
+    }
+    if (p.native_preserving &&
+        (p.policy.routed_w1 != DS4Q_TYPE_COUNT ||
+         p.policy.routed_w2 != DS4Q_TYPE_COUNT ||
+         p.policy.routed_w3 != DS4Q_TYPE_COUNT ||
+         p.policy.attention_proj != DS4Q_TYPE_COUNT ||
+         p.policy.attention != DS4Q_TYPE_COUNT ||
+         p.policy.shared != DS4Q_TYPE_COUNT ||
+         p.policy.embedding != DS4Q_TYPE_COUNT ||
+         p.policy.output != DS4Q_TYPE_COUNT ||
+         p.policy.dense != DS4Q_TYPE_COUNT ||
+         p.policy.n_overrides != 0)) {
+        die("--native-preserving cannot be combined with tensor type overrides");
+    }
     if (p.dspark_manifest && p.dspark_support) die("--dspark-manifest and --dspark-support are mutually exclusive");
     if (p.dspark_manifest) return p;
     if (p.dspark_support) {
@@ -2952,7 +3070,9 @@ static params parse_args(int argc, char **argv) {
         return p;
     }
     if (!p.template_gguf) die("--template is required");
-    if (!p.dry_run && !p.compare_tensor && !p.out_gguf) die("--out is required unless --dry-run or --compare-tensor is used");
+    if (!p.dry_run && !p.compare_tensor && !p.compare_all_gguf && !p.out_gguf) {
+        die("--out is required unless a dry-run or comparison mode is used");
+    }
     if (p.compare_tensor && !p.compare_gguf) p.compare_gguf = p.template_gguf;
     if (p.out_gguf && file_exists(p.out_gguf) && !p.overwrite) die("output exists; use --overwrite");
     return p;
@@ -3012,6 +3132,57 @@ static void compare_one_tensor(st_db *db, const gguf_file *tmpl, const output_co
     print_byte_compare(&generated, &reference);
     free(generated.data);
     free(reference.data);
+    free_gguf_file(&ref);
+}
+
+static void compare_all_tensors(st_db *db,
+                                const gguf_file *tmpl,
+                                const output_context *out_ctx,
+                                const params *p,
+                                const imatrix_store *imatrix) {
+    gguf_file ref = load_gguf_metadata(p->compare_all_gguf);
+    if (ref.n_tensors != out_ctx->n_tensors) {
+        die("all-tensor comparison tensor count mismatch");
+    }
+    size_t compared_bytes = 0;
+    size_t mxfp4_tensors = 0;
+    for (uint64_t i = 0; i < out_ctx->n_tensors; i++) {
+        const tensor_meta *planned = &out_ctx->tensors[i];
+        const int ref_idx = hmap_get(&ref.tensor_map, planned->name);
+        if (ref_idx < 0 || ref.tensors[ref_idx].type != planned->type) {
+            fprintf(stderr, "error: comparison type/name mismatch for %s\n", planned->name);
+            exit(1);
+        }
+        byte_buf generated = generate_tensor(
+            db,
+            planned->name,
+            &tmpl->tensors[i],
+            planned->type,
+            p->n_experts,
+            p->n_threads,
+            imatrix);
+        byte_buf reference = read_gguf_tensor_data(
+            &ref, p->compare_all_gguf, planned->name);
+        if (generated.size != reference.size ||
+            memcmp(generated.data, reference.data, generated.size) != 0) {
+            fprintf(stderr, "error: all-tensor byte comparison failed for %s\n", planned->name);
+            exit(1);
+        }
+        compared_bytes += generated.size;
+        if (planned->type == DS4Q_TYPE_MXFP4) mxfp4_tensors++;
+        free(generated.data);
+        free(reference.data);
+        if ((i + 1) % 32 == 0 || i + 1 == out_ctx->n_tensors) {
+            fprintf(stderr,
+                    "compare_all: %" PRIu64 "/%" PRIu64 " tensors OK\n",
+                    i + 1,
+                    out_ctx->n_tensors);
+        }
+    }
+    printf("compare_all: OK\n");
+    printf("compared_tensors: %" PRIu64 "\n", out_ctx->n_tensors);
+    printf("compared_bytes: %zu\n", compared_bytes);
+    printf("mxfp4_tensors: %zu\n", mxfp4_tensors);
     free_gguf_file(&ref);
 }
 
@@ -3100,6 +3271,12 @@ int main(int argc, char **argv) {
 
     hf_model_metadata metadata = load_hf_model_metadata(p.hf_dir);
     gguf_file tmpl = load_gguf_metadata_with_override(p.template_gguf, &metadata);
+    st_db db;
+    db_open(&db, p.hf_dir);
+    if (p.native_preserving) {
+        apply_native_preserving_policy(
+            &db, tmpl.tensors, tmpl.n_tensors, &p.policy);
+    }
     if (p.n_experts <= 0) {
         if (tmpl.n_experts > 0) {
             p.n_experts = tmpl.n_experts;
@@ -3115,6 +3292,7 @@ int main(int argc, char **argv) {
     print_plan(&tmpl, &out_ctx);
     printf("compress_ratios: source=config.json count=%" PRIu64 "\n", metadata.n_compress_ratios);
     if (p.dry_run) {
+        db_close(&db);
         free_hf_model_metadata(&metadata);
         imatrix_free(&imatrix);
         free_gguf_file(&tmpl);
@@ -3124,8 +3302,17 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    st_db db;
-    db_open(&db, p.hf_dir);
+    if (p.compare_all_gguf) {
+        compare_all_tensors(&db, &tmpl, &out_ctx, &p, &imatrix);
+        db_close(&db);
+        imatrix_free(&imatrix);
+        free_hf_model_metadata(&metadata);
+        free_gguf_file(&tmpl);
+        free(out_ctx.tensors);
+        for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
+        free(p.policy.overrides);
+        return 0;
+    }
     if (p.compare_tensor) {
         compare_one_tensor(&db, &tmpl, &out_ctx, &p, &imatrix);
         db_close(&db);
