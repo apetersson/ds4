@@ -1264,8 +1264,9 @@ static void policy_add_exact_override(quant_policy *p, const char *name, ds4q_ty
 /* The published checkpoint stores routed experts as packed E2M1 codes plus
  * UE8M0 scales, which map exactly to GGUF MXFP4 after a layout-only repack.
  * DS4 has no block-scaled FP8 GGUF weight type, so regular E4M3+UE8M0 tensors
- * are expanded to BF16. Every represented FP8 value has only three mantissa
- * bits and a power-of-two scale, making BF16 an exact storage expansion. */
+ * are expanded to F16 when exact. Source BF16 expands to F32 because some
+ * published values are outside exact F16 representation. The converter checks
+ * every FP8 element and refuses the build if F16 cannot represent it exactly. */
 static ds4q_type native_preserving_type(st_db *db, const char *gguf_name) {
     expert_tensor expert = parse_expert_tensor(gguf_name);
     if (expert.is_expert) {
@@ -1295,9 +1296,10 @@ static ds4q_type native_preserving_type(st_db *db, const char *gguf_name) {
     char *hf_name = hf_name_for_regular(gguf_name);
     tensor_entry *source = db_tensor(db, hf_name, NULL);
     ds4q_type type = DS4Q_TYPE_COUNT;
-    if (strcmp(source->info.dtype, "F8_E4M3") == 0 ||
-        strcmp(source->info.dtype, "BF16") == 0) {
-        type = DS4Q_TYPE_BF16;
+    if (strcmp(source->info.dtype, "F8_E4M3") == 0) {
+        type = DS4Q_TYPE_F16;
+    } else if (strcmp(source->info.dtype, "BF16") == 0) {
+        type = DS4Q_TYPE_F32;
     } else if (strcmp(source->info.dtype, "F16") == 0) {
         type = DS4Q_TYPE_F16;
     } else if (strcmp(source->info.dtype, "F32") == 0) {
@@ -1495,19 +1497,21 @@ static byte_buf generate_regular_hf(st_db *db, const char *gguf_name, const char
         imat = imatrix_find(imatrix, names, 2, tmpl->ne[0], -1, 0);
     }
     byte_buf b = f32_to_type(f32, n, target, tmpl->ne[0], imat);
-    if (target == DS4Q_TYPE_BF16 &&
+    if ((target == DS4Q_TYPE_BF16 || target == DS4Q_TYPE_F16) &&
         (strcmp(te->info.dtype, "F8_E4M3") == 0 ||
          strcmp(te->info.dtype, "BF16") == 0)) {
         for (int64_t i = 0; i < n; i++) {
             const uint16_t stored = load_u16_le(b.data + (size_t)i * 2);
-            const float roundtrip = bf16_to_f32_bits(stored);
+            const float roundtrip = target == DS4Q_TYPE_BF16 ?
+                bf16_to_f32_bits(stored) : ds4q_f16_to_f32(stored);
             uint32_t source_bits = 0;
             uint32_t roundtrip_bits = 0;
             memcpy(&source_bits, &f32[i], sizeof(source_bits));
             memcpy(&roundtrip_bits, &roundtrip, sizeof(roundtrip_bits));
             if (source_bits != roundtrip_bits) {
                 fprintf(stderr,
-                        "error: BF16 expansion is not exact for %s at element %" PRId64 "\n",
+                        "error: %s expansion is not exact for %s at element %" PRId64 "\n",
+                        target == DS4Q_TYPE_BF16 ? "BF16" : "F16",
                         gguf_name,
                         i);
                 exit(1);
@@ -2887,7 +2891,7 @@ static void usage(const char *argv0) {
     printf("  --dspark-target-layers CSV DSpark target layer ids metadata, default 40,41,42\n");
     printf("  --imatrix FILE         legacy .dat imatrix from ds4 --imatrix-out\n");
     printf("  --imatrix-strict       fail if a quantized tensor has no matching imatrix vector\n");
-    printf("  --native-preserving    losslessly repack routed MXFP4; expand block-scaled FP8 to exact BF16; preserve BF16/F32\n");
+    printf("  --native-preserving    losslessly repack routed MXFP4; exact-expand block-scaled FP8 to F16 and BF16 to F32\n");
     printf("  --experts TYPE         set routed w1/w2/w3 expert tensors to TYPE\n");
     printf("  --routed-w1 TYPE       routed gate expert tensor type\n");
     printf("  --routed-w2 TYPE       routed down expert tensor type\n");
