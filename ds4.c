@@ -36916,6 +36916,7 @@ struct ds4_vocab {
     int arg_value_start_id;
     int arg_value_end_id;
     int dsml_id;
+    int image_id;
     str_i32_table token_to_id;
     str_i32_table merge_rank;
 };
@@ -37832,6 +37833,7 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
         vocab->arg_value_start_id = vocab_lookup_optional(vocab, "<arg_value>");
         vocab->arg_value_end_id = vocab_lookup_optional(vocab, "</arg_value>");
         vocab->dsml_id = -1;
+        vocab->image_id = vocab_lookup_optional(vocab, "<｜image｜>");
         return;
     }
 
@@ -37853,6 +37855,7 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
     vocab->arg_value_start_id = -1;
     vocab->arg_value_end_id = -1;
     vocab->dsml_id = vocab_lookup(vocab, "｜DSML｜");
+    vocab->image_id = vocab_lookup_optional(vocab, "<｜image｜>");
 }
 
 static void vocab_free(ds4_vocab *vocab) {
@@ -37962,6 +37965,7 @@ static bool special_token_at(const ds4_vocab *vocab, const char *p, int *token, 
         {"<arg_value>",            vocab->arg_value_start_id},
         {"</arg_value>",           vocab->arg_value_end_id},
         {"｜DSML｜",                vocab->dsml_id},
+        {"<｜image｜>",              vocab->image_id},
     };
 
     for (size_t i = 0; i < sizeof(specials) / sizeof(specials[0]); i++) {

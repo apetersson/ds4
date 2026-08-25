@@ -621,6 +621,27 @@ typedef struct {
     int cap;
 } chat_msgs;
 
+enum { DS4V_FLAG_BEGIN_END = 1u };
+
+typedef struct {
+    char magic[8];
+    uint32_t version;
+    uint32_t header_bytes;
+    uint32_t token_count;
+    uint32_t hidden_size;
+    uint32_t flags;
+    int32_t begin_token;
+    int32_t end_token;
+    uint32_t reserved;
+    uint8_t image_sha256[32];
+} ds4v_header;
+
+typedef struct {
+    ds4v_header header;
+    int32_t *routes;
+    float *rows;
+} ds4v_payload;
+
 static void tool_memory_attach_to_messages(server *s, chat_msgs *msgs,
                                            tool_replay_stats *stats);
 static bool tool_memory_has_id(server *s, const char *id);
@@ -650,6 +671,9 @@ typedef struct {
     stop_list stops;
     char *raw_body;
     char *prompt_text;
+    char *embedding_span_path;
+    ds4v_payload embedding_payload;
+    ds4_embedding_span embedding_span;
     tool_schema_orders tool_orders;
     int max_tokens;
     int top_k;
@@ -831,6 +855,9 @@ static void request_free(request *r) {
     free(r->stops.v);
     free(r->raw_body);
     free(r->prompt_text);
+    free(r->embedding_span_path);
+    free(r->embedding_payload.routes);
+    free(r->embedding_payload.rows);
     stop_list_clear(&r->responses_live_call_ids);
     free(r->responses_live_call_ids.v);
     free(r->responses_live_suffix_text);
@@ -839,6 +866,83 @@ static void request_free(request *r) {
     free(r->anthropic_live_suffix_text);
     tool_schema_orders_free(&r->tool_orders);
     memset(r, 0, sizeof(*r));
+}
+
+static bool load_ds4v_payload(const char *path, ds4v_payload *out,
+                              char *err, size_t errlen) {
+    memset(out, 0, sizeof(*out));
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        if (err && errlen)
+            snprintf(err, errlen, "cannot open embedding span: %s", strerror(errno));
+        return false;
+    }
+
+    bool ok = fread(&out->header, 1, sizeof(out->header), fp) == sizeof(out->header);
+    const uint32_t count = out->header.token_count;
+    if (!ok || memcmp(out->header.magic, "DS4VEMB1", 8) != 0 ||
+        out->header.version != 1 ||
+        out->header.header_bytes != sizeof(out->header) ||
+        (count != 257 && count != 769 && count != 1281) ||
+        out->header.hidden_size != 4096 ||
+        (out->header.flags & ~DS4V_FLAG_BEGIN_END) != 0) {
+        if (err && errlen) snprintf(err, errlen, "invalid or unsupported DS4VEMB1 payload");
+        fclose(fp);
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+
+    const size_t route_bytes = (size_t)count * sizeof(out->routes[0]);
+    const size_t row_values = (size_t)count * (size_t)out->header.hidden_size;
+    const size_t row_bytes = row_values * sizeof(out->rows[0]);
+    out->routes = xmalloc(route_bytes);
+    out->rows = xmalloc(row_bytes);
+    ok = fread(out->routes, 1, route_bytes, fp) == route_bytes &&
+         fread(out->rows, 1, row_bytes, fp) == row_bytes &&
+         fgetc(fp) == EOF;
+    fclose(fp);
+    if (ok) {
+        for (uint32_t i = 0; i < count; i++) {
+            if (out->routes[i] < 0 || out->routes[i] >= 129280) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if (ok) {
+        for (size_t i = 0; i < row_values; i++) {
+            if (!isfinite(out->rows[i])) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if (!ok) {
+        if (err && errlen) snprintf(err, errlen, "truncated or invalid DS4VEMB1 payload");
+        free(out->routes);
+        free(out->rows);
+        memset(out, 0, sizeof(*out));
+    }
+    return ok;
+}
+
+static int find_embedding_route_span(const ds4_tokens *prompt,
+                                     const ds4v_payload *payload) {
+    if (!prompt || !payload || !payload->routes || payload->header.token_count == 0 ||
+        payload->header.token_count > (uint32_t)prompt->len)
+        return -1;
+    const int count = (int)payload->header.token_count;
+    for (int start = prompt->len - count; start >= 0; start--) {
+        bool match = true;
+        for (int i = 0; i < count; i++) {
+            if (prompt->v[start + i] != payload->routes[i]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return start;
+    }
+    return -1;
 }
 
 static ds4_think_mode think_mode_from_enabled(bool enabled, ds4_think_mode effort) {
@@ -3001,6 +3105,11 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
                 goto bad;
             }
             got_messages = true;
+        } else if (!strcmp(key, "ds4_embedding_span_path")) {
+            if (!json_string_replace(&p, &r->embedding_span_path)) {
+                free(key);
+                goto bad;
+            }
         } else if (!strcmp(key, "tools")) {
             free(tool_schemas);
             tool_schemas = NULL;
@@ -3133,6 +3242,29 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
         r->model_syntax, &msgs, active_tool_schemas,
         &r->tool_orders, r->think_mode);
     ds4_tokenize_rendered_chat(e, r->prompt_text, &r->prompt);
+    if (r->embedding_span_path) {
+        if (!load_ds4v_payload(r->embedding_span_path, &r->embedding_payload,
+                               err, errlen)) {
+            chat_msgs_free(&msgs);
+            free(tool_schemas);
+            request_free(r);
+            return false;
+        }
+        const int start = find_embedding_route_span(&r->prompt,
+                                                     &r->embedding_payload);
+        if (start < 0) {
+            snprintf(err, errlen,
+                     "embedding span route tokens are not present in the rendered prompt");
+            chat_msgs_free(&msgs);
+            free(tool_schemas);
+            request_free(r);
+            return false;
+        }
+        r->embedding_span.rows = r->embedding_payload.rows;
+        r->embedding_span.start = (uint32_t)start;
+        r->embedding_span.count = r->embedding_payload.header.token_count;
+        r->embedding_span.width = r->embedding_payload.header.hidden_size;
+    }
     chat_msgs_free(&msgs);
     free(tool_schemas);
     return true;
@@ -10197,6 +10329,7 @@ typedef struct {
     bool enable_cors;
     bool headers_sent;
     bool stream_failed;
+    bool disable_kv_store;
     double last_keepalive;
     job *request_job;
 } server_prefill_progress;
@@ -10515,6 +10648,18 @@ static int server_session_sync(server *s, server_slot *slot,
            DS4_SESSION_SYNC_INTERRUPTED : 0;
 }
 
+static int server_session_sync_embedding_span(server *s, server_slot *slot,
+                                              const ds4_tokens *prompt,
+                                              const ds4_embedding_span *span,
+                                              char *err, size_t errlen) {
+    if (!s || !slot || !prompt || !span) return 1;
+    if (!server_prefill_enter(s, slot)) return DS4_SESSION_SYNC_INTERRUPTED;
+    const int rc = ds4_session_sync_embedding_span(slot->session, prompt, span,
+                                                   err, errlen);
+    server_prefill_leave(s);
+    return rc;
+}
+
 static bool append_rendered_suffix_to_live_session(server *s, server_slot *slot,
                                                    const char *suffix,
                                                    int *tokens_appended,
@@ -10627,7 +10772,8 @@ static void server_progress_cb(void *ud, const char *event, int current, int tot
     if (is_display) return;
     double elapsed = now - p->t0;
     if (p->seen && current == p->last_current) {
-        if (p->srv && p->slot && current > p->cached_tokens) {
+        if (!p->disable_kv_store && p->srv && p->slot &&
+            current > p->cached_tokens) {
             kv_cache_maybe_store_continued(p->srv, p->slot);
         }
         return;
@@ -10668,7 +10814,8 @@ static void server_progress_cb(void *ud, const char *event, int current, int tot
                chunk_tps,
                avg_tps,
                elapsed);
-    if (p->srv && p->slot && current > p->cached_tokens) {
+    if (!p->disable_kv_store && p->srv && p->slot &&
+        current > p->cached_tokens) {
         kv_cache_maybe_store_continued(p->srv, p->slot);
     }
 }
@@ -11323,6 +11470,21 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
             prompt_for_sync = &effective_prompt;
         }
     }
+    const bool has_embedding_span = j->req.embedding_span.rows != NULL;
+    if (has_embedding_span) {
+        /* Placeholder token ids do not identify the image.  The external-span
+         * API deliberately rebuilds from token zero, so do not report or
+         * persist token-only cache state for this request. */
+        ds4_tokens_free(&effective_prompt);
+        prompt_for_sync = &j->req.prompt;
+        cached = 0;
+        disk_cached = 0;
+        cache_source = "embedding-span";
+        free(disk_cache_path);
+        disk_cache_path = NULL;
+        disk_cache_ext_flags = 0;
+        slot->continued_last_store_tokens = 0;
+    }
     const bool responses_reasoning_state_preserved =
         cached > 0 &&
         ((!strcmp(cache_source, "responses-visible") ||
@@ -11339,6 +11501,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
      * the live KV cache and can be reused by the next request. */
     j->req.cache_read_tokens = cached;
     j->req.cache_write_tokens = prompt_tokens > cached ? prompt_tokens - cached : 0;
+    if (has_embedding_span) j->req.cache_write_tokens = 0;
 
     const double t0 = now_sec();
     uint64_t trace_id = trace_begin(s, j, cached, prompt_tokens, &cache_diag,
@@ -11353,6 +11516,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
         .cached_tokens = cached,
         .has_tools = j->req.has_tools,
         .responses_protocol = responses_protocol,
+        .disable_kv_store = has_embedding_span,
         .t0 = t0,
         .fd = j->fd,
         .stream = j->req.stream,
@@ -11409,7 +11573,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
     ds4_session_set_display_progress(slot->session, server_progress_cb, &progress);
 
     int cold_store_len = 0;
-    if (cached == 0 &&
+    if (!has_embedding_span && cached == 0 &&
         s->kv.enabled &&
         prompt_for_sync->len >= s->kv.opt.min_tokens &&
         s->kv.opt.cold_max_tokens > 0 &&
@@ -11469,8 +11633,12 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
         ds4_tokens_free(&prefix);
     }
 
-    if (server_session_sync(s, slot, prompt_for_sync,
-                            err, sizeof(err)) != 0) {
+    const int sync_rc = has_embedding_span ?
+        server_session_sync_embedding_span(s, slot, prompt_for_sync,
+                                           &j->req.embedding_span,
+                                           err, sizeof(err)) :
+        server_session_sync(s, slot, prompt_for_sync, err, sizeof(err));
+    if (sync_rc != 0) {
         ds4_tokens_free(&effective_prompt);
         ds4_session_set_progress(slot->session, NULL, NULL);
         ds4_session_set_display_progress(slot->session, NULL, NULL);
@@ -11503,7 +11671,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
     if (!thinking_live_continuation) thinking_live_clear(s, slot);
     ds4_session_set_progress(slot->session, NULL, NULL);
     ds4_session_set_display_progress(slot->session, NULL, NULL);
-    kv_cache_maybe_store_continued(s, slot);
+    if (!has_embedding_span) kv_cache_maybe_store_continued(s, slot);
     server_log(DS4_LOG_PREFILL,
                "ds4-server: %s ctx=%s%s%s prompt done %.3fs",
                j->req.kind == REQ_CHAT ? "chat" : "completion",
