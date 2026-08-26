@@ -71,6 +71,19 @@ static void expect_rejected(const char *name, const char *fixture,
     free(mutated);
 }
 
+static void expect_accepted(const char *name, const char *fixture,
+                            const char *needle, const char *replacement) {
+    size_t size = 0;
+    char *mutated = replace_once(fixture, needle, replacement, &size);
+    ds4_hf_manifest manifest;
+    char err[512] = {0};
+    bool ok = mutated && ds4_hf_manifest_parse(mutated, size, &manifest,
+                                               err, sizeof(err));
+    CHECK(name, mutated && ok);
+    if (mutated && !ok) fprintf(stderr, "  diagnostic: %s\n", err);
+    free(mutated);
+}
+
 static void test_production_fixture(const char *json, size_t json_len) {
     ds4_hf_manifest manifest;
     char err[512] = {0};
@@ -278,6 +291,9 @@ static void test_llama_metadata_without_manifest(void) {
 }
 
 static void test_schema_rejections(const char *json) {
+    expect_accepted("large unknown optional numbers are ignored", json,
+                    "\"future_optional_top_level\": [1, {\"nested\": \"ignored\"}]",
+                    "\"future_optional_top_level\": [1e400, 123456789012345678901234567890123456789012345678901234567890123456789, {\"nested\": \"ignored\"}]");
     expect_rejected("unsupported major version fails actionably", json,
                     "\"schema_version\": 2", "\"schema_version\": 3",
                     "unsupported variants.json major version 3");

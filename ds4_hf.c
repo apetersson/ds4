@@ -506,7 +506,9 @@ static bool manifest_json_bool(manifest_json_parser *jp, bool *out) {
     return json_fail(jp, "expected boolean in manifest");
 }
 
-static bool manifest_json_double(manifest_json_parser *jp, double *out) {
+static bool manifest_json_scan_number(manifest_json_parser *jp,
+                                      const char **start_out,
+                                      size_t *len_out) {
     manifest_json_ws(jp);
     if (!manifest_json_charge(jp)) return false;
     const char *start = jp->p;
@@ -525,7 +527,15 @@ static bool manifest_json_double(manifest_json_parser *jp, double *out) {
         if (jp->p >= jp->end || !isdigit((unsigned char)*jp->p)) return json_fail(jp, "malformed exponent");
         while (jp->p < jp->end && isdigit((unsigned char)*jp->p)) jp->p++;
     }
-    size_t len = (size_t)(jp->p - start);
+    *start_out = start;
+    *len_out = (size_t)(jp->p - start);
+    return true;
+}
+
+static bool manifest_json_double(manifest_json_parser *jp, double *out) {
+    const char *start;
+    size_t len;
+    if (!manifest_json_scan_number(jp, &start, &len)) return false;
     if (len >= 64) return json_fail(jp, "manifest number is too long");
     char text[64];
     memcpy(text, start, len);
@@ -592,8 +602,9 @@ static bool manifest_json_skip_array(manifest_json_parser *jp) {
 }
 
 static bool manifest_json_skip_number(manifest_json_parser *jp) {
-    double ignored;
-    return manifest_json_double(jp, &ignored);
+    const char *start;
+    size_t len;
+    return manifest_json_scan_number(jp, &start, &len);
 }
 
 static bool manifest_json_skip_value(manifest_json_parser *jp) {
