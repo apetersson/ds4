@@ -63,7 +63,7 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+.PHONY: all help clean test test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-hf-dspark test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
@@ -508,6 +508,9 @@ test-hf-cli: tests/test_hf_args ds4 ds4-server
 	./tests/test_hf_args
 	./tests/test_hf_cli.sh
 
+test-hf-dspark: ds4 ds4-server
+	python3 tests/test_hf_dspark.py
+
 ds4_agent_test: ds4_agent_test.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o $(CORE_OBJS)
 ifeq ($(UNAME_S),Darwin)
 	$(CC) $(CFLAGS) -o $@ ds4_agent_test.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o $(CORE_OBJS) $(METAL_LDLIBS)
@@ -531,6 +534,7 @@ test: ds4_test ds4_agent_test ds4-eval q4k-dot-test mxfp4-dot-test \
 	python3 tests/test_hf_cache.py
 	python3 tests/test_hf_integrity.py
 	python3 tests/test_hf_runtime.py
+	python3 tests/test_hf_dspark.py
 	./tests/test_gpu_args_cli.sh
 	./tests/test_sampling
 

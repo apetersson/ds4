@@ -106,8 +106,16 @@ run_fail "server rejects explicit vision with --no-vision" \
         --vision-tower /models/tower.safetensors \
         --vision-adapter /models/adapter.safetensors
 run_fail "server accepts explicit DSpark catalog opt-in" \
-    "catalog DSpark activation is not wired yet" \
+    "HF network failure" \
+    env HF_ENDPOINT=http://127.0.0.1:1 \
     ./ds4-server --hf owner/repo --dspark
+for bin in ./ds4 ./ds4-server; do
+    name=${bin#./}
+    run_fail "$name rejects DSpark with SSD streaming before HF resolution" \
+        "not compatible with --ssd-streaming" \
+        env HF_ENDPOINT=http://127.0.0.1:1 \
+        "$bin" --hf owner/repo --dspark --ssd-streaming
+done
 run_fail "server rejects DSpark without a support source" \
     "requires either explicit --mtp" \
     ./ds4-server --dspark

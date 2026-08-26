@@ -207,14 +207,14 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
     opt(fp, c, "--prefill-chunk N", "Graph prefill chunk size. Default: CUDA TP 2048; PRO long prompts 8192; others 4096.");
     if (full) {
         if (tool != DS4_HELP_BENCH) {
-            opt(fp, c, "--mtp FILE", "Explicit local MTP/DSpark support GGUF. Takes precedence over any catalog DSpark role.");
+            opt(fp, c, "--mtp FILE", "Explicit local MTP/DSpark support GGUF. With -hf it is the only support model used; the catalog DSpark role is not downloaded.");
         }
         if (tool == DS4_HELP_DS4 || tool == DS4_HELP_AGENT || tool == DS4_HELP_SERVER) {
             opt(fp, c, "--mtp-draft N", "Maximum autoregressive MTP draft tokens. Default: 1");
             opt(fp, c, "--mtp-margin F", "Verifier confidence margin for fast MTP acceptance. Default: 3");
             opt(fp, c, "--glm-mtp", "Enable integrated greedy GLM MTP speculation.");
             opt(fp, c, "--glm-mtp-timing", "Enable GLM MTP and print acceptance/timing counters.");
-            opt(fp, c, "--dspark", "Explicitly enable DSpark. Uses --mtp when present; otherwise -hf may provide the matching catalog role.");
+            opt(fp, c, "--dspark", "Explicitly enable DSpark. Uses --mtp when present; otherwise -hf resolves the selected catalog role. Incompatible with --ssd-streaming.");
             opt(fp, c, "--dspark-confidence F", "Enable DSpark with confidence pruning threshold 0..1. Greedy/opportunistic default: Metal 0.6, CUDA/ROCm 0.7; exact sampling: 0.8");
             opt(fp, c, "--mtp-exact-sampling", "DFlash: preserve the ordinary temperature distribution instead of accepting target-matching greedy drafts directly.");
             opt(fp, c, "--dspark-strict", "Load DSpark support but keep target-only decode.");
