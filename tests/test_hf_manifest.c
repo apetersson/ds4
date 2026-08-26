@@ -114,7 +114,12 @@ static void test_production_fixture(const char *json, size_t json_len) {
           manifest.shared_vision.separator_tokens == 1 &&
           !strcmp(manifest.shared_vision.token_formula, "views*256+1") &&
           manifest.shared_vision.global_view_first &&
-          !strcmp(manifest.shared_vision.crop_order, "row-major"));
+          !strcmp(manifest.shared_vision.color_space, "RGB") &&
+          !strcmp(manifest.shared_vision.crop_boundaries, "integer") &&
+          !strcmp(manifest.shared_vision.crop_order, "row-major") &&
+          !strcmp(manifest.shared_vision.grid_selection, "closest-aspect-ratio") &&
+          !strcmp(manifest.shared_vision.grid_tie_break, "more-tiles") &&
+          !strcmp(manifest.shared_vision.separator_placement, "last"));
     CHECK("257, 769, 1025, and 1281 visual rows follow views*256+1",
           ds4_hf_manifest_visual_rows_valid(&manifest, 257) &&
           ds4_hf_manifest_visual_rows_valid(&manifest, 769) &&
@@ -157,6 +162,73 @@ static void test_llama_discovery_without_manifest(void) {
               "Headroom128-IQ2_XXS/main.gguf",
               "Headroom128-IQ2_XXS/MMProj-decoy.gguf", NULL,
               err, sizeof(err)));
+}
+
+static void init_llama_metadata_fixture(ds4_hf_llama_gguf_metadata *metadata) {
+    memset(metadata, 0, sizeof(*metadata));
+    strcpy(metadata->main_architecture, "deepseek4");
+    strcpy(metadata->main_image_token, "<｜image｜>");
+    metadata->main_image_token_id = 129279;
+    metadata->has_dspark = true;
+    strcpy(metadata->dspark_architecture, "deepseek4");
+    strcpy(metadata->mmproj_architecture, "clip");
+    strcpy(metadata->mmproj_projector_type, "deepencoder_v2_dsv4");
+    strcpy(metadata->mmproj_precision, "BF16");
+    metadata->mmproj_has_vision_encoder = true;
+    strcpy(metadata->mmproj_image_token, "<｜image｜>");
+    metadata->mmproj_image_token_id = 129279;
+    metadata->mmproj_image_size = 1024;
+    metadata->mmproj_patch_size = 16;
+    metadata->mmproj_embedding_length = 768;
+    metadata->mmproj_encoder_dim = 896;
+    metadata->mmproj_projection_dim = 4096;
+    metadata->mmproj_tokens_per_view = 256;
+    metadata->mmproj_separator_tokens = 1;
+    metadata->mmproj_tile_limit = 4;
+    metadata->mmproj_tile_threshold_pixels = 1536;
+    metadata->mmproj_global_view_first = true;
+    metadata->mmproj_separator_last = true;
+    strcpy(metadata->mmproj_color_space, "RGB");
+    strcpy(metadata->mmproj_crop_boundaries, "integer");
+    strcpy(metadata->mmproj_crop_order, "row-major");
+    strcpy(metadata->mmproj_grid_selection, "closest-aspect-ratio");
+    strcpy(metadata->mmproj_grid_tie_break, "more-tiles");
+    strcpy(metadata->mmproj_resize, "1024x1024-bicubic");
+    for (unsigned i = 0; i < 3; i++) {
+        metadata->mmproj_image_mean[i] = 0.5;
+        metadata->mmproj_image_std[i] = 0.5;
+    }
+}
+
+static void test_llama_metadata_without_manifest(void) {
+    char err[512] = {0};
+    ds4_hf_llama_gguf_metadata headroom;
+    ds4_hf_llama_gguf_metadata quality;
+    init_llama_metadata_fixture(&headroom);
+    init_llama_metadata_fixture(&quality);
+    CHECK("Headroom128 embedded GGUF metadata is valid without variants.json",
+          ds4_hf_llama_gguf_metadata_valid(&headroom, err, sizeof(err)));
+    CHECK("Quality128 embedded GGUF metadata is valid without variants.json",
+          ds4_hf_llama_gguf_metadata_valid(&quality, err, sizeof(err)));
+
+    headroom.main_has_vision_tensors = true;
+    CHECK("ordinary deepseek4 main cannot contain vision tensors",
+          !ds4_hf_llama_gguf_metadata_valid(&headroom, err, sizeof(err)) &&
+          strstr(err, "ordinary deepseek4 receiver"));
+    init_llama_metadata_fixture(&headroom);
+    headroom.mmproj_image_token_id = 1;
+    CHECK("mmproj route-token metadata mismatch is rejected independently",
+          !ds4_hf_llama_gguf_metadata_valid(&headroom, err, sizeof(err)) &&
+          strstr(err, "DeepEncoderV2 DS4 routing"));
+    init_llama_metadata_fixture(&headroom);
+    strcpy(headroom.mmproj_projector_type, "generic");
+    CHECK("mmproj projector metadata mismatch is rejected independently",
+          !ds4_hf_llama_gguf_metadata_valid(&headroom, err, sizeof(err)));
+    init_llama_metadata_fixture(&headroom);
+    strcpy(headroom.dspark_architecture, "clip");
+    CHECK("DSpark metadata mismatch is rejected independently",
+          !ds4_hf_llama_gguf_metadata_valid(&headroom, err, sizeof(err)) &&
+          strstr(err, "DSpark GGUF architecture"));
 }
 
 static void test_schema_rejections(const char *json) {
@@ -215,6 +287,42 @@ static void test_schema_rejections(const char *json) {
                     "\"gguf_metadata\": {\"architecture\": \"deepseek4\"}",
                     "\"gguf_metadata\": {\"architecture\": \"clip\"}",
                     "incompatible GGUF metadata");
+    expect_rejected("RGB preprocessing contract mismatch is rejected", json,
+                    "\"color_space\": \"RGB\"", "\"color_space\": \"BGR\"",
+                    "preprocessing contract is incompatible");
+    expect_rejected("fractional crop-boundary contract is rejected", json,
+                    "\"crop_boundaries\": \"integer\"",
+                    "\"crop_boundaries\": \"fractional\"",
+                    "preprocessing contract is incompatible");
+    expect_rejected("wrong aspect-grid selection is rejected", json,
+                    "\"grid_selection\": \"closest-aspect-ratio\"",
+                    "\"grid_selection\": \"first-fit\"",
+                    "preprocessing contract is incompatible");
+    expect_rejected("wrong equal-score tile preference is rejected", json,
+                    "\"grid_tie_break\": \"more-tiles\"",
+                    "\"grid_tie_break\": \"fewer-tiles\"",
+                    "preprocessing contract is incompatible");
+    expect_rejected("separator placement mismatch is rejected", json,
+                    "\"separator_placement\": \"last\"",
+                    "\"separator_placement\": \"first\"",
+                    "preprocessing contract is incompatible");
+
+    const char *bad_repositories[] = {
+        "../repo", "owner/..", ".owner/repo", "owner/.repo",
+        "owner-/repo", "owner/repo-", "owner/re..po", "owner/re--po",
+        "owner/re$po",
+    };
+    for (size_t i = 0; i < sizeof(bad_repositories) / sizeof(bad_repositories[0]); i++) {
+        char replacement[256];
+        char name[256];
+        snprintf(replacement, sizeof(replacement), "\"repository\": \"%s\"",
+                 bad_repositories[i]);
+        snprintf(name, sizeof(name), "unsafe repository identifier %s is rejected",
+                 bad_repositories[i]);
+        expect_rejected(name, json,
+                        "\"repository\": \"apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision\"",
+                        replacement, "repository must be OWNER/REPO");
+    }
 }
 
 static void test_non_executable_boundary(const char *json) {
@@ -264,6 +372,7 @@ int main(void) {
 
     test_production_fixture(json, json_len);
     test_llama_discovery_without_manifest();
+    test_llama_metadata_without_manifest();
     test_schema_rejections(json);
     test_non_executable_boundary(json);
     test_resource_limits();

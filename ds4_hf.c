@@ -949,10 +949,26 @@ static bool manifest_parse_preprocessing(manifest_json_parser *jp,
             if (!manifest_mark_field(jp, &seen, 32, key) || !manifest_parse_triple(jp, vision->mean)) return false;
         } else if (!strcmp(key, "std")) {
             if (!manifest_mark_field(jp, &seen, 64, key) || !manifest_parse_triple(jp, vision->std)) return false;
+        } else if (!strcmp(key, "color_space")) {
+            if (!manifest_mark_field(jp, &seen, 128, key) || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, vision->color_space, sizeof(vision->color_space))) return false;
+        } else if (!strcmp(key, "crop_boundaries")) {
+            if (!manifest_mark_field(jp, &seen, 256, key) || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, vision->crop_boundaries, sizeof(vision->crop_boundaries))) return false;
+        } else if (!strcmp(key, "grid_selection")) {
+            if (!manifest_mark_field(jp, &seen, 512, key) || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, vision->grid_selection, sizeof(vision->grid_selection))) return false;
+        } else if (!strcmp(key, "grid_tie_break")) {
+            if (!manifest_mark_field(jp, &seen, 1024, key) || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, vision->grid_tie_break, sizeof(vision->grid_tie_break))) return false;
+        } else if (!strcmp(key, "separator_placement")) {
+            if (!manifest_mark_field(jp, &seen, 2048, key) || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, vision->separator_placement,
+                                      sizeof(vision->separator_placement))) return false;
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
-    if (seen != 127) return json_fail(jp, "preprocessing contract is incomplete");
+    if (seen != 4095) return json_fail(jp, "preprocessing contract is incomplete");
     return true;
 }
 
@@ -1008,8 +1024,13 @@ static bool manifest_validate_shared_vision(manifest_json_parser *jp,
         return json_fail(jp, "shared_vision is incompatible with the DS4 DeepEncoderV2 contract");
     }
     if (vision->tile_limit != 4 || vision->tile_threshold_pixels != 1536 ||
-        !vision->global_view_first || strcmp(vision->crop_order, "row-major") ||
-        strcmp(vision->resize, "1024x1024-bicubic")) {
+        !vision->global_view_first || strcmp(vision->color_space, "RGB") ||
+        strcmp(vision->crop_boundaries, "integer") ||
+        strcmp(vision->crop_order, "row-major") ||
+        strcmp(vision->grid_selection, "closest-aspect-ratio") ||
+        strcmp(vision->grid_tie_break, "more-tiles") ||
+        strcmp(vision->resize, "1024x1024-bicubic") ||
+        strcmp(vision->separator_placement, "last")) {
         return json_fail(jp, "shared_vision preprocessing contract is incompatible");
     }
     for (unsigned i = 0; i < 3; i++) {
@@ -1117,6 +1138,55 @@ bool ds4_hf_llama_siblings_valid(const char *receiver_path,
     return true;
 }
 
+bool ds4_hf_llama_gguf_metadata_valid(
+    const ds4_hf_llama_gguf_metadata *metadata,
+    char *err,
+    size_t errlen) {
+    if (!metadata) return fail(err, errlen, "llama.cpp GGUF metadata summary is required");
+    if (strcmp(metadata->main_architecture, "deepseek4") ||
+        strcmp(metadata->main_image_token, "<｜image｜>") ||
+        metadata->main_image_token_id != 129279 || metadata->main_has_vision_tensors) {
+        return fail(err, errlen,
+                    "main GGUF must be an ordinary deepseek4 receiver with image token 129279 and no vision tensors");
+    }
+    if (metadata->has_dspark && strcmp(metadata->dspark_architecture, "deepseek4")) {
+        return fail(err, errlen, "DSpark GGUF architecture must be deepseek4");
+    }
+    if (strcmp(metadata->mmproj_architecture, "clip") ||
+        strcmp(metadata->mmproj_projector_type, "deepencoder_v2_dsv4") ||
+        strcmp(metadata->mmproj_precision, "BF16") ||
+        !metadata->mmproj_has_vision_encoder ||
+        strcmp(metadata->mmproj_image_token, "<｜image｜>") ||
+        metadata->mmproj_image_token_id != 129279 ||
+        metadata->mmproj_image_size != 1024 ||
+        metadata->mmproj_patch_size != 16 ||
+        metadata->mmproj_embedding_length != 768 ||
+        metadata->mmproj_encoder_dim != 896 ||
+        metadata->mmproj_projection_dim != 4096 ||
+        metadata->mmproj_tokens_per_view != 256 ||
+        metadata->mmproj_separator_tokens != 1 ||
+        metadata->mmproj_tile_limit != 4 ||
+        metadata->mmproj_tile_threshold_pixels != 1536 ||
+        !metadata->mmproj_global_view_first || !metadata->mmproj_separator_last ||
+        strcmp(metadata->mmproj_color_space, "RGB") ||
+        strcmp(metadata->mmproj_crop_boundaries, "integer") ||
+        strcmp(metadata->mmproj_crop_order, "row-major") ||
+        strcmp(metadata->mmproj_grid_selection, "closest-aspect-ratio") ||
+        strcmp(metadata->mmproj_grid_tie_break, "more-tiles") ||
+        strcmp(metadata->mmproj_resize, "1024x1024-bicubic")) {
+        return fail(err, errlen,
+                    "mmproj GGUF metadata is incompatible with DeepEncoderV2 DS4 routing");
+    }
+    for (unsigned i = 0; i < 3; i++) {
+        if (metadata->mmproj_image_mean[i] != 0.5 ||
+            metadata->mmproj_image_std[i] != 0.5) {
+            return fail(err, errlen,
+                        "mmproj GGUF normalization metadata is incompatible with DeepEncoderV2");
+        }
+    }
+    return true;
+}
+
 static bool manifest_validate_variant(manifest_json_parser *jp,
                                       const ds4_hf_manifest_variant *variant) {
     if (!manifest_safe_atom(variant->selector) || !manifest_safe_path(variant->directory)) {
@@ -1156,14 +1226,23 @@ static bool manifest_validate_variant(manifest_json_parser *jp,
     return true;
 }
 
+static bool manifest_valid_repository_part(const char *part, size_t len) {
+    if (!len || len > 96 || part[0] == '.' || part[0] == '-' ||
+        part[len - 1] == '.' || part[len - 1] == '-') return false;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)part[i];
+        if (!(isalnum(c) || c == '-' || c == '_' || c == '.')) return false;
+        if (i && ((c == '.' && part[i - 1] == '.') ||
+                  (c == '-' && part[i - 1] == '-'))) return false;
+    }
+    return true;
+}
+
 static bool manifest_valid_repository(const char *repository) {
     const char *slash = strchr(repository, '/');
     if (!slash || slash == repository || !slash[1] || strchr(slash + 1, '/')) return false;
-    for (const unsigned char *p = (const unsigned char *)repository; *p; p++) {
-        if (*p == '/') continue;
-        if (!(isalnum(*p) || *p == '-' || *p == '_' || *p == '.')) return false;
-    }
-    return repository[0] != '-' && slash[1] != '-';
+    return manifest_valid_repository_part(repository, (size_t)(slash - repository)) &&
+           manifest_valid_repository_part(slash + 1, strlen(slash + 1));
 }
 
 bool ds4_hf_manifest_parse(const char *json,

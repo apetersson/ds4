@@ -132,8 +132,13 @@ typedef struct {
     uint32_t tile_limit;
     uint32_t tile_threshold_pixels;
     bool global_view_first;
+    char color_space[DS4_HF_METADATA_MAX];
+    char crop_boundaries[DS4_HF_METADATA_MAX];
     char crop_order[DS4_HF_METADATA_MAX];
+    char grid_selection[DS4_HF_METADATA_MAX];
+    char grid_tie_break[DS4_HF_METADATA_MAX];
     char resize[DS4_HF_METADATA_MAX];
+    char separator_placement[DS4_HF_METADATA_MAX];
     double mean[3];
     double std[3];
 } ds4_hf_manifest_vision_metadata;
@@ -146,6 +151,44 @@ typedef struct {
     size_t variant_count;
     ds4_hf_manifest_variant variants[DS4_HF_MANIFEST_MAX_VARIANTS];
 } ds4_hf_manifest;
+
+/* Summary of metadata read from the ordinary main and discovered companion
+ * GGUFs. It is intentionally separate from variants.json so sibling discovery
+ * and embedded-metadata compatibility can be proven without the DS4 catalog. */
+typedef struct {
+    char main_architecture[DS4_HF_METADATA_MAX];
+    char main_image_token[DS4_HF_METADATA_MAX];
+    uint32_t main_image_token_id;
+    bool main_has_vision_tensors;
+    bool has_dspark;
+    char dspark_architecture[DS4_HF_METADATA_MAX];
+
+    char mmproj_architecture[DS4_HF_METADATA_MAX];
+    char mmproj_projector_type[DS4_HF_METADATA_MAX];
+    char mmproj_precision[DS4_HF_METADATA_MAX];
+    bool mmproj_has_vision_encoder;
+    char mmproj_image_token[DS4_HF_METADATA_MAX];
+    uint32_t mmproj_image_token_id;
+    uint32_t mmproj_image_size;
+    uint32_t mmproj_patch_size;
+    uint32_t mmproj_embedding_length;
+    uint32_t mmproj_encoder_dim;
+    uint32_t mmproj_projection_dim;
+    uint32_t mmproj_tokens_per_view;
+    uint32_t mmproj_separator_tokens;
+    uint32_t mmproj_tile_limit;
+    uint32_t mmproj_tile_threshold_pixels;
+    bool mmproj_global_view_first;
+    bool mmproj_separator_last;
+    char mmproj_color_space[DS4_HF_METADATA_MAX];
+    char mmproj_crop_boundaries[DS4_HF_METADATA_MAX];
+    char mmproj_crop_order[DS4_HF_METADATA_MAX];
+    char mmproj_grid_selection[DS4_HF_METADATA_MAX];
+    char mmproj_grid_tie_break[DS4_HF_METADATA_MAX];
+    char mmproj_resize[DS4_HF_METADATA_MAX];
+    double mmproj_image_mean[3];
+    double mmproj_image_std[3];
+} ds4_hf_llama_gguf_metadata;
 
 void ds4_hf_cli_init(ds4_hf_cli_config *cfg);
 
@@ -192,5 +235,12 @@ bool ds4_hf_llama_siblings_valid(const char *receiver_path,
                                  const char *dspark_path,
                                  char *err,
                                  size_t errlen);
+
+/* Validate metadata summaries extracted from discovered GGUFs. This performs
+ * no file loading and has no dependency on variants.json. */
+bool ds4_hf_llama_gguf_metadata_valid(
+    const ds4_hf_llama_gguf_metadata *metadata,
+    char *err,
+    size_t errlen);
 
 #endif

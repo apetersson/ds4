@@ -18,8 +18,13 @@
       "tile_limit": 4,
       "tile_threshold_pixels": 1536,
       "global_view_first": true,
+      "color_space": "RGB",
+      "crop_boundaries": "integer",
       "crop_order": "row-major",
+      "grid_selection": "closest-aspect-ratio",
+      "grid_tie_break": "more-tiles",
       "resize": "1024x1024-bicubic",
+      "separator_placement": "last",
       "mean": [0.5, 0.5, 0.5],
       "std": [0.5, 0.5, 0.5]
     }
