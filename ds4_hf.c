@@ -54,6 +54,12 @@ static bool visible_nonspace(const char *value) {
     return true;
 }
 
+static bool valid_reference(const char *value) {
+    return visible_nonspace(value) && strcmp(value, ".") &&
+           strcmp(value, "..") &&
+           memchr(value, '\0', DS4_HF_METADATA_MAX) != NULL;
+}
+
 static bool valid_repo_part(const char *start, size_t len) {
     if (len == 0) return false;
     for (size_t i = 0; i < len; i++) {
@@ -2123,11 +2129,14 @@ ds4_hf_resolve_status ds4_hf_resolve_repository(
     char *err,
     size_t errlen) {
     if (resolved) memset(resolved, 0, sizeof(*resolved));
-    if (!cfg || !resolved || !safe_repo_id(cfg->repo) ||
-        (cfg->revision && (!visible_nonspace(cfg->revision) ||
-                          !strcmp(cfg->revision, ".") ||
-                          !strcmp(cfg->revision, "..")))) {
+    if (!cfg || !resolved || !safe_repo_id(cfg->repo)) {
         fail(err, errlen, "invalid HF repository resolution request");
+        return DS4_HF_RESOLVE_INVALID_ARGUMENT;
+    }
+    if (cfg->revision && !valid_reference(cfg->revision)) {
+        fail(err, errlen,
+             "invalid HF revision; expected 1-%d nonspace bytes other than '.' or '..'",
+             DS4_HF_METADATA_MAX - 1);
         return DS4_HF_RESOLVE_INVALID_ARGUMENT;
     }
     if (!normalize_endpoint(cfg->endpoint, resolved->endpoint,
@@ -3825,22 +3834,31 @@ static bool reference_cache_path(const ds4_hf_cli_config *cfg,
                                  char parent[DS4_HF_CACHE_PATH_MAX],
                                  char leaf[DS4_HF_PATH_MAX]) {
     char repo_component[DS4_HF_REPO_MAX + 4];
-    char reference_component[DS4_HF_METADATA_MAX * 2 + 5];
-    bool explicit_reference = cfg->revision && cfg->revision[0];
+    char reference_component[DS4_HF_METADATA_MAX * 2];
+    bool explicit_reference = cfg->revision != NULL;
     const char *reference = explicit_reference ? cfg->revision : "default";
-    int written;
-    return cache_root_resolve(cfg, cache_root) &&
-           cache_component_encode(repo, repo_component,
-                                  sizeof(repo_component)) &&
-           copy_string(reference_component,
-                       sizeof(reference_component),
-                       explicit_reference ? "ref-" : "def-") &&
-           cache_reference_encode(reference, reference_component + 4,
-                                  sizeof(reference_component) - 4) &&
-           (written = snprintf(parent, DS4_HF_CACHE_PATH_MAX,
-                               "repos/%s/refs", repo_component)) > 0 &&
-           written < DS4_HF_CACHE_PATH_MAX &&
-           copy_string(leaf, DS4_HF_PATH_MAX, reference_component);
+    if ((explicit_reference && !valid_reference(reference)) ||
+        !cache_root_resolve(cfg, cache_root) ||
+        !cache_component_encode(repo, repo_component,
+                                sizeof(repo_component)) ||
+        !cache_reference_encode(reference, reference_component,
+                                sizeof(reference_component))) return false;
+    int written = snprintf(parent, DS4_HF_CACHE_PATH_MAX,
+                           "repos/%s/refs/%s", repo_component,
+                           explicit_reference ? "ref" : "default");
+    if (written <= 0 || written >= DS4_HF_CACHE_PATH_MAX) return false;
+    size_t used = (size_t)written;
+    size_t reference_len = strlen(reference_component);
+    for (size_t offset = 0; offset < reference_len; offset += 64) {
+        size_t chunk = reference_len - offset;
+        if (chunk > 64) chunk = 64;
+        if (used + 1 + chunk >= DS4_HF_CACHE_PATH_MAX) return false;
+        parent[used++] = '/';
+        memcpy(parent + used, reference_component + offset, chunk);
+        used += chunk;
+        parent[used] = '\0';
+    }
+    return copy_string(leaf, DS4_HF_PATH_MAX, "commit");
 }
 
 static bool reference_cache_publish(const ds4_hf_cli_config *cfg,

@@ -6,6 +6,7 @@ import os
 import subprocess
 import tempfile
 import threading
+import unicodedata
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -21,6 +22,9 @@ SHA_SLASH_REF = "1111111111111111111111111111111111111111"
 SHA_PERCENT_REF = "2222222222222222222222222222222222222222"
 SHA_DEFAULT_REF = "3333333333333333333333333333333333333333"
 SHA_UPPER_REF = "4444444444444444444444444444444444444444"
+SHA_COMPOSED_REF = "5555555555555555555555555555555555555555"
+SHA_DECOMPOSED_REF = "6666666666666666666666666666666666666666"
+SHA_BOUNDARY_REF = "7777777777777777777777777777777777777777"
 LOCK = "/tmp/ds4-ds00108-hf-diagnostics.lock"
 
 
@@ -53,6 +57,9 @@ class HubHandler(BaseHTTPRequestHandler):
         "feature/x": SHA_SLASH_REF,
         "feature%2Fx": SHA_PERCENT_REF,
         "default": SHA_DEFAULT_REF,
+        "caf\u00e9": SHA_COMPOSED_REF,
+        "cafe\u0301": SHA_DECOMPOSED_REF,
+        "r" * 127: SHA_BOUNDARY_REF,
     }
 
     def log_message(self, _format, *_args):
@@ -240,6 +247,9 @@ class HFDiagnosticsTests(unittest.TestCase):
             ("Feature/X", SHA_UPPER_REF),
             ("feature/x", SHA_SLASH_REF),
             ("feature%2Fx", SHA_PERCENT_REF),
+            ("caf\u00e9", SHA_COMPOSED_REF),
+            ("cafe\u0301", SHA_DECOMPOSED_REF),
+            ("r" * 127, SHA_BOUNDARY_REF),
         )
         for revision, expected_commit in cases:
             with self.subTest(mode="populate", revision=revision):
@@ -253,9 +263,13 @@ class HFDiagnosticsTests(unittest.TestCase):
 
         ref_directory = (Path(self.cache.name) / "repos" /
                          "owner%2Frepo" / "refs")
-        leaves = [entry.name for entry in ref_directory.iterdir()]
-        self.assertEqual(len(leaves), len(cases))
-        self.assertEqual(len({leaf.casefold() for leaf in leaves}), len(cases))
+        keys = [entry.parent.relative_to(ref_directory).as_posix()
+                for entry in ref_directory.rglob("commit")]
+        normalized_keys = {
+            unicodedata.normalize("NFD", key).casefold() for key in keys
+        }
+        self.assertEqual(len(keys), len(cases))
+        self.assertEqual(len(normalized_keys), len(cases))
 
         HubHandler.requests = []
         for revision, expected_commit in cases:
@@ -269,6 +283,14 @@ class HFDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["revision"],
                                  expected_commit)
+        self.assertEqual(HubHandler.requests, [])
+
+        too_long = self.run_binary(
+            "ds4", "--list-hf-variants", "--json",
+            "--hf-revision", "r" * 128,
+        )
+        self.assertNotEqual(too_long.returncode, 0)
+        self.assertIn("expected 1-127 nonspace bytes", too_long.stderr)
         self.assertEqual(HubHandler.requests, [])
 
     def test_runtime_totals_never_mix_raw_vision_and_mmproj(self):
