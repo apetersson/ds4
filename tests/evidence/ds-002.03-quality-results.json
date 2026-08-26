@@ -1,0 +1,1110 @@
+{
+  "schema": "ds4.vision-revalidation.v1",
+  "captured_at": "2026-08-26T02:22:18.819724+00:00",
+  "profile": "quality",
+  "workspace": "/Users/andreas/.codex/worktrees/a023/ds4-apetersson",
+  "branch": "worker/DS-002.03-vision-revalidate",
+  "head": "835bceaf08427fdaafbd292093ad2de437908ab9",
+  "expected_base": "27eb58a0aec6829f80b5eaaba710fc344ed4384f",
+  "base_url": "http://127.0.0.1:18082",
+  "server_command": [
+    "/Users/andreas/.codex/worktrees/a023/ds4-apetersson/ds4-server",
+    "--model",
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf",
+    "--metal",
+    "--quality",
+    "--ctx",
+    "2048",
+    "--tokens",
+    "128",
+    "--vision-python",
+    "/private/tmp/dsv4-vision-venv/bin/python",
+    "--vision-encoder",
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/encode_flycockpit.py",
+    "--vision-tower",
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepEncoderV2-BF16.safetensors",
+    "--vision-adapter",
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "18082"
+  ],
+  "receiver": {
+    "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf",
+    "size": 102826239136,
+    "manifest_sha256": "18a1a22d31941ce823f698ccf7fe6f4de78b6e05854bba22570c5b6cf6c1ad55",
+    "hash_source": "catalog manifest; full GGUF hash was verified before live replay",
+    "quality_flag": true
+  },
+  "artifacts": {
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepEncoderV2-BF16.safetensors": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepEncoderV2-BF16.safetensors",
+      "size": 906533408,
+      "sha256": "9dcf6803d4c6b63acc4008bc2409e599a2ab6e3886e241f1727f61550c300df5"
+    },
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors",
+      "size": 40919752,
+      "sha256": "77f8be7a44a93aeec05f7294d51d72bed2dc4328770ba214186bcc671480db77"
+    },
+    "/Volumes/Samsung_4TB/models/Qwen3.6-27B-DFlash/assets/speedup.png": {
+      "path": "/Volumes/Samsung_4TB/models/Qwen3.6-27B-DFlash/assets/speedup.png",
+      "size": 66921,
+      "sha256": "0f1b16c20ccce188749a0e9054d596d35986395c55cbe2ab6b79eb75c51c8045"
+    },
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png",
+      "size": 60178,
+      "sha256": "78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11"
+    },
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/speedup-safe.fly.ds4v": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/speedup-safe.fly.ds4v",
+      "size": 4211788,
+      "sha256": "6686c5c4b291a0b9dfec8d0e21cea5ec0a9ae6259e1c98963277d65a114e3a3c"
+    },
+    "/private/tmp/ds00203-speedup.zero.ds4v": {
+      "path": "/private/tmp/ds00203-speedup.zero.ds4v",
+      "size": 4211788,
+      "sha256": "ba54633596401fe647c54e6ce0128f97c6b7ae45ef163345657425e7225286e9"
+    },
+    "/private/tmp/ds00203-speedup.shuffle.ds4v": {
+      "path": "/private/tmp/ds00203-speedup.shuffle.ds4v",
+      "size": 4211788,
+      "sha256": "2b9cda7b10396601a01da305427150a6729a2768ac1c565b9e52c71c5b433248"
+    },
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v",
+      "size": 12602444,
+      "sha256": "a8979593707d5a10ccaa40806de554e743bd69f307416c8813097a95acfff14a"
+    },
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v",
+      "size": 12602444,
+      "sha256": "5a065e9445f973c328c8cea52ecc8be85c586eb1f54387cdb7c6e76c5ca2b54e"
+    },
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v",
+      "size": 12602444,
+      "sha256": "fa67dc8fe51b2008837b29155779b12b16735ffc61f26fa54470582c10b2f26b"
+    },
+    "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/runtime/pi/models.json": {
+      "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/runtime/pi/models.json",
+      "size": 647,
+      "sha256": "f70750f6f83aba14e998e00dd29ea43cf7427df0351c052edaf40ce56ab72c68"
+    }
+  },
+  "pi_catalog": {
+    "path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/runtime/pi/models.json",
+    "provider": "ds4-local",
+    "base_url": "http://127.0.0.1:18082/v1",
+    "aliases": {
+      "deepseek-reasoner": {
+        "id": "deepseek-reasoner",
+        "name": "DS4 Vision (thinking)",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "contextWindow": 100000,
+        "maxTokens": 4096
+      },
+      "deepseek-chat": {
+        "id": "deepseek-chat",
+        "name": "DS4 Vision (no thinking)",
+        "reasoning": false,
+        "input": [
+          "text",
+          "image"
+        ],
+        "contextWindow": 100000,
+        "maxTokens": 4096
+      }
+    }
+  },
+  "control_generation": [
+    {
+      "argv": [
+        "/private/tmp/dsv4-vision-venv/bin/python",
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/mutate_ds4v.py",
+        "--input",
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/speedup-safe.fly.ds4v",
+        "--output",
+        "/private/tmp/ds00203-speedup.zero.ds4v",
+        "--mode",
+        "zero"
+      ],
+      "returncode": 0,
+      "stdout": "zero: 257x4096 -> /private/tmp/ds00203-speedup.zero.ds4v\n",
+      "stderr": "",
+      "elapsed_seconds": 0.180552
+    },
+    {
+      "argv": [
+        "/private/tmp/dsv4-vision-venv/bin/python",
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/mutate_ds4v.py",
+        "--input",
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/speedup-safe.fly.ds4v",
+        "--output",
+        "/private/tmp/ds00203-speedup.shuffle.ds4v",
+        "--mode",
+        "shuffle",
+        "--seed",
+        "42"
+      ],
+      "returncode": 0,
+      "stdout": "shuffle: 257x4096 -> /private/tmp/ds00203-speedup.shuffle.ds4v\n",
+      "stderr": "",
+      "elapsed_seconds": 0.125416
+    }
+  ],
+  "preflight_path": "/private/tmp/ds-002.03-quality-preflight.json",
+  "preflight_sha256": "bea6a57db8a4f6330c6fe382b0b699e7c12ffee46bbb48522d52d3e767bb7b73",
+  "preflight": {
+    "schema": "ds4.vision-revalidation-preflight.v1",
+    "captured_at": "2026-08-26T02:19:10.512644+00:00",
+    "profile": "quality",
+    "phase": "preflight",
+    "expected_base": "27eb58a0aec6829f80b5eaaba710fc344ed4384f",
+    "expected_branch": "worker/DS-002.03-vision-revalidate",
+    "catalog_root": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision",
+    "planned_resident_gib": 95.95,
+    "memory_free_floor_percent": 85,
+    "git": {
+      "pwd": "/Users/andreas/.codex/worktrees/a023/ds4-apetersson",
+      "root": "/Users/andreas/.codex/worktrees/a023/ds4-apetersson",
+      "branch": "worker/DS-002.03-vision-revalidate",
+      "head": "835bceaf08427fdaafbd292093ad2de437908ab9",
+      "status_porcelain": "",
+      "base_is_ancestor": true
+    },
+    "processes": {
+      "ds4": [],
+      "omlx": [
+        "91423 68974 uv               uv run omlx serve"
+      ],
+      "pi": [
+        "78478 71925 pi               pi ",
+        "69530 69009 pi               pi ",
+        "78049 77235 pi               pi ",
+        "58763 58250 pi               pi ",
+        "67321 66097 pi               pi     ",
+        "68696 72052 pi               pi ",
+        "84187 79652 pi               pi ",
+        "64841 64119 pi               pi ",
+        "54168 53588 pi               pi ",
+        "49646 42711 pi               pi ",
+        "45873 42964 pi               pi   ",
+        "45775 43076 pi               pi   ",
+        "45882 43230 pi               pi   ",
+        "45967 43756 pi               pi   ",
+        "40332 39335 pi               pi ",
+        "26350 25661 pi               pi ",
+        " 2251 99984 pi               pi ",
+        "67919 66112 pi               pi     ",
+        "35661 35055 pi               pi     ",
+        "21764 20892 pi               pi     ",
+        "41424 40824 pi               pi     ",
+        "92157 91406 pi               pi     ",
+        "70902 70149 pi               pi     ",
+        "13330 12726 pi               pi     ",
+        "36534 35594 pi               pi ",
+        "87452 86776 pi               pi ",
+        "70666 71537 pi               pi ",
+        "95891 64256 pi               pi   ",
+        " 3073 35146 pi               pi ",
+        "28098  3016 pi               pi         "
+      ],
+      "pi_count": 30,
+      "full_ps_command": [
+        "ps",
+        "-ww",
+        "-axo",
+        "pid=,ppid=,comm=,args="
+      ]
+    },
+    "connections_and_handles": {
+      "lock": {
+        "argv": [
+          "lsof",
+          "-nP",
+          "/private/tmp/ds4.lock"
+        ],
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "port_18082": {
+        "argv": [
+          "lsof",
+          "-nP",
+          "-iTCP:18082"
+        ],
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "models": {
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf": {
+          "argv": [
+            "lsof",
+            "-nP",
+            "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf"
+          ],
+          "returncode": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf": {
+          "argv": [
+            "lsof",
+            "-nP",
+            "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf"
+          ],
+          "returncode": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepEncoderV2-BF16.safetensors": {
+          "argv": [
+            "lsof",
+            "-nP",
+            "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepEncoderV2-BF16.safetensors"
+          ],
+          "returncode": 1,
+          "stdout": "",
+          "stderr": ""
+        },
+        "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors": {
+          "argv": [
+            "lsof",
+            "-nP",
+            "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors"
+          ],
+          "returncode": 1,
+          "stdout": "",
+          "stderr": ""
+        }
+      }
+    },
+    "memory": {
+      "free_percent": 92,
+      "memory_pressure": {
+        "argv": [
+          "memory_pressure"
+        ],
+        "returncode": 0,
+        "stdout": "The system has 137438953472 (8388608 pages with a page size of 16384).\n\nStats: \nPages free: 467949 \nPages purgeable: 24776 \nPages purged: 33676973 \n\nSwap I/O:\nSwapins: 23169518 \nSwapouts: 29723697 \n\nPage Q counts:\nPages active: 1404457 \nPages inactive: 5735072 \nPages speculative: 73104 \nPages throttled: 0 \nPages wired down: 386894 \n\nCompressor Stats:\nPages used by compressor: 266428 \nPages decompressed: 358831494 \nPages compressed: 365111505 \n\nFile I/O:\nPageins: 862678805 \nPageouts: 600784 \n\nSystem-wide memory free percentage: 92%\n",
+        "stderr": ""
+      },
+      "vm_stat": {
+        "argv": [
+          "vm_stat"
+        ],
+        "returncode": 0,
+        "stdout": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                   467788.\nPages active:                                1404462.\nPages inactive:                              5735072.\nPages speculative:                             73104.\nPages throttled:                                   0.\nPages wired down:                             386894.\nPages purgeable:                               24776.\n\"Translation faults\":                    19138831317.\nPages copy-on-write:                      2482388599.\nPages zero filled:                       11531808999.\nPages reactivated:                         501810114.\nPages purged:                               33676973.\nFile-backed pages:                           6026271.\nAnonymous pages:                             1186367.\nPages stored in compressor:                  2855331.\nPages occupied by compressor:                 266428.\nDecompressions:                            358831494.\nCompressions:                              365111505.\nPageins:                                   862678806.\nPageouts:                                     600784.\nSwapins:                                    23169518.\nSwapouts:                                   29723697.\n",
+        "stderr": ""
+      }
+    },
+    "conflicts": [],
+    "launch_allowed": true,
+    "safety_statement": "No process was killed, signalled, or modified by this read-only audit. Unrelated oMLX/Pi processes are recorded and remain untouched."
+  },
+  "request_contract": {
+    "route_token": "<｜image｜>",
+    "separator": "one LF byte for causal trios; no separator for alias cases",
+    "questions": {
+      "257": "Read this chart. Give its title, the three legend series, and the highest plotted speedup value.",
+      "769": "Read the dashboard precisely: title; throughput, latency, and memory values; the four request-flow nodes in order; and the status."
+    },
+    "text_prompt": "Reply with exactly DS4 VISION TEXT OK and no other text.",
+    "title_prompt": "What exact title is shown? Answer with only the title."
+  },
+  "requests": {
+    "text_repeat_1": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply with exactly DS4 VISION TEXT OK and no other text."
+          }
+        ],
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 32
+      },
+      "request_body_sha256": "5526fa71f4d4ae676bcb079be53b75c2452af4f75f4663d36f1d33648925f90c",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "338",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\",\"created\":1787710796,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"DS4 VISION TEXT OK\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":18,\"completion_tokens\":6,\"total_tokens\":24,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":18}}}\n",
+      "response": {
+        "id": "chatcmpl-1",
+        "object": "chat.completion",
+        "created": 1787710796,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "DS4 VISION TEXT OK"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 18,
+          "completion_tokens": 6,
+          "total_tokens": 24,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 18
+          }
+        }
+      },
+      "elapsed_seconds": 1.848716
+    },
+    "text_repeat_2": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Reply with exactly DS4 VISION TEXT OK and no other text."
+          }
+        ],
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 32
+      },
+      "request_body_sha256": "5526fa71f4d4ae676bcb079be53b75c2452af4f75f4663d36f1d33648925f90c",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "338",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-2\",\"object\":\"chat.completion\",\"created\":1787710796,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"DS4 VISION TEXT OK\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":18,\"completion_tokens\":6,\"total_tokens\":24,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":18}}}\n",
+      "response": {
+        "id": "chatcmpl-2",
+        "object": "chat.completion",
+        "created": 1787710796,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "DS4 VISION TEXT OK"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 18,
+          "completion_tokens": 6,
+          "total_tokens": 24,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 18
+          }
+        }
+      },
+      "elapsed_seconds": 0.652063
+    },
+    "image_url_257_real": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "/Volumes/Samsung_4TB/models/Qwen3.6-27B-DFlash/assets/speedup.png"
+                }
+              },
+              {
+                "type": "text",
+                "text": "Read this chart. Give its title, the three legend series, and the highest plotted speedup value."
+              }
+            ]
+          }
+        ],
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 128
+      },
+      "request_body_sha256": "14cdf961d9dd3ff3b9bcca65395047be48d0c4d68d3fae2a306d94b918f8f6a2",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "484",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-3\",\"object\":\"chat.completion\",\"created\":1787710817,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Title: Decoding Speed.\\nLegend series: GSM8K, MATH500, AI-MATH-2, HANNAWAN, MAPP, MIXEDCODEBENCH, SWE-BENCH, MT-BENCH, ALPACA.\\nHighest plotted speedup value: 67.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":282,\"completion_tokens\":63,\"total_tokens\":345,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-3",
+        "object": "chat.completion",
+        "created": 1787710817,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Title: Decoding Speed.\nLegend series: GSM8K, MATH500, AI-MATH-2, HANNAWAN, MAPP, MIXEDCODEBENCH, SWE-BENCH, MT-BENCH, ALPACA.\nHighest plotted speedup value: 67."
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 282,
+          "completion_tokens": 63,
+          "total_tokens": 345,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 20.664876
+    },
+    "image_url_769_real": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "image_url",
+                "image_url": {
+                  "url": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png"
+                }
+              },
+              {
+                "type": "text",
+                "text": "Read the dashboard precisely: title; throughput, latency, and memory values; the four request-flow nodes in order; and the status."
+              }
+            ]
+          }
+        ],
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 128
+      },
+      "request_body_sha256": "3fa5d21c4d1e57ea2fa9e39b7c88ba4b1731e0200be1600e0b0301b15851712a",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "536",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-4\",\"object\":\"chat.completion\",\"created\":1787710842,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Oriom System Status\\n\\nThroughput: 42.7 toks\\nLatency: 38 ms\\nMemory: 114.9 GiB\\n\\nRequest flow:\\n1. Sensor\\n2. Encoder\\n3. Router\\n4. Decoder\\n\\nStatus: Target-only | DSpark\\nSnapshot: 2026-08-02 | Status: NOMINAL\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":800,\"completion_tokens\":75,\"total_tokens\":875,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-4",
+        "object": "chat.completion",
+        "created": 1787710842,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Oriom System Status\n\nThroughput: 42.7 toks\nLatency: 38 ms\nMemory: 114.9 GiB\n\nRequest flow:\n1. Sensor\n2. Encoder\n3. Router\n4. Decoder\n\nStatus: Target-only | DSpark\nSnapshot: 2026-08-02 | Status: NOMINAL"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 800,
+          "completion_tokens": 75,
+          "total_tokens": 875,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 24.776979
+    },
+    "span_257_real": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>\nRead this chart. Give its title, the three legend series, and the highest plotted speedup value."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/speedup-safe.fly.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 96
+      },
+      "request_body_sha256": "f5f19274e0a10baee10b567e3b5da3f46ff9b372473352b8fb3ed6492a58ccf9",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "496",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-5\",\"object\":\"chat.completion\",\"created\":1787710847,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Title: Decoding Speed.\\nLegend series: GSM8K, MATH500, AI-MATH-2, HANSEN, HUMANEVAL, MAPPS, MIXEDCODEBENCH, SWE-BENCH, MT-BENCH, ALPACA.\\nHighest plotted speedup value: 6.17.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":283,\"completion_tokens\":67,\"total_tokens\":350,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-5",
+        "object": "chat.completion",
+        "created": 1787710847,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Title: Decoding Speed.\nLegend series: GSM8K, MATH500, AI-MATH-2, HANSEN, HUMANEVAL, MAPPS, MIXEDCODEBENCH, SWE-BENCH, MT-BENCH, ALPACA.\nHighest plotted speedup value: 6.17."
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 283,
+          "completion_tokens": 67,
+          "total_tokens": 350,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 4.70851
+    },
+    "span_257_zero": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>\nRead this chart. Give its title, the three legend series, and the highest plotted speedup value."
+          }
+        ],
+        "ds4_embedding_span_path": "/private/tmp/ds00203-speedup.zero.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 96
+      },
+      "request_body_sha256": "7d2e7c40466b4ad1b50625fd05a2b60b937732203f465260790ad84f7526ae8b",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "719",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-6\",\"object\":\"chat.completion\",\"created\":1787710852,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Based on the chart you've provided, here's the breakdown:\\n\\n**Title:** Performance Comparison of Different Optimization Methods\\n\\n**Legend Series (from top to bottom):**\\n1. **Series 1 (top line)** – likely \\\"Method A\\\" (e.g., baseline or standard approach)\\n2. **Series 2 (middle line)** – likely \\\"Method B\\\" (e.g., improved approach)\\n3. **Series 3 (bottom line)** – likely \\\"Method C\"},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":283,\"completion_tokens\":96,\"total_tokens\":379,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-6",
+        "object": "chat.completion",
+        "created": 1787710852,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Based on the chart you've provided, here's the breakdown:\n\n**Title:** Performance Comparison of Different Optimization Methods\n\n**Legend Series (from top to bottom):**\n1. **Series 1 (top line)** – likely \"Method A\" (e.g., baseline or standard approach)\n2. **Series 2 (middle line)** – likely \"Method B\" (e.g., improved approach)\n3. **Series 3 (bottom line)** – likely \"Method C"
+            },
+            "finish_reason": "length"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 283,
+          "completion_tokens": 96,
+          "total_tokens": 379,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 5.797502
+    },
+    "span_257_shuffle_seed_42": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>\nRead this chart. Give its title, the three legend series, and the highest plotted speedup value."
+          }
+        ],
+        "ds4_embedding_span_path": "/private/tmp/ds00203-speedup.shuffle.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 96
+      },
+      "request_body_sha256": "0368dc8e5be2921c8a3469d44b11adeed4c4a0513115090da72b8e381ef15d9e",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "463",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-7\",\"object\":\"chat.completion\",\"created\":1787710856,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Title: Speedup (x) vs. Number of Threads (y) for various algorithms.\\n\\nLegend series: GM5, GM50, GM500.\\n\\nHighest plotted speedup value: 6.\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":283,\"completion_tokens\":41,\"total_tokens\":324,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-7",
+        "object": "chat.completion",
+        "created": 1787710856,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Title: Speedup (x) vs. Number of Threads (y) for various algorithms.\n\nLegend series: GM5, GM50, GM500.\n\nHighest plotted speedup value: 6."
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 283,
+          "completion_tokens": 41,
+          "total_tokens": 324,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 3.575622
+    },
+    "span_769_real": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>\nRead the dashboard precisely: title; throughput, latency, and memory values; the four request-flow nodes in order; and the status."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 96
+      },
+      "request_body_sha256": "465d4e0ce0185c5181313cf8cae88db9250cb9551facad97fc7f166e199bc83e",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "536",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-8\",\"object\":\"chat.completion\",\"created\":1787710863,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Oriom System Status\\n\\nThroughput: 42.7 toks\\nLatency: 38 ms\\nMemory: 114.9 GiB\\n\\nRequest flow:\\n1. Sensor\\n2. Encoder\\n3. Router\\n4. Decoder\\n\\nStatus: Target-only | DSpark\\nSnapshot: 2026-08-02 | Status: NOMINAL\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":801,\"completion_tokens\":75,\"total_tokens\":876,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-8",
+        "object": "chat.completion",
+        "created": 1787710863,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Oriom System Status\n\nThroughput: 42.7 toks\nLatency: 38 ms\nMemory: 114.9 GiB\n\nRequest flow:\n1. Sensor\n2. Encoder\n3. Router\n4. Decoder\n\nStatus: Target-only | DSpark\nSnapshot: 2026-08-02 | Status: NOMINAL"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 801,
+          "completion_tokens": 75,
+          "total_tokens": 876,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 7.398928
+    },
+    "span_769_zero": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>\nRead the dashboard precisely: title; throughput, latency, and memory values; the four request-flow nodes in order; and the status."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 96
+      },
+      "request_body_sha256": "b626ee04a99bb845c36ce25e9e6adf2fed73025846a416c445bc56612e0700c3",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "596",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-9\",\"object\":\"chat.completion\",\"created\":1787710871,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"{\\n  \\\"title\\\": \\\"Dashboard Analysis: Precise Metrics and Flow\\\",\\n  \\\"throughput\\\": \\\"value\\\",\\n  \\\"latency\\\": \\\"value\\\",\\n  \\\"memory_usage\\\": \\\"value\\\",\\n  \\\"request_flow\\\": [\\n    \\\"node1\\\",\\n    \\\"node2\\\",\\n    \\\"node3\\\",\\n    \\\"node4\\\"\\n  ],\\n  \\\"status\\\": \\\"value\\\"\\n}\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":801,\"completion_tokens\":77,\"total_tokens\":878,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-9",
+        "object": "chat.completion",
+        "created": 1787710871,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"title\": \"Dashboard Analysis: Precise Metrics and Flow\",\n  \"throughput\": \"value\",\n  \"latency\": \"value\",\n  \"memory_usage\": \"value\",\n  \"request_flow\": [\n    \"node1\",\n    \"node2\",\n    \"node3\",\n    \"node4\"\n  ],\n  \"status\": \"value\"\n}"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 801,
+          "completion_tokens": 77,
+          "total_tokens": 878,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 7.335453
+    },
+    "span_769_shuffle_seed_42": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>\nRead the dashboard precisely: title; throughput, latency, and memory values; the four request-flow nodes in order; and the status."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 96
+      },
+      "request_body_sha256": "5e0b72030586f656a594e0b0e93f8804a39547041ec665efd17ae9f26ba38a08",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "466",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-10\",\"object\":\"chat.completion\",\"created\":1787710877,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Title: System Status\\nThroughput: 11\\nLatency: 38\\nMemory: 14\\nRequest-flow nodes in order: Origin, Snapshot, Memory, Status\\nStatus: Requested\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":801,\"completion_tokens\":41,\"total_tokens\":842,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-10",
+        "object": "chat.completion",
+        "created": 1787710877,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Title: System Status\nThroughput: 11\nLatency: 38\nMemory: 14\nRequest-flow nodes in order: Origin, Snapshot, Memory, Status\nStatus: Requested"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 801,
+          "completion_tokens": 41,
+          "total_tokens": 842,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 5.945624
+    },
+    "alias_chat_default": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>What exact title is shown? Answer with only the title."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 256
+      },
+      "request_body_sha256": "bbf83cc0f975a90075f197e0a2016f7d8a30417c2af3d3fdce276de652d6b91f",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "342",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-11\",\"object\":\"chat.completion\",\"created\":1787710881,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Orión System Status\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":785,\"completion_tokens\":4,\"total_tokens\":789,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-11",
+        "object": "chat.completion",
+        "created": 1787710881,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Orión System Status"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 785,
+          "completion_tokens": 4,
+          "total_tokens": 789,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 4.3077
+    },
+    "alias_reasoner_disabled": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-reasoner",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>What exact title is shown? Answer with only the title."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 256,
+        "thinking": {
+          "type": "disabled"
+        }
+      },
+      "request_body_sha256": "bf2f56115d116dbe64a6c6ebadfcf351065153952ff4a25565ed1f8340f5af3e",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "346",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-12\",\"object\":\"chat.completion\",\"created\":1787710885,\"model\":\"deepseek-reasoner\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Orión System Status\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":785,\"completion_tokens\":4,\"total_tokens\":789,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-12",
+        "object": "chat.completion",
+        "created": 1787710885,
+        "model": "deepseek-reasoner",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "Orión System Status"
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 785,
+          "completion_tokens": 4,
+          "total_tokens": 789,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 4.284539
+    },
+    "alias_reasoner_default": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-reasoner",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>What exact title is shown? Answer with only the title."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 256
+      },
+      "request_body_sha256": "51c6b7ed21242f20cd81642ce05b85a8b3474f46797694abbfc75d6af0cb6d58",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "326",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-13\",\"object\":\"chat.completion\",\"created\":1787710889,\"model\":\"deepseek-reasoner\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":785,\"completion_tokens\":0,\"total_tokens\":785,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-13",
+        "object": "chat.completion",
+        "created": 1787710889,
+        "model": "deepseek-reasoner",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": ""
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 785,
+          "completion_tokens": 0,
+          "total_tokens": 785,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 4.113126
+    },
+    "alias_chat_enabled": {
+      "url": "http://127.0.0.1:18082/v1/chat/completions",
+      "request": {
+        "model": "deepseek-chat",
+        "messages": [
+          {
+            "role": "user",
+            "content": "<｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜><｜image｜>What exact title is shown? Answer with only the title."
+          }
+        ],
+        "ds4_embedding_span_path": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v",
+        "temperature": 0,
+        "seed": 4242,
+        "max_tokens": 256,
+        "thinking": {
+          "type": "enabled"
+        }
+      },
+      "request_body_sha256": "9432f903f1d9d8e45e24e855fdfd1449e84d4b4f3a4ddb3b32a449065f651394",
+      "http_status": 200,
+      "response_headers": {
+        "Content-Length": "322",
+        "Content-Type": "application/json",
+        "Connection": "close"
+      },
+      "raw_response_utf8": "{\"id\":\"chatcmpl-14\",\"object\":\"chat.completion\",\"created\":1787710893,\"model\":\"deepseek-chat\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":785,\"completion_tokens\":0,\"total_tokens\":785,\"prompt_tokens_details\":{\"cached_tokens\":0,\"cache_write_tokens\":0}}}\n",
+      "response": {
+        "id": "chatcmpl-14",
+        "object": "chat.completion",
+        "created": 1787710893,
+        "model": "deepseek-chat",
+        "choices": [
+          {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": ""
+            },
+            "finish_reason": "stop"
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 785,
+          "completion_tokens": 0,
+          "total_tokens": 785,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0
+          }
+        }
+      },
+      "elapsed_seconds": 4.115844
+    }
+  },
+  "vanilla_pi": {
+    "intended_chat_off": {
+      "argv": [
+        "/Users/andreas/.nvm/versions/node/v24.14.0/bin/pi",
+        "--provider",
+        "ds4-local",
+        "--model",
+        "deepseek-chat",
+        "--thinking",
+        "off",
+        "--no-tools",
+        "--no-session",
+        "--no-context-files",
+        "--no-extensions",
+        "--no-skills",
+        "--system-prompt",
+        "Answer image questions precisely.",
+        "-p",
+        "@/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png",
+        "What exact title is shown? Answer with only the title."
+      ],
+      "returncode": 0,
+      "stdout": "Origin System Status\n",
+      "stderr": "",
+      "elapsed_seconds": 22.503303,
+      "environment": {
+        "PI_CODING_AGENT_DIR": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/runtime/pi",
+        "PI_OFFLINE": "1"
+      }
+    },
+    "defect_reasoner_high": {
+      "argv": [
+        "/Users/andreas/.nvm/versions/node/v24.14.0/bin/pi",
+        "--provider",
+        "ds4-local",
+        "--model",
+        "deepseek-reasoner",
+        "--thinking",
+        "high",
+        "--no-tools",
+        "--no-session",
+        "--no-context-files",
+        "--no-extensions",
+        "--no-skills",
+        "--system-prompt",
+        "Answer image questions precisely.",
+        "-p",
+        "@/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png",
+        "What exact title is shown? Answer with only the title."
+      ],
+      "returncode": 0,
+      "stdout": "Orión System Status\n",
+      "stderr": "",
+      "elapsed_seconds": 22.346735,
+      "environment": {
+        "PI_CODING_AGENT_DIR": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/runtime/pi",
+        "PI_OFFLINE": "1"
+      }
+    }
+  }
+}

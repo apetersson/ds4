@@ -1,0 +1,150 @@
+{
+  "schema": "ds4.vision-revalidation-preflight.v1",
+  "captured_at": "2026-08-26T02:19:10.512644+00:00",
+  "profile": "quality",
+  "phase": "preflight",
+  "expected_base": "27eb58a0aec6829f80b5eaaba710fc344ed4384f",
+  "expected_branch": "worker/DS-002.03-vision-revalidate",
+  "catalog_root": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision",
+  "planned_resident_gib": 95.95,
+  "memory_free_floor_percent": 85,
+  "git": {
+    "pwd": "/Users/andreas/.codex/worktrees/a023/ds4-apetersson",
+    "root": "/Users/andreas/.codex/worktrees/a023/ds4-apetersson",
+    "branch": "worker/DS-002.03-vision-revalidate",
+    "head": "835bceaf08427fdaafbd292093ad2de437908ab9",
+    "status_porcelain": "",
+    "base_is_ancestor": true
+  },
+  "processes": {
+    "ds4": [],
+    "omlx": [
+      "91423 68974 uv               uv run omlx serve"
+    ],
+    "pi": [
+      "78478 71925 pi               pi ",
+      "69530 69009 pi               pi ",
+      "78049 77235 pi               pi ",
+      "58763 58250 pi               pi ",
+      "67321 66097 pi               pi     ",
+      "68696 72052 pi               pi ",
+      "84187 79652 pi               pi ",
+      "64841 64119 pi               pi ",
+      "54168 53588 pi               pi ",
+      "49646 42711 pi               pi ",
+      "45873 42964 pi               pi   ",
+      "45775 43076 pi               pi   ",
+      "45882 43230 pi               pi   ",
+      "45967 43756 pi               pi   ",
+      "40332 39335 pi               pi ",
+      "26350 25661 pi               pi ",
+      " 2251 99984 pi               pi ",
+      "67919 66112 pi               pi     ",
+      "35661 35055 pi               pi     ",
+      "21764 20892 pi               pi     ",
+      "41424 40824 pi               pi     ",
+      "92157 91406 pi               pi     ",
+      "70902 70149 pi               pi     ",
+      "13330 12726 pi               pi     ",
+      "36534 35594 pi               pi ",
+      "87452 86776 pi               pi ",
+      "70666 71537 pi               pi ",
+      "95891 64256 pi               pi   ",
+      " 3073 35146 pi               pi ",
+      "28098  3016 pi               pi         "
+    ],
+    "pi_count": 30,
+    "full_ps_command": [
+      "ps",
+      "-ww",
+      "-axo",
+      "pid=,ppid=,comm=,args="
+    ]
+  },
+  "connections_and_handles": {
+    "lock": {
+      "argv": [
+        "lsof",
+        "-nP",
+        "/private/tmp/ds4.lock"
+      ],
+      "returncode": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    "port_18082": {
+      "argv": [
+        "lsof",
+        "-nP",
+        "-iTCP:18082"
+      ],
+      "returncode": 1,
+      "stdout": "",
+      "stderr": ""
+    },
+    "models": {
+      "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf": {
+        "argv": [
+          "lsof",
+          "-nP",
+          "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf"
+        ],
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf": {
+        "argv": [
+          "lsof",
+          "-nP",
+          "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf"
+        ],
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepEncoderV2-BF16.safetensors": {
+        "argv": [
+          "lsof",
+          "-nP",
+          "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepEncoderV2-BF16.safetensors"
+        ],
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      },
+      "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors": {
+        "argv": [
+          "lsof",
+          "-nP",
+          "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors"
+        ],
+        "returncode": 1,
+        "stdout": "",
+        "stderr": ""
+      }
+    }
+  },
+  "memory": {
+    "free_percent": 92,
+    "memory_pressure": {
+      "argv": [
+        "memory_pressure"
+      ],
+      "returncode": 0,
+      "stdout": "The system has 137438953472 (8388608 pages with a page size of 16384).\n\nStats: \nPages free: 467949 \nPages purgeable: 24776 \nPages purged: 33676973 \n\nSwap I/O:\nSwapins: 23169518 \nSwapouts: 29723697 \n\nPage Q counts:\nPages active: 1404457 \nPages inactive: 5735072 \nPages speculative: 73104 \nPages throttled: 0 \nPages wired down: 386894 \n\nCompressor Stats:\nPages used by compressor: 266428 \nPages decompressed: 358831494 \nPages compressed: 365111505 \n\nFile I/O:\nPageins: 862678805 \nPageouts: 600784 \n\nSystem-wide memory free percentage: 92%\n",
+      "stderr": ""
+    },
+    "vm_stat": {
+      "argv": [
+        "vm_stat"
+      ],
+      "returncode": 0,
+      "stdout": "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                                   467788.\nPages active:                                1404462.\nPages inactive:                              5735072.\nPages speculative:                             73104.\nPages throttled:                                   0.\nPages wired down:                             386894.\nPages purgeable:                               24776.\n\"Translation faults\":                    19138831317.\nPages copy-on-write:                      2482388599.\nPages zero filled:                       11531808999.\nPages reactivated:                         501810114.\nPages purged:                               33676973.\nFile-backed pages:                           6026271.\nAnonymous pages:                             1186367.\nPages stored in compressor:                  2855331.\nPages occupied by compressor:                 266428.\nDecompressions:                            358831494.\nCompressions:                              365111505.\nPageins:                                   862678806.\nPageouts:                                     600784.\nSwapins:                                    23169518.\nSwapouts:                                   29723697.\n",
+      "stderr": ""
+    }
+  },
+  "conflicts": [],
+  "launch_allowed": true,
+  "safety_statement": "No process was killed, signalled, or modified by this read-only audit. Unrelated oMLX/Pi processes are recorded and remain untouched."
+}
