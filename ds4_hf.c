@@ -709,7 +709,10 @@ static uint32_t manifest_capability(const char *name) {
 }
 
 static bool manifest_parse_capability_array(manifest_json_parser *jp,
-                                            bool required, uint32_t *bits) {
+                                            bool required,
+                                            ds4_hf_manifest_artifact *artifact) {
+    uint32_t *bits = required ? &artifact->required_capabilities
+                              : &artifact->optional_capabilities;
     if (!manifest_json_open(jp, '[')) return false;
     manifest_json_ws(jp);
     if (jp->p < jp->end && *jp->p == ']') return manifest_json_close(jp, ']');
@@ -730,6 +733,18 @@ static bool manifest_parse_capability_array(manifest_json_parser *jp,
         if (bit) {
             if (*bits & bit) return json_fail(jp, "duplicate capability '%s'", capability);
             *bits |= bit;
+        } else {
+            for (size_t i = 0;
+                 i < artifact->unknown_optional_capability_count; i++) {
+                if (!strcmp(artifact->unknown_optional_capabilities[i],
+                            capability)) {
+                    return json_fail(jp, "duplicate capability '%s'",
+                                     capability);
+                }
+            }
+            size_t index = artifact->unknown_optional_capability_count++;
+            memcpy(artifact->unknown_optional_capabilities[index], capability,
+                   strlen(capability) + 1);
         }
         if (!manifest_json_next(jp, ']', &more)) return false;
     }
@@ -748,10 +763,10 @@ static bool manifest_parse_capabilities(manifest_json_parser *jp,
         if (!manifest_json_key(jp, key, sizeof(key))) return false;
         if (!strcmp(key, "required")) {
             if (!manifest_mark_field(jp, &seen, 1, key) ||
-                !manifest_parse_capability_array(jp, true, &artifact->required_capabilities)) return false;
+                !manifest_parse_capability_array(jp, true, artifact)) return false;
         } else if (!strcmp(key, "optional")) {
             if (!manifest_mark_field(jp, &seen, 2, key) ||
-                !manifest_parse_capability_array(jp, false, &artifact->optional_capabilities)) return false;
+                !manifest_parse_capability_array(jp, false, artifact)) return false;
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
@@ -3964,7 +3979,9 @@ static const hf_capability_name hf_capability_names[] = {
     {DS4_HF_CAP_SSD_STREAMING, "ssd_streaming"},
 };
 
-static void hf_json_capabilities(FILE *fp, uint32_t capabilities) {
+static void hf_json_capabilities(FILE *fp, uint32_t capabilities,
+                                 const char *const *unknown,
+                                 size_t unknown_count) {
     fputc('[', fp);
     bool first = true;
     for (size_t i = 0; i < sizeof(hf_capability_names) /
@@ -3974,10 +3991,17 @@ static void hf_json_capabilities(FILE *fp, uint32_t capabilities) {
         hf_json_string(fp, hf_capability_names[i].name);
         first = false;
     }
+    for (size_t i = 0; i < unknown_count; i++) {
+        if (!first) fputc(',', fp);
+        hf_json_string(fp, unknown[i]);
+        first = false;
+    }
     fputc(']', fp);
 }
 
-static void hf_human_capabilities(FILE *fp, uint32_t capabilities) {
+static void hf_human_capabilities(FILE *fp, uint32_t capabilities,
+                                  const char *const *unknown,
+                                  size_t unknown_count) {
     bool first = true;
     for (size_t i = 0; i < sizeof(hf_capability_names) /
                             sizeof(hf_capability_names[0]); i++) {
@@ -3986,12 +4010,25 @@ static void hf_human_capabilities(FILE *fp, uint32_t capabilities) {
                 hf_capability_names[i].name);
         first = false;
     }
+    for (size_t i = 0; i < unknown_count; i++) {
+        fprintf(fp, "%s%s", first ? "" : ",", unknown[i]);
+        first = false;
+    }
     if (first) fputs("none", fp);
 }
 
+#define DS4_HF_VARIANT_MAX_UNKNOWN_OPTIONAL \
+    (DS4_HF_ACQUISITION_MAX_ARTIFACTS * DS4_HF_MANIFEST_MAX_CAPABILITIES)
+
+typedef struct {
+    uint32_t required;
+    uint32_t optional;
+    const char *unknown_optional[DS4_HF_VARIANT_MAX_UNKNOWN_OPTIONAL];
+    size_t unknown_optional_count;
+} variant_capability_summary;
+
 static void variant_capabilities(const ds4_hf_manifest_variant *variant,
-                                 uint32_t *required,
-                                 uint32_t *optional) {
+                                 variant_capability_summary *summary) {
     const ds4_hf_manifest_artifact *artifacts[] = {
         &variant->receiver,
         &variant->ds4_vision.tower,
@@ -4000,12 +4037,27 @@ static void variant_capabilities(const ds4_hf_manifest_variant *variant,
         &variant->llama_cpp_mmproj,
         variant->has_dspark ? &variant->dspark : NULL,
     };
-    *required = 0;
-    *optional = 0;
+    memset(summary, 0, sizeof(*summary));
     for (size_t i = 0; i < sizeof(artifacts) / sizeof(artifacts[0]); i++) {
         if (!artifacts[i]) continue;
-        *required |= artifacts[i]->required_capabilities;
-        *optional |= artifacts[i]->optional_capabilities;
+        summary->required |= artifacts[i]->required_capabilities;
+        summary->optional |= artifacts[i]->optional_capabilities;
+        for (size_t j = 0;
+             j < artifacts[i]->unknown_optional_capability_count; j++) {
+            const char *name = artifacts[i]->unknown_optional_capabilities[j];
+            bool duplicate = false;
+            for (size_t k = 0; k < summary->unknown_optional_count; k++) {
+                if (!strcmp(summary->unknown_optional[k], name)) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            if (!duplicate && summary->unknown_optional_count <
+                                  DS4_HF_VARIANT_MAX_UNKNOWN_OPTIONAL) {
+                summary->unknown_optional[summary->unknown_optional_count++] =
+                    name;
+            }
+        }
     }
 }
 
@@ -4024,6 +4076,9 @@ static bool variant_llama_heuristics(const ds4_hf_manifest_variant *variant,
 
 static void print_json_artifact(FILE *fp,
                                 const ds4_hf_manifest_artifact *artifact) {
+    const char *unknown[DS4_HF_MANIFEST_MAX_CAPABILITIES];
+    for (size_t i = 0; i < artifact->unknown_optional_capability_count; i++)
+        unknown[i] = artifact->unknown_optional_capabilities[i];
     fputs("{\"path\":", fp);
     hf_json_string(fp, artifact->path);
     fprintf(fp, ",\"bytes\":%" PRIu64 ",\"precision\":",
@@ -4038,9 +4093,10 @@ static void print_json_artifact(FILE *fp,
     fputs(",\"llama_cpp_minimum_revision\":", fp);
     hf_json_string(fp, artifact->llama_cpp_minimum_revision);
     fputs("},\"declared_capabilities\":{\"required\":", fp);
-    hf_json_capabilities(fp, artifact->required_capabilities);
+    hf_json_capabilities(fp, artifact->required_capabilities, NULL, 0);
     fputs(",\"optional\":", fp);
-    hf_json_capabilities(fp, artifact->optional_capabilities);
+    hf_json_capabilities(fp, artifact->optional_capabilities, unknown,
+                         artifact->unknown_optional_capability_count);
     fputs("}}", fp);
 }
 
@@ -4048,8 +4104,8 @@ static void print_json_variant(FILE *fp,
                                const ds4_hf_manifest_variant *variant) {
     bool primary = false, siblings = false;
     variant_llama_heuristics(variant, &primary, &siblings);
-    uint32_t required = 0, optional = 0;
-    variant_capabilities(variant, &required, &optional);
+    variant_capability_summary capabilities;
+    variant_capabilities(variant, &capabilities);
     fputs("{\"selector\":", fp);
     hf_json_string(fp, variant->selector);
     fputs(",\"default\":", fp);
@@ -4072,14 +4128,19 @@ static void print_json_variant(FILE *fp,
     fputs(",\"sibling_layout_match\":", fp);
     fputs(siblings ? "true" : "false", fp);
     fputs("},\"declared_capabilities\":{\"required\":", fp);
-    hf_json_capabilities(fp, required);
+    hf_json_capabilities(fp, capabilities.required, NULL, 0);
     fputs(",\"optional\":", fp);
-    hf_json_capabilities(fp, optional);
+    hf_json_capabilities(fp, capabilities.optional,
+                         capabilities.unknown_optional,
+                         capabilities.unknown_optional_count);
     fputs("}}", fp);
 }
 
 static void print_human_artifact(FILE *fp, const char *role,
                                  const ds4_hf_manifest_artifact *artifact) {
+    const char *unknown[DS4_HF_MANIFEST_MAX_CAPABILITIES];
+    for (size_t i = 0; i < artifact->unknown_optional_capability_count; i++)
+        unknown[i] = artifact->unknown_optional_capabilities[i];
     fprintf(fp,
             "  %s: path=%s bytes=%" PRIu64
             " precision=%s ds4=%s llama_cpp=%s"
@@ -4091,9 +4152,10 @@ static void print_human_artifact(FILE *fp, const char *role,
                 ? artifact->ds4_minimum_revision : "unavailable",
             artifact->llama_cpp_minimum_revision[0]
                 ? artifact->llama_cpp_minimum_revision : "unavailable");
-    hf_human_capabilities(fp, artifact->required_capabilities);
+    hf_human_capabilities(fp, artifact->required_capabilities, NULL, 0);
     fputs(" optional=", fp);
-    hf_human_capabilities(fp, artifact->optional_capabilities);
+    hf_human_capabilities(fp, artifact->optional_capabilities, unknown,
+                          artifact->unknown_optional_capability_count);
     fputc('\n', fp);
 }
 
@@ -4101,8 +4163,8 @@ static void print_human_variant(FILE *fp,
                                 const ds4_hf_manifest_variant *variant) {
     bool primary = false, siblings = false;
     variant_llama_heuristics(variant, &primary, &siblings);
-    uint32_t required = 0, optional = 0;
-    variant_capabilities(variant, &required, &optional);
+    variant_capability_summary capabilities;
+    variant_capabilities(variant, &capabilities);
     fprintf(fp, "variant %s%s\n", variant->selector,
             variant->is_default ? " (default)" : "");
     print_human_artifact(fp, "receiver", &variant->receiver);
@@ -4121,9 +4183,11 @@ static void print_human_variant(FILE *fp,
             primary ? "match" : "mismatch",
             siblings ? "match" : "mismatch");
     fputs("  declared_capabilities: required=", fp);
-    hf_human_capabilities(fp, required);
+    hf_human_capabilities(fp, capabilities.required, NULL, 0);
     fputs(" optional=", fp);
-    hf_human_capabilities(fp, optional);
+    hf_human_capabilities(fp, capabilities.optional,
+                          capabilities.unknown_optional,
+                          capabilities.unknown_optional_count);
     fputc('\n', fp);
 }
 

@@ -112,6 +112,12 @@ static void test_production_fixture(const char *json, size_t json_len) {
           !strcmp(headroom->llama_cpp_mmproj.gguf_projector_type,
                   "deepencoder_v2_dsv4") &&
           (headroom->receiver.optional_capabilities & DS4_HF_CAP_SSD_STREAMING));
+    CHECK("unknown optional capability is retained for diagnostics",
+          headroom &&
+          headroom->ds4_vision.tower.unknown_optional_capability_count == 1 &&
+          !strcmp(headroom->ds4_vision.tower
+                       .unknown_optional_capabilities[0],
+                  "future-optional-capability"));
     CHECK("Quality128 typed records remain independently selectable",
           quality && !quality->is_default && quality->has_dspark &&
           !strcmp(quality->receiver.profile, "Quality128") &&

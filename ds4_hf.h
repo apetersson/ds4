@@ -102,6 +102,9 @@ typedef struct {
     char profile[DS4_HF_METADATA_MAX];
     uint32_t required_capabilities;
     uint32_t optional_capabilities;
+    char unknown_optional_capabilities[DS4_HF_MANIFEST_MAX_CAPABILITIES]
+                                      [DS4_HF_METADATA_MAX];
+    size_t unknown_optional_capability_count;
     bool supports_ds4;
     bool supports_llama_cpp;
     char ds4_minimum_revision[DS4_HF_METADATA_MAX];
