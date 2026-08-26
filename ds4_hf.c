@@ -2888,22 +2888,14 @@ static bool untrusted_entry_fail(
     const ds4_hf_acquisition_artifact *artifact, const char *path,
     bool complete_cache_entry, const char *reason) {
     char quoted[DS4_HF_CACHE_PATH_MAX * 4 + 3];
-    char metadata_path[DS4_HF_CACHE_PATH_MAX + 16];
-    char quoted_metadata[(DS4_HF_CACHE_PATH_MAX + 16) * 4 + 3];
     char quarantine_template[DS4_HF_CACHE_PATH_MAX + 32];
     char quoted_template[(DS4_HF_CACHE_PATH_MAX + 32) * 4 + 3];
-    int metadata_written = snprintf(metadata_path, sizeof(metadata_path),
-                                    "%s.ds4-meta", path);
     int template_written = snprintf(quarantine_template,
                                     sizeof(quarantine_template),
                                     "%s.untrusted.XXXXXX", path);
-    if (metadata_written <= 0 ||
-        (size_t)metadata_written >= sizeof(metadata_path) ||
-        template_written <= 0 ||
+    if (template_written <= 0 ||
         (size_t)template_written >= sizeof(quarantine_template) ||
         !shell_quote(path, quoted, sizeof(quoted)) ||
-        !shell_quote(metadata_path, quoted_metadata,
-                     sizeof(quoted_metadata)) ||
         !shell_quote(quarantine_template, quoted_template,
                      sizeof(quoted_template))) {
         return acquisition_context_fail(
@@ -2921,10 +2913,11 @@ static bool untrusted_entry_fail(
     return acquisition_context_fail(
         err, errlen, plan, artifact,
         "%s; non-destructive recovery command: "
-        "q=$(mktemp -d %s) && for p in %s %s; do "
-        "if [ -e \"$p\" ] || [ -L \"$p\" ]; then "
-        "mv -- \"$p\" \"$q/\" || exit; fi; done",
-        reason, quoted_template, quoted, quoted_metadata);
+        "p=%s; q=$(mktemp -d %s) && "
+        "for s in '' .ds4-meta .part .ds4-meta.part; do "
+        "if [ -e \"$p$s\" ] || [ -L \"$p$s\" ]; then "
+        "mv -- \"$p$s\" \"$q/\" || exit; fi; done",
+        reason, quoted, quoted_template);
 }
 
 static bool acquisition_plan_valid(const ds4_hf_acquisition_plan *plan) {
@@ -2992,6 +2985,21 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
         untrusted_entry_fail(
             err, errlen, plan, artifact, artifact->destination, true,
             "cache entry fails manifest role, byte-count, SHA-256, sidecar, or stable-path verification; no same-directory fallback is permitted");
+        goto done;
+    }
+    struct stat transaction_stat;
+    if (!fstatat(parent_fd, metadata_tmp_leaf, &transaction_stat,
+                 AT_SYMLINK_NOFOLLOW)) {
+        untrusted_entry_fail(
+            err, errlen, plan, artifact, artifact->destination, true,
+            "interrupted cache publication left transaction members that must be quarantined before retry");
+        goto done;
+    }
+    if (errno != ENOENT) {
+        acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "cannot inspect interrupted cache publication metadata: %s",
+            strerror(errno));
         goto done;
     }
     if (cfg->offline) {

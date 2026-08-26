@@ -75,6 +75,17 @@ class IntegrityTests(unittest.TestCase):
         destination = self.plan(result, "receiver")["destination"]
         self.assertEqual(destination.read_bytes(), original_bytes)
 
+    def execute_recovery(self, failed):
+        marker = "non-destructive recovery command: "
+        combined = failed.stdout + failed.stderr
+        self.assertIn(marker, combined)
+        command = combined.split(marker, 1)[1].splitlines()[0]
+        recovered = subprocess.run(
+            ["/bin/sh", "-c", command], cwd=ROOT, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        self.assertEqual(recovered.returncode, 0,
+                         recovered.stdout + recovered.stderr)
+
     def test_every_requested_role_is_byte_and_sha_verified(self):
         with tempfile.TemporaryDirectory() as cache:
             ds4 = self.run_probe(cache, modes="vision,dspark")
@@ -126,17 +137,11 @@ class IntegrityTests(unittest.TestCase):
             failed = self.run_probe(cache, modes="text,offline")
             self.assert_integrity_failure(failed, truncated)
             self.assertEqual(FakeArtifactHub.requests, before)
-            marker = "non-destructive recovery command: "
-            command = (failed.stdout + failed.stderr).split(marker, 1)[1].splitlines()[0]
             prior_quarantine = destination.with_name(
                 destination.name + ".untrusted.PRIOR")
             prior_quarantine.mkdir()
             (prior_quarantine / "evidence").write_bytes(b"prior evidence")
-            recovered = subprocess.run(
-                ["/bin/sh", "-c", command], cwd=ROOT, text=True,
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-            self.assertEqual(recovered.returncode, 0,
-                             recovered.stdout + recovered.stderr)
+            self.execute_recovery(failed)
             self.assertFalse(destination.exists())
             self.assertFalse(metadata.exists())
             quarantines = [
@@ -157,6 +162,61 @@ class IntegrityTests(unittest.TestCase):
                              payload_for("Headroom128/H-receiver.gguf"))
             self.assertEqual((quarantines[0] / destination.name).read_bytes(),
                              truncated)
+
+    def test_interrupted_publication_states_recover_without_wedging_retry(self):
+        for crash_point in ("metadata temp", "metadata publication",
+                            "artifact publication"):
+            with self.subTest(crash_point=crash_point), \
+                    tempfile.TemporaryDirectory() as cache:
+                valid = self.run_probe(cache)
+                self.assert_ok(valid)
+                destination = self.plan(valid, "receiver")["destination"]
+                metadata = Path(str(destination) + ".ds4-meta")
+                part = Path(str(destination) + ".part")
+                metadata_tmp = Path(str(destination) + ".ds4-meta.part")
+                expected_artifact = destination.read_bytes()
+                expected_metadata = metadata.read_bytes()
+
+                if crash_point == "metadata temp":
+                    os.replace(destination, part)
+                    os.replace(metadata, metadata_tmp)
+                    expected_names = {part.name, metadata_tmp.name}
+                elif crash_point == "metadata publication":
+                    os.replace(destination, part)
+                    os.link(metadata, metadata_tmp)
+                    expected_names = {part.name, metadata.name,
+                                      metadata_tmp.name}
+                else:
+                    os.link(destination, part)
+                    os.link(metadata, metadata_tmp)
+                    expected_names = {destination.name, part.name,
+                                      metadata.name, metadata_tmp.name}
+
+                failed = self.run_probe(cache, modes="text,offline")
+                combined = failed.stdout + failed.stderr
+                self.assertEqual(failed.returncode, 2, combined)
+                self.assertIn("non-destructive recovery command:", combined)
+                self.assertNotIn("cannot create exclusive", combined)
+                self.execute_recovery(failed)
+
+                quarantines = list(destination.parent.glob(
+                    destination.name + ".untrusted.*"))
+                self.assertEqual(len(quarantines), 1)
+                self.assertEqual(
+                    {path.name for path in quarantines[0].iterdir()},
+                    expected_names)
+                self.assertEqual((quarantines[0] / part.name).read_bytes(),
+                                 expected_artifact)
+                metadata_evidence = (quarantines[0] / metadata_tmp.name
+                                     if metadata_tmp.name in expected_names
+                                     else quarantines[0] / metadata.name)
+                self.assertEqual(metadata_evidence.read_bytes(),
+                                 expected_metadata)
+
+                reacquired = self.run_probe(cache)
+                self.assert_ok(reacquired)
+                self.assertEqual(destination.read_bytes(), expected_artifact)
+                self.assertEqual(metadata.read_bytes(), expected_metadata)
 
     def test_same_size_corruption_never_uses_same_directory_decoy(self):
         with tempfile.TemporaryDirectory() as cache:
