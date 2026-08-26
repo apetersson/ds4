@@ -345,6 +345,17 @@ int main(void) {
               strstr(err, "catalog DSpark"));
     }
     {
+        char *argv[] = {"ds4", "--hf", "owner/repo", "--hf-dry-run",
+                        "--mtp", "/models/legacy-mtp.gguf"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, false, 6, argv, false, false,
+                               err, sizeof(err));
+        CHECK("dry run rejects an unreported legacy MTP-only file",
+              !ok && strstr(err, "cannot report an explicit local --mtp") &&
+              strstr(err, "catalog DSpark"));
+    }
+    {
         char *argv[] = {"ds4", "--list-hf-variants"};
         ds4_hf_cli_config cfg;
         char err[256] = {0};
