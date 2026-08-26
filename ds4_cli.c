@@ -1,6 +1,7 @@
 #include "ds4.h"
 #include "ds4_distributed.h"
 #include "ds4_gpu_args.h"
+#include "ds4_hf.h"
 #include "ds4_tp.h"
 #include "ds4_help.h"
 #include "linenoise.h"
@@ -91,6 +92,7 @@ typedef struct {
 
 typedef struct {
     ds4_engine_options engine;
+    ds4_hf_cli_config hf;
     ds4_dist_options *dist;
     cli_generation_options gen;
     char *prompt_owned;
@@ -1776,8 +1778,10 @@ static cli_config parse_options(int argc, char **argv) {
         fprintf(stderr, "ds4: out of memory creating distributed options\n");
         exit(1);
     }
+    ds4_hf_cli_init(&c.hf);
 
     bool directional_steering_scale_set = false;
+    bool model_explicit = false;
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
         if (!strcmp(arg, "-h") || !strcmp(arg, "--help")) {
@@ -1786,6 +1790,17 @@ static cli_config parse_options(int argc, char **argv) {
             usage(stdout, topic);
             exit(0);
         }
+        char hf_parse_err[256] = {0};
+        ds4_hf_cli_parse_result hf_parse =
+            ds4_hf_cli_parse_arg(&c.hf, false, &i, argc, argv,
+                                 hf_parse_err, sizeof(hf_parse_err));
+        if (hf_parse == DS4_HF_CLI_ERROR) {
+            fprintf(stderr, "ds4: %s\n",
+                    hf_parse_err[0] ? hf_parse_err : "invalid Hugging Face option");
+            exit(2);
+        }
+        if (hf_parse == DS4_HF_CLI_MATCHED) continue;
+
         char dist_parse_err[256] = {0};
         ds4_dist_cli_parse_result dist_parse = ds4_dist_parse_cli_arg(arg,
                                                                       &i,
@@ -1832,9 +1847,12 @@ static cli_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--raw") || !strcmp(arg, "--raw-prompt")) {
             c.gen.raw_prompt = true;
         } else if (!strcmp(arg, "-m") || !strcmp(arg, "--model")) {
+            if (model_explicit) {
+                fprintf(stderr, "ds4: duplicate option: %s\n", arg);
+                exit(2);
+            }
+            model_explicit = true;
             c.engine.model_path = need_arg(&i, argc, argv, arg);
-        } else if (!strcmp(arg, "--mtp")) {
-            c.engine.mtp_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--mtp-draft")) {
             c.engine.mtp_draft_tokens = parse_int(need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "--mtp-margin")) {
@@ -1844,8 +1862,6 @@ static cli_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--glm-mtp-timing")) {
             c.engine.glm_mtp = true;
             c.engine.glm_mtp_timing = true;
-        } else if (!strcmp(arg, "--dspark")) {
-            c.engine.dspark = true;
         } else if (!strcmp(arg, "--dspark-confidence")) {
             c.engine.dspark = true;
             c.engine.dspark_confidence_threshold =
@@ -2035,6 +2051,14 @@ static cli_config parse_options(int argc, char **argv) {
         fprintf(stderr, "ds4: --perplexity-file does not use -p/--prompt-file\n");
         exit(2);
     }
+    c.engine.mtp_path = c.hf.mtp_path;
+    c.engine.dspark = c.engine.dspark || c.hf.dspark_requested;
+    char hf_err[256];
+    if (!ds4_hf_cli_validate(&c.hf, model_explicit, c.engine.dspark,
+                             hf_err, sizeof(hf_err))) {
+        fprintf(stderr, "ds4: %s\n", hf_err);
+        exit(2);
+    }
     char tp_err[256];
     if (!ds4_tp_adopt_distributed_options(&c.engine.tp, c.dist,
                                           tp_err, sizeof(tp_err))) {
@@ -2056,6 +2080,13 @@ static cli_config parse_options(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     cli_config cfg = parse_options(argc, argv);
+    if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
+        fprintf(stderr,
+                "ds4: Hugging Face selection is valid, but repository resolution is not available in this build\n");
+        ds4_dist_options_free(cfg.dist);
+        free(cfg.prompt_owned);
+        return 2;
+    }
     if (cfg.gen.dump_tokens) {
         if (cfg.gen.prompt == NULL) {
             fprintf(stderr, "ds4: --dump-tokens requires -p or --prompt-file\n");

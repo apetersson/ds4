@@ -143,10 +143,41 @@ static const char *tool_summary(ds4_help_tool tool) {
     return "";
 }
 
+static void print_hf_selection(FILE *fp, const help_colors *c,
+                               ds4_help_tool tool) {
+    if (tool != DS4_HELP_DS4 && tool != DS4_HELP_SERVER) return;
+
+    opt(fp, c, "-hf, -hfr, --hf-repo, --hf OWNER/REPO[:SELECTOR]",
+        "Select an HF receiver variant. SELECTOR matching is case-insensitive; cannot be combined with --model.");
+    opt(fp, c, "-hff, --hf-file FILE",
+        "Select an exact repository file, overriding :SELECTOR. Requires -hf.");
+    opt(fp, c, "-hft, --hf-token TOKEN",
+        "Override HF_TOKEN for this run. Tokens are never logged; prefer HF_TOKEN to avoid shell history/process arguments.");
+    opt(fp, c, "--hf-revision REVISION",
+        "Resolve this branch, tag, or commit, then pin all requested files to one immutable commit.");
+    opt(fp, c, "--hf-cache-dir DIR",
+        "Override the Hugging Face cache directory for this run.");
+    opt(fp, c, "--offline, --hf-offline",
+        "Require a complete verified cache snapshot and perform no network access.");
+    opt(fp, c, "HF_ENDPOINT",
+        "Environment override used for every HF metadata and artifact request.");
+
+    if (tool == DS4_HELP_SERVER) {
+        opt(fp, c, "--no-vision",
+            "Disable catalog vision discovery and downloads; serve the HF receiver as text-only.");
+        opt(fp, c, "--vision-python FILE --vision-encoder FILE",
+            "Trusted local vision runtime. Supply these with --vision-tower and --vision-adapter as one complete override.");
+        opt(fp, c, "--vision-tower FILE --vision-adapter FILE",
+            "Trusted local vision weights. A complete four-option set overrides catalog vision; partial mixing is rejected.");
+        para(fp, c, "With -hf, ds4-server plans the complete declared DS4 vision bundle by default. --no-vision disables it; a complete explicit local bundle overrides it.");
+    }
+}
+
 static void print_model_runtime(FILE *fp, const help_colors *c,
                                 ds4_help_tool tool, bool full) {
     title(fp, c, "Model And Runtime");
     opt(fp, c, "-m, --model FILE", "GGUF model path. Default: ds4flash.gguf");
+    print_hf_selection(fp, c, tool);
 #ifdef DS4_ROCM_BUILD
     opt(fp, c, "--metal | --rocm | --cpu", "Select the backend explicitly.");
     opt(fp, c, "--backend NAME", "Backend name: metal, rocm, or cpu.");
@@ -176,14 +207,14 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
     opt(fp, c, "--prefill-chunk N", "Graph prefill chunk size. Default: CUDA TP 2048; PRO long prompts 8192; others 4096.");
     if (full) {
         if (tool != DS4_HELP_BENCH) {
-            opt(fp, c, "--mtp FILE", "Optional MTP support GGUF used for draft-token probes.");
+            opt(fp, c, "--mtp FILE", "Explicit local MTP/DSpark support GGUF. Takes precedence over any catalog DSpark role.");
         }
         if (tool == DS4_HELP_DS4 || tool == DS4_HELP_AGENT || tool == DS4_HELP_SERVER) {
             opt(fp, c, "--mtp-draft N", "Maximum autoregressive MTP draft tokens. Default: 1");
             opt(fp, c, "--mtp-margin F", "Verifier confidence margin for fast MTP acceptance. Default: 3");
             opt(fp, c, "--glm-mtp", "Enable integrated greedy GLM MTP speculation.");
             opt(fp, c, "--glm-mtp-timing", "Enable GLM MTP and print acceptance/timing counters.");
-            opt(fp, c, "--dspark", "Enable DSpark using the support GGUF passed with --mtp.");
+            opt(fp, c, "--dspark", "Explicitly enable DSpark. Uses --mtp when present; otherwise -hf may provide the matching catalog role.");
             opt(fp, c, "--dspark-confidence F", "Enable DSpark with confidence pruning threshold 0..1. Greedy/opportunistic default: Metal 0.6, CUDA/ROCm 0.7; exact sampling: 0.8");
             opt(fp, c, "--mtp-exact-sampling", "DFlash: preserve the ordinary temperature distribution instead of accepting target-matching greedy drafts directly.");
             opt(fp, c, "--dspark-strict", "Load DSpark support but keep target-only decode.");
