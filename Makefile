@@ -519,6 +519,7 @@ integration-non-model-test:
 ifeq ($(UNAME_S),Darwin)
 	$(MAKE) test-mxfp4-metal
 endif
+	$(RM) tests/test_dspark_mxfp4_quantizer
 
 integration-gates: integration-merge-plan integration-topology integration-non-model-test
 

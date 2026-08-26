@@ -14,8 +14,15 @@ feature_heads=(
   2d25fad1bd9b9c86218986daf51514953b56c854
   0f15545eef685a4718d2cd1a322cb7c1e55a9f9c
 )
+merge_trees=(
+  7b4e233e8f4a9c159558d013ec03f21f3da48ca0
+  da38af0df1f50653664cf356e84dbf94b5d76154
+  87b8a9180ab075b13445305d8278fd8c5c17dfe3
+)
+final_feature_merge=ac77d7ec7ea8448679868f90ea4c678fdfbc7400
 allowed_integration_paths=(
   "backlog/tasks/ds-005.02 - Establish-repeatable-integration-merge-and-conflict-gates.md"
+  "backlog/tasks/ds-005.02.01 - Pin-semantic-merge-identity-in-topology-gates.md"
   Makefile
   scripts/check_branch_topology.sh
   scripts/merge_integration.sh
@@ -69,8 +76,14 @@ for i in "${!merges[@]}"; do
     die "${merges[$i]} breaks the recorded first-parent chain"
   [[ ${parents[1]} == "${feature_heads[$i]}" ]] ||
     die "merge $((i + 1)) has second parent ${parents[1]}, expected ${feature_heads[$i]}"
+  tree=$(git show -s --format=%T "${merges[$i]}")
+  [[ $tree == "${merge_trees[$i]}" ]] ||
+    die "merge $((i + 1)) has tree $tree, expected validated tree ${merge_trees[$i]}"
   expected_first_parent=${merges[$i]}
 done
+
+[[ ${merges[2]} == "$final_feature_merge" ]] ||
+  die "final feature merge is ${merges[2]}, expected $final_feature_merge"
 
 expected=$(mktemp "${TMPDIR:-/tmp}/ds005-expected.XXXXXX")
 actual=$(mktemp "${TMPDIR:-/tmp}/ds005-actual.XXXXXX")
@@ -93,11 +106,20 @@ if [[ -s $missing || -s $extra ]]; then
   die "integrated path inventory differs from the feature union plus approved gate files"
 fi
 
+git diff --name-only "$final_feature_merge..$revision" | LC_ALL=C sort -u >"$actual"
+comm -23 "$actual" "$allowed" >"$extra"
+if [[ -s $extra ]]; then
+  echo "paths changed after the validated feature merge but outside DS-005.02:" >&2
+  sed 's/^/  /' "$extra" >&2
+  die "post-merge delta contains non-gate changes"
+fi
+
 echo "check_branch_topology: PASS"
 echo "  integration revision: $revision"
 echo "  base: $base"
 for i in "${!merges[@]}"; do
   echo "  merge $((i + 1)): ${merges[$i]} <- ${feature_heads[$i]}"
+  echo "    tree: ${merge_trees[$i]}"
 done
 echo "  main == upstream/main: $main"
 echo "  feature inventory paths: $(wc -l <"$expected" | tr -d ' ')"
