@@ -19,10 +19,13 @@ merge_trees=(
   da38af0df1f50653664cf356e84dbf94b5d76154
   87b8a9180ab075b13445305d8278fd8c5c17dfe3
 )
+approved_makefile_blob=eba268897e08dab725e63e439573ac0b6f3b7f6f
+approved_merge_helper_blob=413663d91e5cde12d4cd6b32216191ad7b0a8a00
 allowed_integration_paths=(
   "backlog/tasks/ds-005.02 - Establish-repeatable-integration-merge-and-conflict-gates.md"
   "backlog/tasks/ds-005.02.01 - Pin-semantic-merge-identity-in-topology-gates.md"
   "backlog/tasks/ds-005.02.02 - Accept-semantically-identical-merge-replays.md"
+  "backlog/tasks/ds-005.02.03 - Pin-approved-post-merge-gate-blobs.md"
   Makefile
   scripts/check_branch_topology.sh
   scripts/merge_integration.sh
@@ -83,6 +86,16 @@ for i in "${!merges[@]}"; do
 done
 
 final_feature_merge=${merges[2]}
+if [[ $revision != "$final_feature_merge" ]]; then
+  makefile_blob=$(git rev-parse --verify "$revision:Makefile" 2>/dev/null) ||
+    die "revision has no Makefile"
+  [[ $makefile_blob == "$approved_makefile_blob" ]] ||
+    die "post-merge Makefile blob is $makefile_blob, expected $approved_makefile_blob"
+  merge_helper_blob=$(git rev-parse --verify "$revision:scripts/merge_integration.sh" 2>/dev/null) ||
+    die "revision has no merge replay helper"
+  [[ $merge_helper_blob == "$approved_merge_helper_blob" ]] ||
+    die "post-merge replay helper blob is $merge_helper_blob, expected $approved_merge_helper_blob"
+fi
 
 expected=$(mktemp "${TMPDIR:-/tmp}/ds005-expected.XXXXXX")
 actual=$(mktemp "${TMPDIR:-/tmp}/ds005-actual.XXXXXX")
