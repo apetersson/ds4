@@ -182,6 +182,11 @@ typedef struct {
     bool load_output;
     ds4_distributed_options distributed;
     ds4_tp_options tp;
+#ifdef DS4_TEST_HOOKS
+    /* Test binaries may inspect metadata-only GGUF fixtures without weakening
+     * the release --inspect path's required tensor/layout validation. */
+    bool test_metadata_only_inspect;
+#endif
 } ds4_engine_options;
 
 typedef void (*ds4_token_emit_fn)(void *ud, int token);

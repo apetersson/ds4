@@ -1419,6 +1419,12 @@ static bool manifest_validate_variant(manifest_json_parser *jp,
     if (variant->has_dspark && !manifest_same_directory(variant->directory, variant->dspark.path)) {
         return json_fail(jp, "variant '%s' DSpark artifact is outside its sibling directory", variant->selector);
     }
+    if (variant->has_dspark &&
+        strcmp(variant->receiver.profile, variant->dspark.profile)) {
+        return json_fail(jp,
+                         "variant '%s' receiver and DSpark profiles differ",
+                         variant->selector);
+    }
     if (!ds4_hf_llama_primary_selectable(variant->selector,
                                          variant->receiver.path)) {
         return json_fail(jp,

@@ -14218,6 +14218,12 @@ static server_config parse_options(int argc, char **argv) {
     c.vision.encoder = c.hf.vision_encoder;
     c.vision.tower = c.hf.vision_tower;
     c.vision.adapter = c.hf.vision_adapter;
+    if (c.engine.dspark && c.engine.ssd_streaming) {
+        server_log(DS4_LOG_DEFAULT,
+                   "ds4-server: --dspark is not compatible with "
+                   "--ssd-streaming; disable one before receiver allocation");
+        exit(2);
+    }
     char dist_err[256];
     if (ds4_dist_prepare_engine_options(&c.engine.distributed,
                                         &c.engine,
@@ -14270,11 +14276,6 @@ int main(int argc, char **argv) {
         cfg.hf.vision_source == DS4_HF_VISION_CATALOG ||
         cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT;
     ds4_hf_runtime hf_runtime = {0};
-    if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
-        server_log(DS4_LOG_DEFAULT,
-                   "ds4-server: catalog DSpark activation is not wired yet; use explicit --mtp FILE or omit --dspark");
-        return 2;
-    }
     if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
         char hf_err[512] = {0};
         if (!ds4_hf_runtime_prepare(&cfg.hf, &hf_runtime,
@@ -14306,17 +14307,38 @@ int main(int argc, char **argv) {
             cfg.vision.config_fd = hf_runtime_role_fd(
                 &hf_runtime, DS4_HF_ROLE_VISION_CONFIG);
         }
+        if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
+            cfg.engine.mtp_path = ds4_hf_runtime_open_path(
+                &hf_runtime, DS4_HF_ROLE_DSPARK);
+            if (!cfg.engine.mtp_path) {
+                server_log(DS4_LOG_DEFAULT,
+                           "ds4-server: HF runtime handoff did not verify the selected DSpark role");
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 2;
+            }
+        }
         const ds4_hf_acquisition_artifact *receiver = &hf_runtime.plan.artifacts[0];
+        const bool dspark_verified = ds4_hf_runtime_role_verified(
+            &hf_runtime, DS4_HF_ROLE_DSPARK);
+        const char *verified_roles =
+            hf_runtime.vision_bundle_verified && dspark_verified ?
+                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config,dspark]" :
+            hf_runtime.vision_bundle_verified ?
+                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
+            dspark_verified ? "[receiver,dspark]" : "[receiver]";
+        const char *support_source =
+            cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG ? "catalog" :
+            cfg.hf.dspark_source == DS4_HF_DSPARK_EXPLICIT_MTP ?
+                "explicit-mtp" : "none";
         server_log(DS4_LOG_DEFAULT,
-                   "ds4-server: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=%s dspark=%s",
+                   "ds4-server: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=%s dspark=%s support=%s",
                    hf_runtime.plan.repository, hf_runtime.plan.revision,
                    hf_runtime.plan.selector, receiver->repo_path,
-                   hf_runtime.vision_bundle_verified ?
-                       "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
-                       "[receiver]",
+                   verified_roles,
                    cfg.hf.vision_source == DS4_HF_VISION_CATALOG ?
                        "verified-pending-receiver" : "inactive",
-                   cfg.engine.dspark ? "requested" : "not-requested");
+                   cfg.engine.dspark ? "requested" : "not-requested",
+                   support_source);
     }
     if (vision_requested) {
         char vision_err[512] = {0};
@@ -14431,13 +14453,20 @@ int main(int argc, char **argv) {
     s.dspark_active = ds4_engine_has_dspark(engine);
     if (s.hf_repository) {
         const ds4_hf_acquisition_artifact *receiver = &s.hf_plan.artifacts[0];
+        const bool dspark_verified =
+            (s.hf_verified_roles &
+             (1u << (unsigned)DS4_HF_ROLE_DSPARK)) != 0;
+        const char *verified_roles =
+            s.hf_vision_verified && dspark_verified ?
+                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config,dspark]" :
+            s.hf_vision_verified ?
+                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
+            dspark_verified ? "[receiver,dspark]" : "[receiver]";
         server_log(DS4_LOG_DEFAULT,
                    "ds4-server: HF runtime repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=%s dspark=%s",
                    s.hf_plan.repository, s.hf_plan.revision,
                    s.hf_plan.selector, receiver->repo_path,
-                   s.hf_vision_verified ?
-                       "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
-                       "[receiver]",
+                   verified_roles,
                    s.vision_active ? "active" : "inactive",
                    s.dspark_active ? "active" : "inactive");
     }

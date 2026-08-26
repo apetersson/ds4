@@ -2059,6 +2059,12 @@ static cli_config parse_options(int argc, char **argv) {
         fprintf(stderr, "ds4: %s\n", hf_err);
         exit(2);
     }
+    if (c.engine.dspark && c.engine.ssd_streaming) {
+        fprintf(stderr,
+                "ds4: --dspark is not compatible with --ssd-streaming; "
+                "disable one before receiver allocation\n");
+        exit(2);
+    }
     char tp_err[256];
     if (!ds4_tp_adopt_distributed_options(&c.engine.tp, c.dist,
                                           tp_err, sizeof(tp_err))) {
@@ -2080,15 +2086,11 @@ static cli_config parse_options(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     cli_config cfg = parse_options(argc, argv);
+#ifdef DS4_TEST_HOOKS
+    cfg.engine.test_metadata_only_inspect = cfg.inspect;
+#endif
     ds4_hf_runtime hf_runtime = {0};
     if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
-        if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
-            fprintf(stderr,
-                    "ds4: catalog DSpark activation is not wired yet; use explicit --mtp FILE or omit --dspark\n");
-            ds4_dist_options_free(cfg.dist);
-            free(cfg.prompt_owned);
-            return 2;
-        }
         char hf_err[512] = {0};
         if (!ds4_hf_runtime_prepare(&cfg.hf, &hf_runtime,
                                     hf_err, sizeof(hf_err))) {
@@ -2100,12 +2102,32 @@ int main(int argc, char **argv) {
         }
         cfg.engine.model_path = ds4_hf_runtime_open_path(
             &hf_runtime, DS4_HF_ROLE_RECEIVER);
+        if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
+            cfg.engine.mtp_path = ds4_hf_runtime_open_path(
+                &hf_runtime, DS4_HF_ROLE_DSPARK);
+            if (!cfg.engine.mtp_path) {
+                fprintf(stderr,
+                        "ds4: HF runtime handoff did not verify the selected DSpark role\n");
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                ds4_dist_options_free(cfg.dist);
+                free(cfg.prompt_owned);
+                return 2;
+            }
+        }
         const ds4_hf_acquisition_artifact *receiver = &hf_runtime.plan.artifacts[0];
+        const bool dspark_verified = ds4_hf_runtime_role_verified(
+            &hf_runtime, DS4_HF_ROLE_DSPARK);
+        const char *support_source =
+            cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG ? "catalog" :
+            cfg.hf.dspark_source == DS4_HF_DSPARK_EXPLICIT_MTP ?
+                "explicit-mtp" : "none";
         fprintf(stderr,
-                "ds4: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=[receiver] vision=inactive dspark=%s\n",
+                "ds4: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=inactive dspark=%s support=%s\n",
                 hf_runtime.plan.repository, hf_runtime.plan.revision,
                 hf_runtime.plan.selector, receiver->repo_path,
-                cfg.engine.dspark ? "requested" : "not-requested");
+                dspark_verified ? "[receiver,dspark]" : "[receiver]",
+                cfg.engine.dspark ? "requested" : "not-requested",
+                support_source);
     }
     if (cfg.gen.dump_tokens) {
         if (cfg.gen.prompt == NULL) {
@@ -2179,9 +2201,12 @@ int main(int argc, char **argv) {
         const ds4_hf_acquisition_artifact *receiver =
             &hf_runtime.plan.artifacts[0];
         fprintf(stderr,
-                "ds4: HF runtime repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=[receiver] vision=inactive dspark=%s\n",
+                "ds4: HF runtime repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=inactive dspark=%s\n",
                 hf_runtime.plan.repository, hf_runtime.plan.revision,
                 hf_runtime.plan.selector, receiver->repo_path,
+                ds4_hf_runtime_role_verified(&hf_runtime,
+                                             DS4_HF_ROLE_DSPARK) ?
+                    "[receiver,dspark]" : "[receiver]",
                 ds4_engine_has_dspark(engine) ? "active" : "inactive");
     }
     cli_apply_model_sampling_defaults(engine, &cfg.gen);

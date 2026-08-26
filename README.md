@@ -227,10 +227,10 @@ GGUF of about 5.6 GiB. It is not a standalone model. Download it once:
 The support file can be used with the 0731 Flash `ds4f-q2`, `ds4f-q2-q4`, and
 `ds4f-q4` models listed above. It is checkpoint-specific
 and must not be paired with an older Flash model. For now **DeepSeek V4 PRO**
-is not supported. On Metal, the main model may be resident or use
-`--ssd-streaming`; the support model still adds its own weights and runtime
-state to the memory requirement. DSpark replaces the legacy one-stage MTP
-support model for that run rather than stacking with it.
+is not supported. The current DSpark runtime is not compatible with
+`--ssd-streaming`; the combination is rejected before receiver allocation.
+DSpark replaces the legacy one-stage MTP support model for that run rather than
+stacking with it.
 
 Run it with the normal sampling defaults:
 
@@ -241,6 +241,11 @@ Run it with the normal sampling defaults:
 ```
 
 `--mtp` supplies the support GGUF, while `--dspark` selects the DSpark runtime.
+With `-hf REPO:SELECTOR --dspark`, omitting `--mtp` downloads and uses only the
+selected variant's declared lowercase same-directory `dspark-` companion. An
+explicit `--mtp FILE` takes precedence: it is the only support model used and
+the catalog DSpark role is not downloaded.
+
 The default confidence threshold is `0.6` on Metal and `0.7` on CUDA and ROCm.
 It prunes suffixes that are unlikely to repay their verification cost.
 `--dspark-confidence 0` forces fixed five-token blocks and is intended for
