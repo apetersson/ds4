@@ -39,11 +39,13 @@ for bin in ./ds4 ./ds4-server; do
 
     for alias in -hf -hfr --hf-repo --hf; do
         run_fail "$name accepts $alias llama.cpp-style selector" \
-            "Hugging Face selection is valid" \
+            "HF network failure" \
+            env HF_ENDPOINT=http://127.0.0.1:1 \
             "$bin" "$alias" ggml-org/GLM-4.7-Flash-GGUF:Q4_K_M
     done
     run_fail "$name accepts exact HF file override" \
-        "Hugging Face selection is valid" \
+        "HF network failure" \
+        env HF_ENDPOINT=http://127.0.0.1:1 \
         "$bin" -hf owner/repo:Q4_K_M -hff nested/model-Q8_0.gguf
     run_fail "$name rejects local/HF receiver conflict before allocation" \
         "mutually exclusive" \
@@ -61,15 +63,15 @@ for bin in ./ds4 ./ds4-server; do
         "missing value for --hf" \
         "$bin" --hf --offline
     run_fail "$name accepts offline alias" \
-        "Hugging Face selection is valid" \
+        "offline manifest reuse" \
         "$bin" --hf owner/repo --hf-offline
 
-    if HF_TOKEN=environment-secret HF_ENDPOINT=https://hf.example.test \
+    if HF_TOKEN=environment-secret HF_ENDPOINT=http://127.0.0.1:1 \
         "$bin" --hf owner/repo --hf-token cli-super-secret >"$log" 2>&1; then
         fail "$name token precedence probe unexpectedly succeeded"
     elif grep -q "cli-super-secret\|environment-secret" "$log"; then
         fail "$name leaked an HF token"
-    elif grep -q "Hugging Face selection is valid" "$log"; then
+    elif grep -q "HF network failure" "$log"; then
         ok "$name accepts token/endpoint configuration without leaking"
     else
         fail "$name token precedence probe returned the wrong diagnostic"
@@ -83,10 +85,11 @@ for option in --no-vision --vision-python --vision-encoder --vision-tower --visi
 done
 
 run_fail "server --no-vision disables catalog planning" \
-    "Hugging Face selection is valid" \
+    "HF network failure" \
+    env HF_ENDPOINT=http://127.0.0.1:1 \
     ./ds4-server --hf owner/repo:Headroom128 --no-vision
 run_fail "server accepts complete explicit vision override" \
-    "Hugging Face selection is valid" \
+    "explicit vision configuration is valid" \
     ./ds4-server --hf owner/repo \
         --vision-python /usr/bin/python3 \
         --vision-encoder /opt/local/encoder.py \
@@ -103,7 +106,7 @@ run_fail "server rejects explicit vision with --no-vision" \
         --vision-tower /models/tower.safetensors \
         --vision-adapter /models/adapter.safetensors
 run_fail "server accepts explicit DSpark catalog opt-in" \
-    "Hugging Face selection is valid" \
+    "catalog DSpark activation is not wired yet" \
     ./ds4-server --hf owner/repo --dspark
 run_fail "server rejects DSpark without a support source" \
     "requires either explicit --mtp" \

@@ -8445,6 +8445,12 @@ static void id_list_push_unique(stop_list *ids, const char *id);
 
 struct server {
     ds4_engine *engine;
+    ds4_hf_acquisition_plan hf_plan;
+    uint32_t hf_verified_roles;
+    bool hf_repository;
+    bool hf_vision_verified;
+    bool vision_active;
+    bool dspark_active;
     server_slot *slots;
     int slot_count;
     int ctx_size;
@@ -12649,12 +12655,53 @@ static void append_model_json_values(buf *b, const char *id, const char *name,
         max_completion);
 }
 
+static void append_hf_catalog_json(buf *b, const server *s) {
+    if (!s->hf_repository || b->len == 0 || b->ptr[b->len - 1] != '}') return;
+
+    const ds4_hf_acquisition_artifact *receiver = NULL;
+    b->ptr[--b->len] = '\0';
+    buf_puts(b, ",\"hf_catalog\":{\"repository\":");
+    json_escape(b, s->hf_plan.repository);
+    buf_puts(b, ",\"revision\":");
+    json_escape(b, s->hf_plan.revision);
+    buf_puts(b, ",\"selector\":");
+    json_escape(b, s->hf_plan.selector);
+    for (size_t i = 0; i < s->hf_plan.artifact_count; i++) {
+        if (s->hf_plan.artifacts[i].role == DS4_HF_ROLE_RECEIVER) {
+            receiver = &s->hf_plan.artifacts[i];
+            break;
+        }
+    }
+    buf_puts(b, ",\"receiver_gguf\":");
+    json_escape(b, receiver ? receiver->repo_path : "");
+    buf_puts(b, ",\"verified_companion_roles\":[");
+    bool first = true;
+    for (size_t i = 0; i < s->hf_plan.artifact_count; i++) {
+        const ds4_hf_acquisition_artifact *artifact =
+            &s->hf_plan.artifacts[i];
+        if (artifact->role == DS4_HF_ROLE_RECEIVER ||
+            !(s->hf_verified_roles & (1u << (unsigned)artifact->role))) continue;
+        if (!first) buf_putc(b, ',');
+        json_escape(b, ds4_hf_artifact_role_name(artifact->role));
+        first = false;
+    }
+    buf_printf(b,
+               "],\"vision_bundle_verified\":%s,\"vision_active\":%s,"
+               "\"dspark_active\":%s,\"multimodal\":%s}",
+               s->hf_vision_verified ? "true" : "false",
+               s->vision_active ? "true" : "false",
+               s->dspark_active ? "true" : "false",
+               s->vision_active ? "true" : "false");
+    buf_putc(b, '}');
+}
+
 static void append_model_json(buf *b, const server *s, const char *id) {
     append_model_json_values(b,
                              id,
                              ds4_engine_model_name(s->engine),
                              s->ctx_size,
                              s->default_tokens);
+    append_hf_catalog_json(b, s);
 }
 
 static bool send_model(server *s, int fd, const char *id) {
@@ -13339,19 +13386,42 @@ int main(int argc, char **argv) {
     sigaction(SIGTERM, &sa, NULL);
 
     server_config cfg = parse_options(argc, argv);
-    if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
-        server_log(DS4_LOG_DEFAULT,
-                   "ds4-server: Hugging Face selection is valid, but repository resolution is not available in this build");
-        return 2;
-    }
+    ds4_hf_runtime hf_runtime = {0};
     if (cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT) {
         server_log(DS4_LOG_DEFAULT,
                    "ds4-server: explicit vision configuration is valid, but vision wiring is not available in this build");
         return 2;
     }
+    if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
+        server_log(DS4_LOG_DEFAULT,
+                   "ds4-server: catalog DSpark activation is not wired yet; use explicit --mtp FILE or omit --dspark");
+        return 2;
+    }
+    if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
+        char hf_err[512] = {0};
+        if (!ds4_hf_runtime_prepare(&cfg.hf, &hf_runtime,
+                                    hf_err, sizeof(hf_err))) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s",
+                       hf_err[0] ? hf_err :
+                                   "Hugging Face receiver preparation failed");
+            return 2;
+        }
+        cfg.engine.model_path = ds4_hf_runtime_open_path(
+            &hf_runtime, DS4_HF_ROLE_RECEIVER);
+        const ds4_hf_acquisition_artifact *receiver = &hf_runtime.plan.artifacts[0];
+        server_log(DS4_LOG_DEFAULT,
+                   "ds4-server: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=inactive dspark=%s",
+                   hf_runtime.plan.repository, hf_runtime.plan.revision,
+                   hf_runtime.plan.selector, receiver->repo_path,
+                   hf_runtime.vision_bundle_verified ?
+                       "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
+                       "[receiver]",
+                   cfg.engine.dspark ? "active" : "inactive");
+    }
     if (cfg.chdir_path && chdir(cfg.chdir_path) != 0) {
         server_log(DS4_LOG_DEFAULT, "ds4-server: failed to chdir to %s: %s",
                    cfg.chdir_path, strerror(errno));
+        ds4_hf_runtime_close_verified(&hf_runtime);
         return 1;
     }
 
@@ -13369,11 +13439,15 @@ int main(int argc, char **argv) {
                                &gpu_cfg, &skip_cuda,
                                gpu_err, sizeof(gpu_err)) != 0) {
             fprintf(stderr, "ds4-server: %s\n", gpu_err);
+            ds4_hf_runtime_close_verified(&hf_runtime);
             return 2;
         }
         cfg.engine.backend = skip_cuda ? DS4_BACKEND_CPU : DS4_BACKEND_CUDA;
         if (skip_cuda) {
-            if (ds4_engine_open(&engine, &cfg.engine) != 0) return 1;
+            if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 1;
+            }
         } else {
             const bool was_auto =
                 (cfg.gpu_vram_arg && !strcmp(cfg.gpu_vram_arg, "auto")) ||
@@ -13385,11 +13459,16 @@ int main(int argc, char **argv) {
                 fflush(stdout);
             }
             if (ds4_engine_create_with_gpu_config(
-                    &engine, &cfg.engine, &gpu_cfg) != 0) return 1;
+                    &engine, &cfg.engine, &gpu_cfg) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 1;
+            }
         }
     } else if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+        ds4_hf_runtime_close_verified(&hf_runtime);
         return 1;
     }
+    ds4_hf_runtime_close_verified(&hf_runtime);
 
     if (cfg.engine.distributed.role == DS4_DISTRIBUTED_WORKER) {
         ds4_dist_generation_options gen = {
@@ -13409,6 +13488,14 @@ int main(int argc, char **argv) {
 
     server s = {0};
     s.engine = engine;
+    s.hf_repository = hf_runtime.repository;
+    s.hf_plan = hf_runtime.plan;
+    s.hf_verified_roles = hf_runtime.verified_roles;
+    s.hf_vision_verified = hf_runtime.vision_bundle_verified;
+    /* DS-001.11 wires the trusted encoder sidecar; verified files alone do
+     * not make image requests executable or advertise multimodal support. */
+    s.vision_active = false;
+    s.dspark_active = cfg.engine.dspark;
     s.ctx_size = cfg.ctx_size;
     s.slot_count = slot_count;
     s.batched_mode = cfg.batched_sessions > 0;
@@ -16955,6 +17042,62 @@ static void test_model_metadata_clamps_completion_to_context(void) {
     buf_free(&b);
 }
 
+static void test_hf_model_metadata_is_complete_and_capability_gated(void) {
+    server s = {0};
+    s.hf_repository = true;
+    snprintf(s.hf_plan.repository, sizeof(s.hf_plan.repository),
+             "%s", "owner/repo");
+    snprintf(s.hf_plan.revision, sizeof(s.hf_plan.revision),
+             "%s", "0123456789abcdef0123456789abcdef01234567");
+    snprintf(s.hf_plan.selector, sizeof(s.hf_plan.selector),
+             "%s", "Headroom128");
+    s.hf_plan.artifact_count = 4;
+    s.hf_plan.artifacts[0].role = DS4_HF_ROLE_RECEIVER;
+    snprintf(s.hf_plan.artifacts[0].repo_path,
+             sizeof(s.hf_plan.artifacts[0].repo_path),
+             "%s", "Headroom128/receiver.gguf");
+    s.hf_plan.artifacts[1].role = DS4_HF_ROLE_VISION_TOWER;
+    s.hf_plan.artifacts[2].role = DS4_HF_ROLE_VISION_PROJECTOR;
+    s.hf_plan.artifacts[3].role = DS4_HF_ROLE_VISION_CONFIG;
+    s.hf_verified_roles = (1u << DS4_HF_ROLE_RECEIVER) |
+                          (1u << DS4_HF_ROLE_VISION_TOWER) |
+                          (1u << DS4_HF_ROLE_VISION_PROJECTOR) |
+                          (1u << DS4_HF_ROLE_VISION_CONFIG);
+    s.hf_vision_verified = true;
+
+    buf b = {0};
+    append_model_json_values(&b, "deepseek-v4-flash", "DeepSeek V4 Flash",
+                             32768, 4096);
+    append_hf_catalog_json(&b, &s);
+    TEST_ASSERT(strstr(b.ptr, "\"repository\":\"owner/repo\"") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"revision\":\"0123456789abcdef0123456789abcdef01234567\"") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"selector\":\"Headroom128\"") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"receiver_gguf\":\"Headroom128/receiver.gguf\"") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"verified_companion_roles\":[\"ds4_vision.tower\",\"ds4_vision.projector\",\"ds4_vision.config\"]") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"vision_bundle_verified\":true") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"vision_active\":false") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"dspark_active\":false") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"multimodal\":false") != NULL);
+    buf_free(&b);
+
+    s.vision_active = true;
+    append_model_json_values(&b, "deepseek-v4-flash", "DeepSeek V4 Flash",
+                             32768, 4096);
+    append_hf_catalog_json(&b, &s);
+    TEST_ASSERT(strstr(b.ptr, "\"vision_active\":true") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"multimodal\":true") != NULL);
+    buf_free(&b);
+
+    s.hf_repository = false;
+    append_model_json_values(&b, "deepseek-v4-flash", "DeepSeek V4 Flash",
+                             32768, 4096);
+    size_t local_len = b.len;
+    append_hf_catalog_json(&b, &s);
+    TEST_ASSERT(b.len == local_len);
+    TEST_ASSERT(strstr(b.ptr, "hf_catalog") == NULL);
+    buf_free(&b);
+}
+
 static void test_live_prefix_rewind_target(void) {
     TEST_ASSERT(live_prefix_rewind_target(true, 17, 8, 8) == 7);
     TEST_ASSERT(live_prefix_rewind_target(true, 49826, 48379, 48379) == 48378);
@@ -18436,6 +18579,7 @@ static void ds4_server_unit_tests_run(void) {
     test_json_int_handles_non_finite_values();
     test_tool_history_validation_handles_large_replays();
     test_model_metadata_clamps_completion_to_context();
+    test_hf_model_metadata_is_complete_and_capability_gated();
     test_live_prefix_rewind_target();
     test_client_socket_nonblocking_flag();
     test_client_disconnect_probe();

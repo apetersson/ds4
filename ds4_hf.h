@@ -318,6 +318,19 @@ typedef struct {
     ds4_hf_acquisition_artifact artifacts[DS4_HF_ACQUISITION_MAX_ARTIFACTS];
 } ds4_hf_acquisition_plan;
 
+/* Launch-scoped, verified handoff from repository selection to a frontend.
+ * Requested artifacts stay open until the frontend has opened/mapped the
+ * receiver (and any companion it actually supports).  open_paths name the
+ * held descriptors, never the mutable cache directory entries. */
+typedef struct {
+    ds4_hf_acquisition_plan plan;
+    uint32_t verified_roles;
+    int verified_fds[DS4_HF_ACQUISITION_MAX_ARTIFACTS];
+    char open_paths[DS4_HF_ACQUISITION_MAX_ARTIFACTS][64];
+    bool repository;
+    bool vision_bundle_verified;
+} ds4_hf_runtime;
+
 /* Select one manifest variant and derive revision-pinned cache destinations.
  * Catalog vision and DSpark follow cfg's validated runtime sources. The mmproj
  * is metadata-only unless materialize_llama_cpp_mmproj is explicitly true. */
@@ -352,6 +365,25 @@ bool ds4_hf_acquisition_open_verified(
     int *fd_out,
     char *err,
     size_t errlen);
+
+/* Resolve one immutable repository revision, fetch and parse its bounded
+ * variants.json, acquire only runtime-requested roles, then hold verified
+ * descriptors for the frontend.  All HF network activity for a successful
+ * launch is complete when this function returns. */
+bool ds4_hf_runtime_prepare(const ds4_hf_cli_config *cfg,
+                            ds4_hf_runtime *runtime,
+                            char *err,
+                            size_t errlen);
+
+/* Return the descriptor path for a verified requested role, or NULL. */
+const char *ds4_hf_runtime_open_path(const ds4_hf_runtime *runtime,
+                                     ds4_hf_artifact_role role);
+
+/* Close held handoff descriptors without discarding immutable diagnostics. */
+void ds4_hf_runtime_close_verified(ds4_hf_runtime *runtime);
+
+bool ds4_hf_runtime_role_verified(const ds4_hf_runtime *runtime,
+                                  ds4_hf_artifact_role role);
 
 const char *ds4_hf_artifact_role_name(ds4_hf_artifact_role role);
 

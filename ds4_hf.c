@@ -2092,6 +2092,112 @@ const char *ds4_hf_artifact_role_name(ds4_hf_artifact_role role) {
     return "unknown";
 }
 
+static bool manifest_download(const ds4_hf_cli_config *cfg,
+                              const ds4_hf_resolved_repo *resolved,
+                              char **json_out,
+                              size_t *json_len_out,
+                              char *err,
+                              size_t errlen) {
+    *json_out = NULL;
+    *json_len_out = 0;
+    if (cfg->offline) {
+        return fail(err, errlen,
+                    "HF offline manifest reuse is not available yet; provide network access or use --model with the verified cached receiver");
+    }
+
+    char url[DS4_HF_URL_MAX];
+    if (!ds4_hf_resolved_file_url(resolved, "variants.json", url,
+                                  sizeof(url), err, errlen)) return false;
+
+    char token[HF_TOKEN_MAX];
+    bool have_token = discover_token(cfg, token);
+    if (cfg->token && cfg->token[0] && !have_token) {
+        return fail(err, errlen, "HF credential is too long");
+    }
+
+    hf_http_response response = {0};
+    response.data = malloc(HF_RESPONSE_MAX + 1u);
+    if (!response.data) {
+        secure_clear(token, sizeof(token));
+        return fail(err, errlen, "HF manifest download ran out of memory");
+    }
+    response.data[0] = '\0';
+
+    CURL *curl = curl_easy_init();
+    struct curl_slist *headers = NULL;
+    if (!curl) {
+        free(response.data);
+        secure_clear(token, sizeof(token));
+        return fail(err, errlen, "HF manifest transport initialization failed");
+    }
+    if (have_token) {
+        size_t token_len = strlen(token);
+        char *authorization = malloc(token_len + sizeof("Authorization: Bearer "));
+        if (!authorization) {
+            curl_easy_cleanup(curl);
+            free(response.data);
+            secure_clear(token, sizeof(token));
+            return fail(err, errlen, "HF manifest authentication setup ran out of memory");
+        }
+        snprintf(authorization, token_len + sizeof("Authorization: Bearer "),
+                 "Authorization: Bearer %s", token);
+        headers = curl_slist_append(headers, authorization);
+        secure_clear(authorization,
+                     token_len + sizeof("Authorization: Bearer "));
+        free(authorization);
+        if (!headers) {
+            curl_easy_cleanup(curl);
+            free(response.data);
+            secure_clear(token, sizeof(token));
+            return fail(err, errlen, "HF manifest authentication setup ran out of memory");
+        }
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, response_body_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, response_header_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "ds4-hf-resolver/1");
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 30000L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, 30000L);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
+    curl_easy_setopt(curl, CURLOPT_UNRESTRICTED_AUTH, 0L);
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS,
+                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS,
+                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    CURLcode curl_status = curl_easy_perform(curl);
+    long http_status = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_status);
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    secure_clear(token, sizeof(token));
+
+    if (curl_status != CURLE_OK || response.too_large ||
+        response.len > DS4_HF_MANIFEST_MAX_BYTES || http_status != 200) {
+        bool too_large = response.too_large ||
+                         response.len > DS4_HF_MANIFEST_MAX_BYTES;
+        free(response.data);
+        if (too_large) {
+            return fail(err, errlen,
+                        "HF manifest exceeds the %u-byte bounded parser limit for repository '%s' revision '%s'",
+                        DS4_HF_MANIFEST_MAX_BYTES, resolved->repo,
+                        resolved->commit);
+        }
+        return fail(err, errlen,
+                    "HF manifest download failed for repository '%s' revision '%s' (curl=%s, HTTP=%ld)",
+                    resolved->repo, resolved->commit,
+                    curl_easy_strerror(curl_status), http_status);
+    }
+    *json_out = response.data;
+    *json_len_out = response.len;
+    return true;
+}
+
 typedef struct {
     uint32_t state[8];
     uint64_t bytes;
@@ -3252,4 +3358,108 @@ bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
     }
     secure_clear(token, sizeof(token));
     return ok;
+}
+
+void ds4_hf_runtime_close_verified(ds4_hf_runtime *runtime) {
+    if (!runtime || !runtime->repository) return;
+    for (size_t i = 0; i < DS4_HF_ACQUISITION_MAX_ARTIFACTS; i++) {
+        if (runtime->verified_fds[i] >= 0) close(runtime->verified_fds[i]);
+        runtime->verified_fds[i] = -1;
+        runtime->open_paths[i][0] = '\0';
+    }
+}
+
+bool ds4_hf_runtime_role_verified(const ds4_hf_runtime *runtime,
+                                  ds4_hf_artifact_role role) {
+    return runtime && role >= DS4_HF_ROLE_RECEIVER &&
+           role <= DS4_HF_ROLE_DSPARK &&
+           (runtime->verified_roles & (1u << (unsigned)role)) != 0;
+}
+
+const char *ds4_hf_runtime_open_path(const ds4_hf_runtime *runtime,
+                                     ds4_hf_artifact_role role) {
+    if (!ds4_hf_runtime_role_verified(runtime, role)) return NULL;
+    for (size_t i = 0; i < runtime->plan.artifact_count; i++) {
+        if (runtime->plan.artifacts[i].role == role &&
+            runtime->open_paths[i][0]) return runtime->open_paths[i];
+    }
+    return NULL;
+}
+
+bool ds4_hf_runtime_prepare(const ds4_hf_cli_config *cfg,
+                            ds4_hf_runtime *runtime,
+                            char *err,
+                            size_t errlen) {
+    if (!runtime) return fail(err, errlen, "invalid HF runtime handoff");
+    memset(runtime, 0, sizeof(*runtime));
+    for (size_t i = 0; i < DS4_HF_ACQUISITION_MAX_ARTIFACTS; i++) {
+        runtime->verified_fds[i] = -1;
+    }
+    if (!cfg || cfg->receiver_source != DS4_HF_RECEIVER_REPOSITORY) {
+        return fail(err, errlen, "HF runtime handoff requires a repository receiver");
+    }
+    if (cfg->offline) {
+        return fail(err, errlen,
+                    "HF offline manifest reuse is not available yet; provide network access or use --model with the verified cached receiver");
+    }
+
+    ds4_hf_resolved_repo resolved;
+    ds4_hf_resolve_status status = ds4_hf_resolve_repository(
+        cfg, 30000L, &resolved, err, errlen);
+    if (status != DS4_HF_RESOLVE_OK) return false;
+
+    char *manifest_json = NULL;
+    size_t manifest_len = 0;
+    ds4_hf_manifest manifest;
+    if (!manifest_download(cfg, &resolved, &manifest_json, &manifest_len,
+                           err, errlen)) return false;
+    bool parsed = ds4_hf_manifest_parse(manifest_json, manifest_len, &manifest,
+                                        err, errlen);
+    free(manifest_json);
+    if (!parsed) return false;
+    if (!ds4_hf_acquisition_plan_build(cfg, &resolved, &manifest, false,
+                                       &runtime->plan, err, errlen) ||
+        !ds4_hf_acquisition_execute(cfg, &runtime->plan, 0, err, errlen)) {
+        return false;
+    }
+
+    runtime->repository = true;
+    for (size_t i = 0; i < runtime->plan.artifact_count; i++) {
+        const ds4_hf_acquisition_artifact *artifact =
+            &runtime->plan.artifacts[i];
+        if (!artifact->requested) continue;
+        int fd = -1;
+        if (!ds4_hf_acquisition_open_verified(&runtime->plan, i, &fd,
+                                              err, errlen)) {
+            ds4_hf_runtime_close_verified(runtime);
+            return false;
+        }
+        runtime->verified_fds[i] = fd;
+#if defined(__linux__)
+        int written = snprintf(runtime->open_paths[i],
+                               sizeof(runtime->open_paths[i]),
+                               "/proc/self/fd/%d", fd);
+#else
+        int written = snprintf(runtime->open_paths[i],
+                               sizeof(runtime->open_paths[i]),
+                               "/dev/fd/%d", fd);
+#endif
+        if (written <= 0 ||
+            (size_t)written >= sizeof(runtime->open_paths[i])) {
+            ds4_hf_runtime_close_verified(runtime);
+            return fail(err, errlen,
+                        "HF verified descriptor path is unavailable");
+        }
+        runtime->verified_roles |= 1u << (unsigned)artifact->role;
+    }
+    runtime->vision_bundle_verified =
+        ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_VISION_TOWER) &&
+        ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_VISION_PROJECTOR) &&
+        ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_VISION_CONFIG);
+    if (!ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_RECEIVER)) {
+        ds4_hf_runtime_close_verified(runtime);
+        return fail(err, errlen,
+                    "HF runtime handoff did not verify a receiver GGUF");
+    }
+    return true;
 }

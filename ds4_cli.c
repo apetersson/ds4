@@ -2080,22 +2080,44 @@ static cli_config parse_options(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     cli_config cfg = parse_options(argc, argv);
+    ds4_hf_runtime hf_runtime = {0};
     if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
+        if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
+            fprintf(stderr,
+                    "ds4: catalog DSpark activation is not wired yet; use explicit --mtp FILE or omit --dspark\n");
+            ds4_dist_options_free(cfg.dist);
+            free(cfg.prompt_owned);
+            return 2;
+        }
+        char hf_err[512] = {0};
+        if (!ds4_hf_runtime_prepare(&cfg.hf, &hf_runtime,
+                                    hf_err, sizeof(hf_err))) {
+            fprintf(stderr, "ds4: %s\n",
+                    hf_err[0] ? hf_err : "Hugging Face receiver preparation failed");
+            ds4_dist_options_free(cfg.dist);
+            free(cfg.prompt_owned);
+            return 2;
+        }
+        cfg.engine.model_path = ds4_hf_runtime_open_path(
+            &hf_runtime, DS4_HF_ROLE_RECEIVER);
+        const ds4_hf_acquisition_artifact *receiver = &hf_runtime.plan.artifacts[0];
         fprintf(stderr,
-                "ds4: Hugging Face selection is valid, but repository resolution is not available in this build\n");
-        ds4_dist_options_free(cfg.dist);
-        free(cfg.prompt_owned);
-        return 2;
+                "ds4: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=[receiver] vision=inactive dspark=%s\n",
+                hf_runtime.plan.repository, hf_runtime.plan.revision,
+                hf_runtime.plan.selector, receiver->repo_path,
+                cfg.engine.dspark ? "active" : "inactive");
     }
     if (cfg.gen.dump_tokens) {
         if (cfg.gen.prompt == NULL) {
             fprintf(stderr, "ds4: --dump-tokens requires -p or --prompt-file\n");
+            ds4_hf_runtime_close_verified(&hf_runtime);
             free(cfg.prompt_owned);
             return 2;
         }
         int rc = ds4_dump_text_tokenization(cfg.engine.model_path,
                                             cfg.gen.prompt,
                                             stdout);
+        ds4_hf_runtime_close_verified(&hf_runtime);
         ds4_dist_options_free(cfg.dist);
         free(cfg.prompt_owned);
         return rc;
@@ -2114,6 +2136,7 @@ int main(int argc, char **argv) {
                                &gpu_cfg, &skip_cuda,
                                errbuf, sizeof(errbuf)) != 0) {
             fprintf(stderr, "ds4: %s\n", errbuf);
+            ds4_hf_runtime_close_verified(&hf_runtime);
             ds4_dist_options_free(cfg.dist);
             free(cfg.prompt_owned);
             return 2;
@@ -2121,6 +2144,7 @@ int main(int argc, char **argv) {
         cfg.engine.backend = skip_cuda ? DS4_BACKEND_CPU : DS4_BACKEND_CUDA;
         if (skip_cuda) {
             if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
                 ds4_dist_options_free(cfg.dist);
                 free(cfg.prompt_owned);
                 return 1;
@@ -2137,16 +2161,20 @@ int main(int argc, char **argv) {
             }
             if (ds4_engine_create_with_gpu_config(&engine, &cfg.engine,
                                                    &gpu_cfg) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
                 ds4_dist_options_free(cfg.dist);
                 free(cfg.prompt_owned);
                 return 1;
             }
         }
     } else if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+        ds4_hf_runtime_close_verified(&hf_runtime);
         ds4_dist_options_free(cfg.dist);
         free(cfg.prompt_owned);
         return 1;
     }
+    /* The engine owns its duplicate file descriptor and mmap from here. */
+    ds4_hf_runtime_close_verified(&hf_runtime);
     cli_apply_model_sampling_defaults(engine, &cfg.gen);
     if (cfg.engine.tp.role == DS4_TP_WORKER) {
         int rc = ds4_tp_worker_run(engine, &cfg.engine.tp);
