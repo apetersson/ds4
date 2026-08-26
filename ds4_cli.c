@@ -2054,7 +2054,7 @@ static cli_config parse_options(int argc, char **argv) {
     c.engine.mtp_path = c.hf.mtp_path;
     c.engine.dspark = c.engine.dspark || c.hf.dspark_requested;
     char hf_err[256];
-    if (!ds4_hf_cli_validate(&c.hf, model_explicit, c.engine.dspark,
+    if (!ds4_hf_cli_validate(&c.hf, false, model_explicit, c.engine.dspark,
                              hf_err, sizeof(hf_err))) {
         fprintf(stderr, "ds4: %s\n", hf_err);
         exit(2);

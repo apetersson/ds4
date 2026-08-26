@@ -13296,7 +13296,7 @@ static server_config parse_options(int argc, char **argv) {
     c.engine.mtp_path = c.hf.mtp_path;
     c.engine.dspark = c.engine.dspark || c.hf.dspark_requested;
     char hf_err[256];
-    if (!ds4_hf_cli_validate(&c.hf, model_explicit, c.engine.dspark,
+    if (!ds4_hf_cli_validate(&c.hf, true, model_explicit, c.engine.dspark,
                              hf_err, sizeof(hf_err))) {
         server_log(DS4_LOG_DEFAULT, "ds4-server: %s", hf_err);
         exit(2);

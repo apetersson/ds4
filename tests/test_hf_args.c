@@ -27,7 +27,7 @@ static bool parse_common(ds4_hf_cli_config *cfg, bool server,
             return false;
         }
     }
-    return ds4_hf_cli_validate(cfg, model_explicit, dspark_requested,
+    return ds4_hf_cli_validate(cfg, server, model_explicit, dspark_requested,
                                err, errlen);
 }
 
@@ -278,8 +278,9 @@ int main(void) {
         char err[256] = {0};
         bool ok = parse_common(&cfg, false, 3, argv, false, false,
                                err, sizeof(err));
-        CHECK("HF receiver alone preserves target-only behavior",
-              ok && cfg.dspark_source == DS4_HF_DSPARK_NONE);
+        CHECK("text-only ds4 plans neither vision nor DSpark companions",
+              ok && cfg.vision_source == DS4_HF_VISION_NONE &&
+              cfg.dspark_source == DS4_HF_DSPARK_NONE);
     }
 
     if (failures) {

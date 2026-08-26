@@ -209,6 +209,7 @@ ds4_hf_cli_parse_result ds4_hf_cli_parse_arg(ds4_hf_cli_config *cfg,
 }
 
 bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
+                         bool server,
                          bool model_explicit,
                          bool dspark_requested,
                          char *err,
@@ -247,7 +248,7 @@ bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
     }
     if (cfg->no_vision) cfg->vision_source = DS4_HF_VISION_DISABLED;
     else if (vision_count == 4) cfg->vision_source = DS4_HF_VISION_EXPLICIT;
-    else if (have_repo) cfg->vision_source = DS4_HF_VISION_CATALOG;
+    else if (have_repo && server) cfg->vision_source = DS4_HF_VISION_CATALOG;
     else cfg->vision_source = DS4_HF_VISION_NONE;
 
     cfg->dspark_requested = cfg->dspark_requested || dspark_requested;

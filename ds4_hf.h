@@ -78,6 +78,7 @@ ds4_hf_cli_parse_result ds4_hf_cli_parse_arg(ds4_hf_cli_config *cfg,
 /* Resolve receiver and companion precedence after the frontend has parsed its
  * existing options. This performs no I/O and must run before model allocation. */
 bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
+                         bool server,
                          bool model_explicit,
                          bool dspark_requested,
                          char *err,
