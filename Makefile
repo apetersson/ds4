@@ -62,7 +62,7 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-mxfp4-quantizer-test dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+.PHONY: all help clean test test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-mxfp4-quantizer-test dspark-acceptance dspark-verify-depth mtp-verify-depth integration-merge-plan integration-topology integration-non-model-test integration-gates cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
@@ -488,6 +488,39 @@ test: ds4_test ds4_agent_test ds4-eval q4k-dot-test mxfp4-dot-test dspark-mxfp4-
 	./tests/test_gpu_args
 	./tests/test_gpu_args_cli.sh
 	./tests/test_sampling
+
+integration-merge-plan:
+	./scripts/merge_integration.sh --check
+
+integration-topology:
+	./scripts/check_branch_topology.sh HEAD
+
+integration-non-model-test:
+	$(MAKE) -B cpu
+	$(MAKE) -B all
+	$(MAKE) -B ds4_test ds4_agent_test ds4-eval q4k-dot-test mxfp4-dot-test \
+		dspark-mxfp4-quantizer-test tests/test_layer_pack \
+		tests/test_engine_mgpu_placement tests/test_gpu_args $(SAMPLING_TEST)
+	./ds4-eval --self-test-extractors
+	./ds4_agent_test
+	./ds4_test --server
+	./tests/test_layer_pack
+	./tests/test_engine_mgpu_placement
+	./tests/test_gpu_args
+	./tests/test_gpu_args_cli.sh
+	./tests/test_sampling
+	python3 tests/test_dspark_support_verify.py
+	python3 -m py_compile gguf-tools/verify_dspark_support.py \
+		tests/test_dspark_support_verify.py tests/vision_revalidation.py \
+		tests/vision_revalidation_preflight.py
+	bash -n tests/run_vision_revalidation.sh scripts/merge_integration.sh \
+		scripts/check_branch_topology.sh
+
+ifeq ($(UNAME_S),Darwin)
+	$(MAKE) test-mxfp4-metal
+endif
+
+integration-gates: integration-merge-plan integration-topology integration-non-model-test
 
 tests/test_dspark_mxfp4_quantizer: tests/test_dspark_mxfp4_quantizer.c
 	$(CC) $(CFLAGS) -o $@ $<
