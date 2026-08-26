@@ -86,6 +86,7 @@ bool ds4_test_engine_dspark_active(bool requested,
                                    bool dspark_support,
                                    bool weights_complete,
                                    bool graph_backend,
+                                   bool graph_initialized,
                                    bool strict);
 
 /* DS4_N_LAYER constant is private to ds4.c; for the test we use
@@ -187,17 +188,19 @@ static void test_null_config(void) {
 
 static void test_effective_dspark_readiness(void) {
     fprintf(stderr, "RUN: test_effective_dspark_readiness\n");
-    CHECK(ds4_test_engine_dspark_active(true, true, true, true, false),
+    CHECK(ds4_test_engine_dspark_active(true, true, true, true, true, false),
           "complete requested DSpark support is active");
-    CHECK(!ds4_test_engine_dspark_active(false, true, true, true, false),
+    CHECK(!ds4_test_engine_dspark_active(false, true, true, true, true, false),
           "unrequested DSpark support is inactive");
-    CHECK(!ds4_test_engine_dspark_active(true, false, true, true, false),
+    CHECK(!ds4_test_engine_dspark_active(true, false, true, true, true, false),
           "legacy MTP support is not active DSpark");
-    CHECK(!ds4_test_engine_dspark_active(true, true, false, true, false),
+    CHECK(!ds4_test_engine_dspark_active(true, true, false, true, true, false),
           "incomplete DSpark weights are inactive");
-    CHECK(!ds4_test_engine_dspark_active(true, true, true, false, false),
+    CHECK(!ds4_test_engine_dspark_active(true, true, true, false, false, false),
           "CPU backend cannot activate DSpark");
-    CHECK(!ds4_test_engine_dspark_active(true, true, true, true, true),
+    CHECK(!ds4_test_engine_dspark_active(true, true, true, true, false, false),
+          "inspect-only graph configuration is inactive");
+    CHECK(!ds4_test_engine_dspark_active(true, true, true, true, true, true),
           "strict target-only mode does not advertise active DSpark");
 }
 

@@ -51236,6 +51236,7 @@ bool ds4_engine_has_mtp(ds4_engine *e) {
 
 bool ds4_engine_has_dspark(ds4_engine *e) {
     return e && e->backend != DS4_BACKEND_CPU &&
+           e->metal_ready &&
            e->distributed.role == DS4_DISTRIBUTED_NONE &&
            e->support_kind == DS4_SUPPORT_DSPARK &&
            e->dspark && !e->quality && !e->dspark_strict &&
@@ -57168,10 +57169,12 @@ bool ds4_test_engine_dspark_active(bool requested,
                                    bool dspark_support,
                                    bool weights_complete,
                                    bool graph_backend,
+                                   bool graph_initialized,
                                    bool strict) {
     ds4_engine eng;
     memset(&eng, 0, sizeof(eng));
     eng.backend = graph_backend ? DS4_BACKEND_METAL : DS4_BACKEND_CPU;
+    eng.metal_ready = graph_initialized;
     eng.support_kind = dspark_support ?
         DS4_SUPPORT_DSPARK : DS4_SUPPORT_MTP_LEGACY;
     eng.dspark = requested;
