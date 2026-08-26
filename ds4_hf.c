@@ -466,8 +466,9 @@ static bool discover_token(const ds4_hf_cli_config *cfg,
         return read_token_file(path, token);
     }
     const char *xdg = getenv("XDG_CACHE_HOME");
-    if (xdg && path_join(path, sizeof(path), xdg, "huggingface/token") &&
-        read_token_file(path, token)) return true;
+    if (xdg && path_join(path, sizeof(path), xdg, "huggingface/token")) {
+        return read_token_file(path, token);
+    }
     const char *home = getenv("HOME");
     if (home && path_join(path, sizeof(path), home, ".cache/huggingface/token")) {
         return read_token_file(path, token);

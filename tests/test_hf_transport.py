@@ -171,6 +171,20 @@ class TransportTests(unittest.TestCase):
                          [f"Bearer {SECRET}", f"Bearer {SECRET}"])
         self.assertTrue(all(SECRET not in path for path, _ in FakeHubHandler.requests))
 
+    def test_configured_xdg_cache_does_not_fall_back_to_legacy_home_token(self):
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as xdg:
+            legacy = Path(home, ".cache", "huggingface")
+            legacy.mkdir(parents=True)
+            Path(legacy, "token").write_text(SECRET + "\n", encoding="utf-8")
+            result = self.run_probe(
+                repo="owner/protected",
+                extra_env={"HOME": home, "XDG_CACHE_HOME": xdg},
+            )
+        self.assertEqual(self.values(result)["status"], "authentication_failed")
+        self.assertNotIn(SECRET, result.stdout + result.stderr)
+        self.assertEqual(FakeHubHandler.requests,
+                         [("/api/models/owner/protected", None)])
+
     def test_failure_classes_have_distinct_statuses_and_safe_diagnostics(self):
         cases = (
             ("owner/private", "-", 1000, "private_or_gated"),
