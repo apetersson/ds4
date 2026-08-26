@@ -1209,6 +1209,7 @@ bool ds4_hf_llama_gguf_metadata_valid(
         strcmp(metadata->mmproj_color_space, "RGB") ||
         strcmp(metadata->mmproj_crop_boundaries, "floor-proportional-v1") ||
         strcmp(metadata->mmproj_crop_order, "row-major") ||
+        strcmp(metadata->mmproj_crop_count_rule, "zero-or-2-through-4") ||
         strcmp(metadata->mmproj_grid_selection, "closest-aspect-ratio") ||
         strcmp(metadata->mmproj_grid_tie_break, "more-tiles") ||
         strcmp(metadata->mmproj_resize, "1024x1024-bicubic")) {

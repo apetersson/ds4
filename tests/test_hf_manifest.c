@@ -231,6 +231,7 @@ static void init_llama_metadata_fixture(ds4_hf_llama_gguf_metadata *metadata) {
     strcpy(metadata->mmproj_color_space, "RGB");
     strcpy(metadata->mmproj_crop_boundaries, "floor-proportional-v1");
     strcpy(metadata->mmproj_crop_order, "row-major");
+    strcpy(metadata->mmproj_crop_count_rule, "zero-or-2-through-4");
     strcpy(metadata->mmproj_grid_selection, "closest-aspect-ratio");
     strcpy(metadata->mmproj_grid_tie_break, "more-tiles");
     strcpy(metadata->mmproj_resize, "1024x1024-bicubic");
@@ -264,6 +265,11 @@ static void test_llama_metadata_without_manifest(void) {
     strcpy(headroom.mmproj_projector_type, "generic");
     CHECK("mmproj projector metadata mismatch is rejected independently",
           !ds4_hf_llama_gguf_metadata_valid(&headroom, err, sizeof(err)));
+    init_llama_metadata_fixture(&headroom);
+    strcpy(headroom.mmproj_crop_count_rule, "zero-through-4");
+    CHECK("mmproj crop-count metadata mismatch is rejected independently",
+          !ds4_hf_llama_gguf_metadata_valid(&headroom, err, sizeof(err)) &&
+          strstr(err, "DeepEncoderV2 DS4 routing"));
     init_llama_metadata_fixture(&headroom);
     strcpy(headroom.dspark_architecture, "clip");
     CHECK("DSpark metadata mismatch is rejected independently",
