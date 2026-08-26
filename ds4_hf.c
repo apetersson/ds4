@@ -3449,7 +3449,7 @@ bool ds4_hf_acquisition_probe_cache(ds4_hf_acquisition_plan *plan,
         artifact_cache_state state = artifact_cache_open(plan, artifact, &fd);
         if (fd >= 0) close(fd);
         artifact->cache_hit = state == ARTIFACT_CACHE_VALID;
-        if (state == ARTIFACT_CACHE_INVALID) {
+        if (state == ARTIFACT_CACHE_INVALID && artifact->requested) {
             return acquisition_context_fail(
                 err, errlen, plan, artifact,
                 "cache entry is present but is not a complete verified immutable role snapshot");
@@ -4124,6 +4124,7 @@ typedef struct {
     uint64_t ds4_vision;
     uint64_t ds4_vision_dspark;
     uint64_t llama_cpp_mmproj;
+    bool ds4_vision_dspark_available;
 } diagnostic_totals;
 
 static bool diagnostics_totals(const ds4_hf_diagnostics *diagnostics,
@@ -4134,6 +4135,7 @@ static bool diagnostics_totals(const ds4_hf_diagnostics *diagnostics,
     totals->ds4_vision = v->receiver.bytes;
     totals->ds4_vision_dspark = v->receiver.bytes;
     totals->llama_cpp_mmproj = v->receiver.bytes;
+    totals->ds4_vision_dspark_available = v->has_dspark;
     if (!add_total(&totals->ds4_vision, v->ds4_vision.tower.bytes) ||
         !add_total(&totals->ds4_vision, v->ds4_vision.projector.bytes) ||
         !add_total(&totals->ds4_vision_dspark, v->ds4_vision.tower.bytes) ||
@@ -4207,11 +4209,15 @@ static void print_json_dry_run(FILE *fp, const ds4_hf_cli_config *cfg,
                 ",\"selected_runtime_weight_bytes\":%" PRIu64
                 ",\"receiver_only_bytes\":%" PRIu64
                 ",\"ds4_receiver_vision_bytes\":%" PRIu64
-                ",\"ds4_receiver_vision_dspark_bytes\":%" PRIu64
-                ",\"llama_cpp_receiver_mmproj_bytes\":%" PRIu64 "}}\n",
+                ",\"ds4_receiver_vision_dspark_bytes\":",
                 totals.transfer, totals.selected_weights,
-                totals.receiver_only, totals.ds4_vision,
-                totals.ds4_vision_dspark, totals.llama_cpp_mmproj);
+                totals.receiver_only, totals.ds4_vision);
+        if (totals.ds4_vision_dspark_available)
+            fprintf(fp, "%" PRIu64, totals.ds4_vision_dspark);
+        else
+            fputs("null", fp);
+        fprintf(fp, ",\"llama_cpp_receiver_mmproj_bytes\":%" PRIu64 "}}\n",
+                totals.llama_cpp_mmproj);
     } else {
         fputs("],\"totals\":null}\n", fp);
     }
@@ -4245,11 +4251,15 @@ static void print_human_dry_run(FILE *fp, const ds4_hf_cli_config *cfg,
                 "\n  selected_runtime_weight_bytes: %" PRIu64
                 "\n  receiver_only_bytes: %" PRIu64
                 "\n  ds4_receiver_vision_bytes: %" PRIu64
-                "\n  ds4_receiver_vision_dspark_bytes: %" PRIu64
-                "\n  llama_cpp_receiver_mmproj_bytes: %" PRIu64 "\n",
+                "\n  ds4_receiver_vision_dspark_bytes: ",
                 totals.transfer, totals.selected_weights,
-                totals.receiver_only, totals.ds4_vision,
-                totals.ds4_vision_dspark, totals.llama_cpp_mmproj);
+                totals.receiver_only, totals.ds4_vision);
+        if (totals.ds4_vision_dspark_available)
+            fprintf(fp, "%" PRIu64, totals.ds4_vision_dspark);
+        else
+            fputs("unavailable", fp);
+        fprintf(fp, "\n  llama_cpp_receiver_mmproj_bytes: %" PRIu64 "\n",
+                totals.llama_cpp_mmproj);
     } else {
         fputs("totals: overflow\n", fp);
     }

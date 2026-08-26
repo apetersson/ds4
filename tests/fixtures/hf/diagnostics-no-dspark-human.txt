@@ -1,0 +1,22 @@
+HF dry run
+repository: owner/repo
+revision: 0123456789abcdef0123456789abcdef01234567
+selector: Headroom128-IQ2_XXS
+metadata_source: network
+selected_runtime: ds4-receiver+vision
+manifest_selection: yes
+llama_primary_filename: match
+llama_sibling_layout: match
+files:
+  receiver: path=Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf selected=yes cache=missing bytes=10
+  ds4_vision.tower: path=Headroom128-IQ2_XXS/DeepEncoderV2-BF16.safetensors selected=yes cache=missing bytes=5
+  ds4_vision.projector: path=Headroom128-IQ2_XXS/DeepSeek-V4-0731-Projector-BF16.safetensors selected=yes cache=missing bytes=7
+  ds4_vision.config: path=Headroom128-IQ2_XXS/upstream-config.json selected=yes cache=missing bytes=3
+  llama_cpp_mmproj: path=Headroom128-IQ2_XXS/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf selected=no cache=missing bytes=11
+totals:
+  transfer_bytes: 25
+  selected_runtime_weight_bytes: 22
+  receiver_only_bytes: 10
+  ds4_receiver_vision_bytes: 22
+  ds4_receiver_vision_dspark_bytes: unavailable
+  llama_cpp_receiver_mmproj_bytes: 21

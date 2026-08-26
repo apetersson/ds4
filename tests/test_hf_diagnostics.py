@@ -88,6 +88,8 @@ class HFDiagnosticsTests(unittest.TestCase):
         HubHandler.manifest = json.dumps(
             manifest, separators=(",", ":"), sort_keys=True
         ).encode()
+        cls.full_manifest = manifest
+        cls.full_manifest_bytes = HubHandler.manifest
         HubHandler.payloads = payloads
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), HubHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever,
@@ -103,6 +105,7 @@ class HFDiagnosticsTests(unittest.TestCase):
 
     def setUp(self):
         HubHandler.requests = []
+        HubHandler.manifest = self.full_manifest_bytes
         self.cache = tempfile.TemporaryDirectory()
 
     def tearDown(self):
@@ -141,10 +144,28 @@ class HFDiagnosticsTests(unittest.TestCase):
                     f"/owner/repo/resolve/{SHA}/variants.json",
                 ])
 
-    def test_listing_is_metadata_only_and_machine_readable(self):
-        result = self.run_binary("ds4", "--list-hf-variants", "--json")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        payload = json.loads(result.stdout)
+    def test_listing_is_metadata_only_and_matches_json_and_human_goldens(self):
+        outputs = {}
+        for option, golden in (
+            (("--json",), "diagnostics-list.json"),
+            ((), "diagnostics-list-human.txt"),
+        ):
+            with self.subTest(golden=golden):
+                HubHandler.requests = []
+                result = self.run_binary("ds4", "--list-hf-variants", *option)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stdout,
+                    (GOLDEN / golden).read_text(encoding="utf-8"),
+                )
+                self.assertEqual(HubHandler.requests, [
+                    "/api/models/owner/repo",
+                    f"/owner/repo/resolve/{SHA}/variants.json",
+                ])
+                outputs[golden] = result.stdout
+
+        result_stdout = outputs["diagnostics-list.json"]
+        payload = json.loads(result_stdout)
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["mode"], "list-hf-variants")
         self.assertEqual(len(payload["variants"]), 2)
@@ -159,10 +180,11 @@ class HFDiagnosticsTests(unittest.TestCase):
         self.assertTrue(
             variant["llama_cpp_heuristics"]["sibling_layout_match"]
         )
-        self.assertEqual(HubHandler.requests, [
-            "/api/models/owner/repo",
-            f"/owner/repo/resolve/{SHA}/variants.json",
-        ])
+        for listed in payload["variants"]:
+            receiver = listed["receiver"]["path"].lower()
+            self.assertFalse(any(marker in receiver for marker in (
+                "mmproj", "dspark", "support",
+            )))
 
     def test_concurrent_metadata_publication_reuses_one_immutable_snapshot(self):
         env = os.environ.copy()
@@ -204,6 +226,24 @@ class HFDiagnosticsTests(unittest.TestCase):
         self.assertEqual(totals["transfer_bytes"], 39)
         self.assertEqual(totals["selected_runtime_weight_bytes"], 36)
         self.assertEqual(totals["llama_cpp_receiver_mmproj_bytes"], 21)
+
+    def test_variant_without_dspark_reports_unavailable_bundle_total(self):
+        manifest = json.loads(json.dumps(self.full_manifest))
+        del manifest["variants"][0]["dspark"]
+        HubHandler.manifest = json.dumps(
+            manifest, separators=(",", ":"), sort_keys=True
+        ).encode()
+        for option, golden in (
+            (("--json",), "diagnostics-no-dspark.json"),
+            ((), "diagnostics-no-dspark-human.txt"),
+        ):
+            with self.subTest(golden=golden):
+                result = self.run_binary("ds4-server", "--hf-dry-run", *option)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(
+                    result.stdout,
+                    (GOLDEN / golden).read_text(encoding="utf-8"),
+                )
 
     def test_offline_uses_only_complete_verified_requested_snapshot(self):
         online = self.run_binary("ds4", "--list-hf-variants", "--json")
@@ -249,6 +289,45 @@ class HFDiagnosticsTests(unittest.TestCase):
         self.assertEqual(selected["ds4_vision.tower"]["cache"], "cached")
         self.assertEqual(selected["dspark"]["cache"], "cached")
         self.assertFalse(selected["llama_cpp_mmproj"]["selected"])
+        self.assertEqual(HubHandler.requests, [])
+
+        invalid_mmproj = subprocess.run(
+            [str(PROBE), self.endpoint, self.cache.name,
+             "populate-invalid-mmproj"],
+            cwd=ROOT, env=populate_env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10, check=False,
+        )
+        self.assertEqual(invalid_mmproj.returncode, 0,
+                         invalid_mmproj.stderr)
+        HubHandler.requests = []
+        receiver_only = self.run_binary(
+            "ds4", "--hf-dry-run", "--hf-offline", "--json",
+            endpoint="http://127.0.0.1:1",
+        )
+        self.assertEqual(receiver_only.returncode, 0, receiver_only.stderr)
+        files = {entry["role"]: entry
+                 for entry in json.loads(receiver_only.stdout)["files"]}
+        self.assertEqual(files["receiver"]["cache"], "cached")
+        self.assertEqual(files["llama_cpp_mmproj"]["cache"], "missing")
+        self.assertEqual(HubHandler.requests, [])
+
+        invalid_dspark = subprocess.run(
+            [str(PROBE), self.endpoint, self.cache.name, "corrupt-dspark"],
+            cwd=ROOT, env=populate_env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=10, check=False,
+        )
+        self.assertEqual(invalid_dspark.returncode, 0,
+                         invalid_dspark.stderr)
+        HubHandler.requests = []
+        requested_invalid = self.run_binary(
+            "ds4-server", "--hf-dry-run", "--dspark", "--hf-offline",
+            "--json", endpoint="http://127.0.0.1:1",
+        )
+        self.assertNotEqual(requested_invalid.returncode, 0)
+        self.assertIn("complete verified immutable role snapshot",
+                      requested_invalid.stderr)
         self.assertEqual(HubHandler.requests, [])
 
 
