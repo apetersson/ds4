@@ -708,6 +708,22 @@ static uint32_t manifest_capability(const char *name) {
     return 0;
 }
 
+static bool manifest_capability_identifier_valid(const char *name) {
+    bool need_alphanumeric = true;
+    for (const unsigned char *p = (const unsigned char *)name; *p; p++) {
+        bool alphanumeric = (*p >= 'a' && *p <= 'z') ||
+                            (*p >= '0' && *p <= '9');
+        if (alphanumeric) {
+            need_alphanumeric = false;
+        } else if (*p == '-' && !need_alphanumeric) {
+            need_alphanumeric = true;
+        } else {
+            return false;
+        }
+    }
+    return !need_alphanumeric;
+}
+
 static bool manifest_parse_capability_array(manifest_json_parser *jp,
                                             bool required,
                                             ds4_hf_manifest_artifact *artifact) {
@@ -726,6 +742,10 @@ static bool manifest_parse_capability_array(manifest_json_parser *jp,
         }
         if (!manifest_json_charge(jp) ||
             !manifest_json_string(jp, capability, sizeof(capability))) return false;
+        if (!manifest_capability_identifier_valid(capability)) {
+            return json_fail(jp, "invalid capability identifier '%s'",
+                             capability);
+        }
         uint32_t bit = manifest_capability(capability);
         if (!bit && required) {
             return json_fail(jp, "unknown required capability '%s'", capability);

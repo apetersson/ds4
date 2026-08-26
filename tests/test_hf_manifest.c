@@ -322,6 +322,15 @@ static void test_schema_rejections(const char *json) {
                     "\"required\": [\"deepseek4\", \"text-generation\"]",
                     "\"required\": [\"deepseek4\", \"unknown-required\"]",
                     "unknown required capability 'unknown-required'");
+    expect_rejected("empty optional capability identifier is rejected", json,
+                    "future-optional-capability", "",
+                    "invalid capability identifier");
+    expect_rejected("comma-delimited optional capability is rejected", json,
+                    "future-optional-capability", "future,optional",
+                    "invalid capability identifier");
+    expect_rejected("empty capability identifier segment is rejected", json,
+                    "future-optional-capability", "future--optional",
+                    "invalid capability identifier");
     expect_rejected("duplicate selectors are case-insensitively rejected", json,
                     "\"selector\": \"Quality128-IQ2_XXS_XL\"",
                     "\"selector\": \"headroom128-iq2_xxs\"",
