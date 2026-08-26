@@ -342,6 +342,30 @@ static void test_schema_rejections(const char *json) {
     expect_rejected("incomplete DS4 companion bundles are rejected", json,
                     "\"config\": {", "\"future_config\": {",
                     "missing exact role ds4_vision.config");
+    expect_rejected("tower precision is exact", json,
+                    "\"precision\": \"BF16\",\n          \"profile\": \"DeepEncoderV2\"",
+                    "\"precision\": \"F16\",\n          \"profile\": \"DeepEncoderV2\"",
+                    "exact role ds4_vision.tower requires BF16 DeepEncoderV2");
+    expect_rejected("tower profile is exact", json,
+                    "\"profile\": \"DeepEncoderV2\",\n          \"capabilities\": {\"required\": [\"ds4-vision\"], \"optional\": [\"future-optional-capability\"]}",
+                    "\"profile\": \"generic\",\n          \"capabilities\": {\"required\": [\"ds4-vision\"], \"optional\": [\"future-optional-capability\"]}",
+                    "exact role ds4_vision.tower requires BF16 DeepEncoderV2");
+    expect_rejected("projector precision is exact", json,
+                    "\"precision\": \"BF16\",\n          \"profile\": \"896-to-4096\"",
+                    "\"precision\": \"F16\",\n          \"profile\": \"896-to-4096\"",
+                    "exact role ds4_vision.projector requires BF16 896-to-4096");
+    expect_rejected("projector profile is exact", json,
+                    "\"profile\": \"896-to-4096\"",
+                    "\"profile\": \"4096-to-896\"",
+                    "exact role ds4_vision.projector requires BF16 896-to-4096");
+    expect_rejected("config precision is exact", json,
+                    "\"precision\": \"JSON\",\n          \"profile\": \"DeepEncoderV2\"",
+                    "\"precision\": \"TEXT\",\n          \"profile\": \"DeepEncoderV2\"",
+                    "exact role ds4_vision.config requires JSON DeepEncoderV2");
+    expect_rejected("config profile is exact", json,
+                    "\"path\": \"Headroom128-IQ2_XXS/upstream-config.json\",\n          \"bytes\": 8192,\n          \"sha256\": \"4444444444444444444444444444444444444444444444444444444444444444\",\n          \"precision\": \"JSON\",\n          \"profile\": \"DeepEncoderV2\"",
+                    "\"path\": \"Headroom128-IQ2_XXS/upstream-config.json\",\n          \"bytes\": 8192,\n          \"sha256\": \"4444444444444444444444444444444444444444444444444444444444444444\",\n          \"precision\": \"JSON\",\n          \"profile\": \"generic\"",
+                    "exact role ds4_vision.config requires JSON DeepEncoderV2");
     expect_rejected("missing llama.cpp companion bundles are rejected", json,
                     "\"llama_cpp_mmproj\": {", "\"future_mmproj\": {",
                     "variant is missing");

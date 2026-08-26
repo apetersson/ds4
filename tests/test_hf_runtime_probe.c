@@ -97,6 +97,11 @@ int main(int argc, char **argv) {
         ds4_hf_runtime_vision_compatible(&runtime, 129279,
                                          compat_err, sizeof(compat_err));
     printf("vision_compatible=%s\n", compat ? "true" : "false");
+    if (runtime.vision_bundle_verified && !compat) {
+        fprintf(stderr, "%s\n", compat_err);
+        ds4_hf_runtime_close_verified(&runtime);
+        return 1;
+    }
     memset(compat_err, 0, sizeof(compat_err));
     bool mismatch_rejected = runtime.vision_bundle_verified &&
         !ds4_hf_runtime_vision_compatible(&runtime, 7,

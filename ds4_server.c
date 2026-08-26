@@ -734,6 +734,13 @@ static void random_tool_id(char *dst, size_t dstlen, api_style api) {
 
 typedef struct server server;
 
+typedef enum {
+    VISION_CONTROL_NONE,
+    VISION_CONTROL_REAL,
+    VISION_CONTROL_ZERO,
+    VISION_CONTROL_SHUFFLE,
+} vision_control;
+
 typedef struct {
     const char *python;
     const char *encoder;
@@ -743,6 +750,7 @@ typedef struct {
     int tower_fd;
     int adapter_fd;
     int config_fd;
+    const char *control_span[3];
     pthread_mutex_t *mu;
 } server_vision_config;
 
@@ -1154,6 +1162,174 @@ static bool vision_config_complete(const server_vision_config *vision) {
            vision->tower && vision->adapter;
 }
 
+static bool vision_data_url_valid(const char *url, char *err, size_t errlen) {
+    static const char *const prefixes[] = {
+        "data:image/png;base64,",
+        "data:image/jpeg;base64,",
+        "data:image/webp;base64,",
+        "data:image/gif;base64,",
+    };
+    const size_t max_encoded_bytes = 16u * 1024u * 1024u;
+    const char *encoded = NULL;
+    if (url) {
+        for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+            const size_t n = strlen(prefixes[i]);
+            if (!strncmp(url, prefixes[i], n)) {
+                encoded = url + n;
+                break;
+            }
+        }
+    }
+    if (!encoded) {
+        snprintf(err, errlen,
+                 "image_url must be a bounded base64 data:image URL");
+        return false;
+    }
+    const size_t n = strlen(encoded);
+    if (n == 0 || n > max_encoded_bytes || n % 4 != 0) {
+        snprintf(err, errlen,
+                 "image_url base64 payload is empty, oversized, or malformed");
+        return false;
+    }
+    size_t padding = 0;
+    for (size_t i = 0; i < n; i++) {
+        const unsigned char c = (unsigned char)encoded[i];
+        const bool alphabet = (c >= 'A' && c <= 'Z') ||
+                              (c >= 'a' && c <= 'z') ||
+                              (c >= '0' && c <= '9') || c == '+' || c == '/';
+        if (c == '=') {
+            padding++;
+            if (i + 2 < n || padding > 2) {
+                snprintf(err, errlen, "image_url has malformed base64 padding");
+                return false;
+            }
+        } else if (!alphabet || padding) {
+            snprintf(err, errlen, "image_url has malformed base64 payload");
+            return false;
+        }
+    }
+    return true;
+}
+
+static const char *vision_control_span(const server_vision_config *vision,
+                                       vision_control control) {
+    if (!vision || control < VISION_CONTROL_REAL ||
+        control > VISION_CONTROL_SHUFFLE)
+        return NULL;
+    return vision->control_span[(int)control - 1];
+}
+
+static void vision_payload_free(ds4v_payload *payload) {
+    if (!payload) return;
+    free(payload->routes);
+    free(payload->rows);
+    memset(payload, 0, sizeof(*payload));
+}
+
+static bool vision_preflight_path(const char *role, const char *path, int fd,
+                                  bool executable, char *err, size_t errlen) {
+    struct stat st;
+    bool ok = fd >= 3 ? fstat(fd, &st) == 0 :
+                        path && stat(path, &st) == 0;
+    if (!ok || !S_ISREG(st.st_mode) ||
+        (fd < 3 && access(path, executable ? X_OK : R_OK) != 0)) {
+        snprintf(err, errlen, "vision role %s is not a %s regular file",
+                 role, executable ? "trusted executable" : "readable");
+        return false;
+    }
+    return true;
+}
+
+static bool vision_runtime_preflight(const server_vision_config *vision,
+                                     char *err, size_t errlen) {
+    if (!vision || !vision->python) {
+        snprintf(err, errlen, "vision role python is missing");
+        return false;
+    }
+    if (!vision->encoder) {
+        snprintf(err, errlen, "vision role encoder is missing");
+        return false;
+    }
+    if (!vision->tower) {
+        snprintf(err, errlen, "vision role ds4_vision.tower is missing");
+        return false;
+    }
+    if (!vision->adapter) {
+        snprintf(err, errlen, "vision role ds4_vision.projector is missing");
+        return false;
+    }
+    if (!vision_preflight_path("python", vision->python, -1, true,
+                               err, errlen) ||
+        !vision_preflight_path("encoder", vision->encoder, -1, false,
+                               err, errlen) ||
+        !vision_preflight_path("ds4_vision.tower", vision->tower,
+                               vision->tower_fd, false, err, errlen) ||
+        !vision_preflight_path("ds4_vision.projector", vision->adapter,
+                               vision->adapter_fd, false, err, errlen))
+        return false;
+    if (vision->config &&
+        !vision_preflight_path("ds4_vision.config", vision->config,
+                               vision->config_fd, false, err, errlen))
+        return false;
+    return true;
+}
+
+static bool vision_host_is_loopback(const char *host) {
+    return host && (!strcmp(host, "127.0.0.1") ||
+                    !strcmp(host, "localhost") || !strcmp(host, "::1"));
+}
+
+static bool vision_configure_test_controls(server_vision_config *vision,
+                                           const char *host,
+                                           bool vision_requested,
+                                           char *err, size_t errlen) {
+    const char *paths[3] = {
+        getenv("DS4_VISION_TEST_REAL_SPAN"),
+        getenv("DS4_VISION_TEST_ZERO_SPAN"),
+        getenv("DS4_VISION_TEST_SHUFFLE_SPAN"),
+    };
+    if (!vision_requested) return true;
+    const bool any = paths[0] || paths[1] || paths[2];
+    if (!any) return true;
+    if (!paths[0] || !paths[1] || !paths[2]) {
+        snprintf(err, errlen,
+                 "trusted vision controls require real, zero, and shuffle spans together");
+        return false;
+    }
+    if (!vision_host_is_loopback(host)) {
+        snprintf(err, errlen,
+                 "trusted vision controls require a loopback-only server");
+        return false;
+    }
+
+    ds4v_payload payloads[3] = {0};
+    bool ok = true;
+    for (size_t i = 0; i < 3; i++) {
+        if (!load_ds4v_payload(paths[i], &payloads[i], err, errlen)) {
+            char detail[160];
+            snprintf(detail, sizeof(detail), "%s", err && err[0] ? err : "invalid payload");
+            snprintf(err, errlen, "trusted vision %s span: %s",
+                     i == 0 ? "real" : i == 1 ? "zero" : "shuffle",
+                     detail);
+            ok = false;
+            break;
+        }
+        if (i > 0 &&
+            (payloads[i].header.token_count != payloads[0].header.token_count ||
+             memcmp(payloads[i].header.image_sha256,
+                    payloads[0].header.image_sha256, 32) != 0)) {
+            snprintf(err, errlen,
+                     "trusted vision control spans do not share image identity and row layout");
+            ok = false;
+            break;
+        }
+    }
+    for (size_t i = 0; i < 3; i++) vision_payload_free(&payloads[i]);
+    if (!ok) return false;
+    for (size_t i = 0; i < 3; i++) vision->control_span[i] = paths[i];
+    return true;
+}
+
 static bool vision_fd_preserved(const server_vision_config *vision, int fd) {
     return vision && (fd == vision->tower_fd || fd == vision->adapter_fd);
 }
@@ -1329,18 +1505,32 @@ static bool replace_image_marker(char **text, const char *replacement) {
 }
 
 static bool prepare_openai_image(const server_vision_config *vision,
-                                 request *r, chat_msgs *msgs,
+                                 vision_control control, request *r,
+                                 chat_msgs *msgs,
                                  char *err, size_t errlen) {
-    if (!r->image_url) return true;
-    if (r->embedding_span_path) {
+    if (!r->image_url) {
+        if (control != VISION_CONTROL_NONE) {
+            snprintf(err, errlen,
+                     "trusted vision control requires exactly one image_url");
+            return false;
+        }
+        return true;
+    }
+    if (!vision_data_url_valid(r->image_url, err, errlen)) return false;
+    const char *control_path = vision_control_span(vision, control);
+    if (control != VISION_CONTROL_NONE && !control_path) {
         snprintf(err, errlen,
-                 "image_url and ds4_embedding_span_path cannot be combined");
+                 "trusted vision control is not enabled for this local server");
         return false;
     }
-    if (!run_vision_encoder(vision, r->image_url,
-                            &r->embedding_span_path, err, errlen))
-        return false;
-    r->embedding_span_owned = true;
+    if (control_path) {
+        r->embedding_span_path = xstrdup(control_path);
+    } else {
+        if (!run_vision_encoder(vision, r->image_url,
+                                &r->embedding_span_path, err, errlen))
+            return false;
+        r->embedding_span_owned = true;
+    }
     if (!load_ds4v_payload(r->embedding_span_path, &r->embedding_payload,
                            err, errlen))
         return false;
@@ -3513,6 +3703,7 @@ static void anthropic_prepare_live_continuation(request *r,
  * prompt plus the small amount of protocol state needed to translate the reply. */
 static bool parse_chat_request(ds4_engine *e, server *s,
                                const server_vision_config *vision,
+                               vision_control control,
                                const char *body, int def_tokens,
                                int ctx_size, request *r, char *err, size_t errlen) {
     request_init(r, REQ_CHAT, def_tokens);
@@ -3548,10 +3739,13 @@ static bool parse_chat_request(ds4_engine *e, server *s,
             }
             got_messages = true;
         } else if (!strcmp(key, "ds4_embedding_span_path")) {
-            if (!json_string_replace(&p, &r->embedding_span_path)) {
-                free(key);
-                goto bad;
-            }
+            free(key);
+            snprintf(err, errlen,
+                     "ds4_embedding_span_path is not accepted by the public API");
+            chat_msgs_free(&msgs);
+            free(tool_schemas);
+            request_free(r);
+            return false;
         } else if (!strcmp(key, "tools")) {
             free(tool_schemas);
             tool_schemas = NULL;
@@ -3677,7 +3871,7 @@ static bool parse_chat_request(ds4_engine *e, server *s,
         request_free(r);
         return false;
     }
-    if (!prepare_openai_image(vision, r, &msgs, err, errlen)) {
+    if (!prepare_openai_image(vision, control, r, &msgs, err, errlen)) {
         chat_msgs_free(&msgs);
         free(tool_schemas);
         request_free(r);
@@ -13158,6 +13352,7 @@ typedef struct {
     char path[256];
     char *body;
     size_t body_len;
+    vision_control control;
 } http_request;
 
 static void http_request_free(http_request *r) {
@@ -13192,6 +13387,41 @@ static long content_length(const char *h, size_t n) {
     return 0;
 }
 
+static bool parse_vision_control_headers(const char *h, size_t n,
+                                         vision_control *out) {
+    static const char name[] = "X-DS4-Vision-Control:";
+    const char *p = h, *end = h + n;
+    bool found = false;
+    *out = VISION_CONTROL_NONE;
+    while (p < end) {
+        const char *line = p;
+        while (p < end && *p != '\n') p++;
+        size_t len = (size_t)(p - line);
+        if (len && line[len - 1] == '\r') len--;
+        if (len >= sizeof(name) - 1 &&
+            strncasecmp(line, name, sizeof(name) - 1) == 0) {
+            if (found) return false;
+            found = true;
+            const char *v = line + sizeof(name) - 1;
+            const char *vend = line + len;
+            while (v < vend && isspace((unsigned char)*v)) v++;
+            while (vend > v && isspace((unsigned char)vend[-1])) vend--;
+            const size_t vlen = (size_t)(vend - v);
+            if (vlen == 4 && !memcmp(v, "real", 4)) {
+                *out = VISION_CONTROL_REAL;
+            } else if (vlen == 4 && !memcmp(v, "zero", 4)) {
+                *out = VISION_CONTROL_ZERO;
+            } else if (vlen == 7 && !memcmp(v, "shuffle", 7)) {
+                *out = VISION_CONTROL_SHUFFLE;
+            } else {
+                return false;
+            }
+        }
+        if (p < end) p++;
+    }
+    return true;
+}
+
 static bool read_http_request(int fd, http_request *r) {
     buf b = {0};
     ssize_t hend = -1;
@@ -13221,6 +13451,8 @@ static bool read_http_request(int fd, http_request *r) {
 
     long clen = content_length(b.ptr, (size_t)hend);
     if (clen < 0 || (size_t)clen > max_body) goto fail;
+    if (!parse_vision_control_headers(b.ptr, (size_t)hend, &r->control))
+        goto fail;
     while (b.len < (size_t)hend + (size_t)clen) {
         char tmp[8192];
         ssize_t n = recv(fd, tmp, sizeof(tmp), 0);
@@ -13508,7 +13740,7 @@ static void *client_main(void *arg) {
         ok = parse_anthropic_request(s->engine, s, hr.body, s->default_tokens,
                                      ctx_size, &req, err, sizeof(err));
     } else if (!strcmp(hr.method, "POST") && !strcmp(hr.path, "/v1/chat/completions")) {
-        ok = parse_chat_request(s->engine, s, &s->vision,
+        ok = parse_chat_request(s->engine, s, &s->vision, hr.control,
                                 hr.body, s->default_tokens,
                                 ctx_size, &req, err, sizeof(err));
     } else if (!strcmp(hr.method, "POST") && !strcmp(hr.path, "/v1/responses")) {
@@ -14034,6 +14266,9 @@ int main(int argc, char **argv) {
     sigaction(SIGTERM, &sa, NULL);
 
     server_config cfg = parse_options(argc, argv);
+    const bool vision_requested =
+        cfg.hf.vision_source == DS4_HF_VISION_CATALOG ||
+        cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT;
     ds4_hf_runtime hf_runtime = {0};
     if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
         server_log(DS4_LOG_DEFAULT,
@@ -14052,8 +14287,8 @@ int main(int argc, char **argv) {
         cfg.engine.model_path = ds4_hf_runtime_open_path(
             &hf_runtime, DS4_HF_ROLE_RECEIVER);
         if (cfg.hf.vision_source == DS4_HF_VISION_CATALOG) {
-            if (!ds4_hf_runtime_vision_compatible(
-                    &hf_runtime, 129279, hf_err, sizeof(hf_err))) {
+            if (!ds4_hf_runtime_vision_artifacts_compatible(
+                    &hf_runtime, hf_err, sizeof(hf_err))) {
                 server_log(DS4_LOG_DEFAULT, "ds4-server: %s", hf_err);
                 ds4_hf_runtime_close_verified(&hf_runtime);
                 return 2;
@@ -14082,6 +14317,21 @@ int main(int argc, char **argv) {
                    cfg.hf.vision_source == DS4_HF_VISION_CATALOG ?
                        "verified-pending-receiver" : "inactive",
                    cfg.engine.dspark ? "requested" : "not-requested");
+    }
+    if (vision_requested) {
+        char vision_err[512] = {0};
+        if (!vision_runtime_preflight(&cfg.vision, vision_err,
+                                      sizeof(vision_err)) ||
+            !vision_configure_test_controls(&cfg.vision, cfg.host, true,
+                                            vision_err,
+                                            sizeof(vision_err))) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s", vision_err);
+            ds4_hf_runtime_close_verified(&hf_runtime);
+            return 2;
+        }
+        if (cfg.vision.control_span[0])
+            server_log(DS4_LOG_DEFAULT,
+                       "ds4-server: trusted loopback-only vision controls enabled");
     }
     if (cfg.chdir_path && chdir(cfg.chdir_path) != 0) {
         server_log(DS4_LOG_DEFAULT, "ds4-server: failed to chdir to %s: %s",
@@ -14143,9 +14393,6 @@ int main(int argc, char **argv) {
         return rc;
     }
 
-    const bool vision_requested =
-        cfg.hf.vision_source == DS4_HF_VISION_CATALOG ||
-        cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT;
     if (vision_requested && ds4_engine_image_token_id(engine) != 129279) {
         server_log(DS4_LOG_DEFAULT,
                    "ds4-server: receiver image token id %d is incompatible with DS4 vision; expected 129279",
@@ -14180,7 +14427,7 @@ int main(int argc, char **argv) {
     s.hf_plan = hf_runtime.plan;
     s.hf_verified_roles = hf_runtime.verified_roles;
     s.hf_vision_verified = hf_runtime.vision_bundle_verified;
-    s.vision_active = vision_requested && vision_config_complete(&cfg.vision);
+    s.vision_active = vision_requested;
     s.dspark_active = ds4_engine_has_dspark(engine);
     if (s.hf_repository) {
         const ds4_hf_acquisition_artifact *receiver = &s.hf_plan.artifacts[0];
@@ -17516,7 +17763,7 @@ static void test_request_parsers_reject_malformed_duplicate_owned_fields(void) {
     TEST_ASSERT(!ok);
     if (ok) request_free(&r);
 
-    ok = parse_chat_request(NULL, NULL, NULL,
+    ok = parse_chat_request(NULL, NULL, NULL, VISION_CONTROL_NONE,
         "{\"model\":\"deepseek-v4-flash\",\"model\":\"bad\\q\","
         "\"max_tokens\":1,\"messages\":[{\"role\":\"user\","
         "\"content\":\"hello\"}]}",
@@ -17593,6 +17840,44 @@ static void test_vision_payload_contract(void) {
     TEST_ASSERT(!vision_route_token_valid(0));
     TEST_ASSERT(!vision_route_token_valid(129278));
     TEST_ASSERT(!vision_route_token_valid(129280));
+
+    char err[160] = {0};
+    TEST_ASSERT(vision_data_url_valid("data:image/png;base64,AA==",
+                                      err, sizeof(err)));
+    TEST_ASSERT(vision_data_url_valid("data:image/jpeg;base64,YWJjZA==",
+                                      err, sizeof(err)));
+    TEST_ASSERT(!vision_data_url_valid("/tmp/private.png", err, sizeof(err)));
+    TEST_ASSERT(!vision_data_url_valid("file:///tmp/private.png", err, sizeof(err)));
+    TEST_ASSERT(!vision_data_url_valid("http://127.0.0.1/private.png",
+                                       err, sizeof(err)));
+    TEST_ASSERT(!vision_data_url_valid("data:text/plain;base64,AA==",
+                                       err, sizeof(err)));
+    TEST_ASSERT(!vision_data_url_valid("data:image/png;base64,AA=A",
+                                       err, sizeof(err)));
+    static const char data_prefix[] = "data:image/png;base64,";
+    const size_t oversized_encoded = 16u * 1024u * 1024u + 4u;
+    char *oversized = xmalloc(sizeof(data_prefix) - 1 + oversized_encoded + 1);
+    memcpy(oversized, data_prefix, sizeof(data_prefix) - 1);
+    memset(oversized + sizeof(data_prefix) - 1, 'A', oversized_encoded);
+    oversized[sizeof(data_prefix) - 1 + oversized_encoded] = '\0';
+    TEST_ASSERT(!vision_data_url_valid(oversized, err, sizeof(err)));
+    free(oversized);
+
+    vision_control control = VISION_CONTROL_NONE;
+    TEST_ASSERT(parse_vision_control_headers(
+        "POST /v1/chat/completions HTTP/1.1\r\n"
+        "X-DS4-Vision-Control: shuffle\r\n\r\n",
+        strlen("POST /v1/chat/completions HTTP/1.1\r\n"
+               "X-DS4-Vision-Control: shuffle\r\n\r\n"), &control));
+    TEST_ASSERT(control == VISION_CONTROL_SHUFFLE);
+    TEST_ASSERT(!parse_vision_control_headers(
+        "X-DS4-Vision-Control: zero\r\n"
+        "X-DS4-Vision-Control: real\r\n\r\n",
+        strlen("X-DS4-Vision-Control: zero\r\n"
+               "X-DS4-Vision-Control: real\r\n\r\n"), &control));
+    TEST_ASSERT(!parse_vision_control_headers(
+        "X-DS4-Vision-Control: ../../span\r\n\r\n",
+        strlen("X-DS4-Vision-Control: ../../span\r\n\r\n"), &control));
 }
 
 static void test_openai_image_content_separates_adjacent_blocks(void) {
@@ -17634,6 +17919,101 @@ static int test_vision_temp_file(char path[64], const char *pattern,
         return -1;
     }
     return fd;
+}
+
+static bool test_write_vision_payload(char path[64], const char *pattern,
+                                      uint8_t image_identity) {
+    snprintf(path, 64, "/tmp/%s-XXXXXX", pattern);
+    int fd = mkstemp(path);
+    if (fd < 0) return false;
+    ds4v_header header = {0};
+    memcpy(header.magic, "DS4VEMB1", 8);
+    header.version = 1;
+    header.header_bytes = sizeof(header);
+    header.token_count = 257;
+    header.hidden_size = 4096;
+    memset(header.image_sha256, image_identity, sizeof(header.image_sha256));
+    bool ok = write_all_file_descriptor(fd, (const char *)&header,
+                                         sizeof(header));
+    int32_t routes[257];
+    for (size_t i = 0; i < 257; i++) routes[i] = 129279;
+    if (ok) ok = write_all_file_descriptor(fd, (const char *)routes,
+                                            sizeof(routes));
+    const off_t total = (off_t)sizeof(header) + (off_t)sizeof(routes) +
+        (off_t)257 * 4096 * (off_t)sizeof(float);
+    if (ok) ok = ftruncate(fd, total) == 0;
+    if (close(fd) != 0) ok = false;
+    if (!ok) unlink(path);
+    return ok;
+}
+
+static void test_vision_trust_boundary_and_preflight(void) {
+    char python[64], encoder[64], tower[64], adapter[64], span[64];
+    int python_fd = test_vision_temp_file(python, "ds4-python", "#!/bin/sh\n",
+                                          true);
+    int encoder_fd = test_vision_temp_file(encoder, "ds4-encoder", "# fixture\n",
+                                           false);
+    int tower_fd = test_vision_temp_file(tower, "ds4-tower", "T", false);
+    int adapter_fd = test_vision_temp_file(adapter, "ds4-adapter", "P", false);
+    TEST_ASSERT(python_fd >= 0 && encoder_fd >= 0 && tower_fd >= 0 &&
+                adapter_fd >= 0);
+    if (python_fd >= 0) close(python_fd);
+    if (encoder_fd >= 0) close(encoder_fd);
+    if (tower_fd >= 0) close(tower_fd);
+    if (adapter_fd >= 0) close(adapter_fd);
+
+    server_vision_config vision = {
+        .python = python,
+        .encoder = encoder,
+        .tower = tower,
+        .adapter = adapter,
+    };
+    char err[256] = {0};
+    TEST_ASSERT(vision_runtime_preflight(&vision, err, sizeof(err)));
+    vision.python = NULL;
+    TEST_ASSERT(!vision_runtime_preflight(&vision, err, sizeof(err)));
+    TEST_ASSERT(!strcmp(err, "vision role python is missing"));
+    vision.python = python;
+    TEST_ASSERT(chmod(python, 0600) == 0);
+    TEST_ASSERT(!vision_runtime_preflight(&vision, err, sizeof(err)));
+    TEST_ASSERT(strstr(err, "python") != NULL);
+    TEST_ASSERT(chmod(python, 0700) == 0);
+    vision.adapter = "/definitely/missing/projector.safetensors";
+    TEST_ASSERT(!vision_runtime_preflight(&vision, err, sizeof(err)));
+    TEST_ASSERT(strstr(err, "ds4_vision.projector") != NULL);
+    vision.adapter = adapter;
+
+    TEST_ASSERT(test_write_vision_payload(span, "ds4-control", 7));
+    vision.control_span[VISION_CONTROL_ZERO - 1] = span;
+    request r;
+    request_init(&r, REQ_CHAT, 1);
+    r.image_url = xstrdup("data:image/png;base64,AA==");
+    chat_msgs msgs = {0};
+    chat_msg msg = {.role = xstrdup("user"),
+                    .content = xstrdup(DS4_IMAGE_MARKER)};
+    chat_msgs_push(&msgs, msg);
+    TEST_ASSERT(prepare_openai_image(&vision, VISION_CONTROL_ZERO, &r, &msgs,
+                                     err, sizeof(err)));
+    TEST_ASSERT(r.embedding_span_path && !strcmp(r.embedding_span_path, span));
+    TEST_ASSERT(!r.embedding_span_owned);
+    TEST_ASSERT(r.embedding_payload.header.token_count == 257);
+    chat_msgs_free(&msgs);
+    request_free(&r);
+
+    request rejected;
+    bool parsed = parse_chat_request(NULL, NULL, NULL, VISION_CONTROL_NONE,
+        "{\"ds4_embedding_span_path\":\"/tmp/private.ds4v\","
+        "\"messages\":[{\"role\":\"user\",\"content\":\"x\"}]}",
+        1, 100, &rejected, err, sizeof(err));
+    TEST_ASSERT(!parsed);
+    TEST_ASSERT(strstr(err, "not accepted by the public API") != NULL);
+    if (parsed) request_free(&rejected);
+
+    unlink(python);
+    unlink(encoder);
+    unlink(tower);
+    unlink(adapter);
+    unlink(span);
 }
 
 static void test_catalog_vision_descriptors_survive_trusted_exec(void) {
@@ -19467,6 +19847,7 @@ static void ds4_server_unit_tests_run(void) {
     test_openai_image_content_preserves_order();
     test_vision_payload_contract();
     test_openai_image_content_separates_adjacent_blocks();
+    test_vision_trust_boundary_and_preflight();
     test_catalog_vision_descriptors_survive_trusted_exec();
     test_json_parser_handles_tool_heavy_requests();
     test_json_string_handles_surrogates();

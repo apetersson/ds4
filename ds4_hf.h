@@ -386,6 +386,13 @@ void ds4_hf_runtime_close_verified(ds4_hf_runtime *runtime);
 bool ds4_hf_runtime_role_verified(const ds4_hf_runtime *runtime,
                                   ds4_hf_artifact_role role);
 
+/* Inspect only the bounded JSON headers of the held, hash-verified tower and
+ * projector descriptors and require the exact DeepEncoderV2/896-to-4096
+ * tensor namespaces, shapes, dtype, and route metadata. This is safe to call
+ * before receiver allocation. */
+bool ds4_hf_runtime_vision_artifacts_compatible(
+    const ds4_hf_runtime *runtime, char *err, size_t errlen);
+
 /* Validate the manifest-selected, hash-verified DS4 vision bundle against the
  * receiver's actual image-token lookup before image requests are enabled. */
 bool ds4_hf_runtime_vision_compatible(const ds4_hf_runtime *runtime,

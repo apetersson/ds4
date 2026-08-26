@@ -6086,6 +6086,7 @@ static void test_tool_call_quality_one(bool quality) {
     char err[160] = {0};
 
     bool request_ok = parse_chat_request(engine, &s, NULL,
+                                         VISION_CONTROL_NONE,
                                          test_tool_call_request_json(),
                                          512, 32768, &first_request,
                                          err, sizeof(err));
@@ -6124,7 +6125,8 @@ static void test_tool_call_quality_one(bool quality) {
     if (!second_body) goto done;
 
     err[0] = '\0';
-    request_ok = parse_chat_request(engine, &s, NULL, second_body,
+    request_ok = parse_chat_request(engine, &s, NULL,
+                                    VISION_CONTROL_NONE, second_body,
                                     512, 32768, &second_request,
                                     err, sizeof(err));
     TEST_ASSERT(request_ok);

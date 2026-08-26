@@ -1372,11 +1372,24 @@ static bool manifest_validate_variant(manifest_json_parser *jp,
         !manifest_suffix(variant->ds4_vision.config.path, ".json")) {
         return json_fail(jp, "DS4 vision bundle paths must be data-only safetensors/safetensors/JSON roles");
     }
+    if (strcmp(variant->ds4_vision.tower.precision, "BF16") ||
+        strcmp(variant->ds4_vision.tower.profile, "DeepEncoderV2")) {
+        return json_fail(
+            jp, "exact role ds4_vision.tower requires BF16 DeepEncoderV2 metadata");
+    }
+    if (strcmp(variant->ds4_vision.projector.precision, "BF16") ||
+        strcmp(variant->ds4_vision.projector.profile, "896-to-4096")) {
+        return json_fail(
+            jp, "exact role ds4_vision.projector requires BF16 896-to-4096 metadata");
+    }
+    if (strcmp(variant->ds4_vision.config.precision, "JSON") ||
+        strcmp(variant->ds4_vision.config.profile, "DeepEncoderV2")) {
+        return json_fail(
+            jp, "exact role ds4_vision.config requires JSON DeepEncoderV2 metadata");
+    }
     const ds4_hf_manifest_bf16_identity *identity =
         &variant->bf16_tensor_identity;
-    if (strcmp(variant->ds4_vision.tower.precision, "BF16") ||
-        strcmp(variant->ds4_vision.projector.precision, "BF16") ||
-        strcmp(variant->llama_cpp_mmproj.precision, "BF16") ||
+    if (strcmp(variant->llama_cpp_mmproj.precision, "BF16") ||
         strcmp(identity->canonicalization,
                "named-tensor-name-shape-bf16le-v1") ||
         !manifest_valid_sha256(identity->source_tower_sha256) ||
@@ -3375,6 +3388,271 @@ bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
     return ok;
 }
 
+#define DS4_HF_SAFETENSORS_HEADER_MAX (1024u * 1024u)
+#define DS4_HF_SAFETENSORS_RANK_MAX 8u
+
+typedef struct {
+    char dtype[16];
+    uint64_t shape[DS4_HF_SAFETENSORS_RANK_MAX];
+    size_t rank;
+    bool have_dtype;
+    bool have_shape;
+} safetensors_tensor;
+
+static bool safetensors_parse_shape(manifest_json_parser *jp,
+                                    safetensors_tensor *tensor) {
+    if (!manifest_json_open(jp, '[')) return false;
+    manifest_json_ws(jp);
+    if (jp->p < jp->end && *jp->p == ']') {
+        return manifest_json_close(jp, ']');
+    }
+    bool more = true;
+    while (more) {
+        if (tensor->rank >= DS4_HF_SAFETENSORS_RANK_MAX) {
+            return json_fail(jp, "safetensors tensor rank exceeds %u",
+                             DS4_HF_SAFETENSORS_RANK_MAX);
+        }
+        if (!manifest_json_uint64(jp, &tensor->shape[tensor->rank++]) ||
+            !manifest_json_next(jp, ']', &more)) return false;
+    }
+    return true;
+}
+
+static bool safetensors_parse_tensor(manifest_json_parser *jp,
+                                     safetensors_tensor *tensor) {
+    memset(tensor, 0, sizeof(*tensor));
+    if (!manifest_json_open(jp, '{')) return false;
+    manifest_json_ws(jp);
+    if (jp->p < jp->end && *jp->p == '}') {
+        return json_fail(jp, "empty safetensors tensor descriptor");
+    }
+    bool more = true;
+    while (more) {
+        char key[64];
+        if (!manifest_json_key(jp, key, sizeof(key))) return false;
+        if (!strcmp(key, "dtype")) {
+            if (tensor->have_dtype || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, tensor->dtype,
+                                      sizeof(tensor->dtype))) return false;
+            tensor->have_dtype = true;
+        } else if (!strcmp(key, "shape")) {
+            if (tensor->have_shape ||
+                !safetensors_parse_shape(jp, tensor)) return false;
+            tensor->have_shape = true;
+        } else if (!manifest_json_skip_value(jp)) {
+            return false;
+        }
+        if (!manifest_json_next(jp, '}', &more)) return false;
+    }
+    return tensor->have_dtype && tensor->have_shape;
+}
+
+static bool safetensors_tensor_is(const safetensors_tensor *tensor,
+                                  const uint64_t *shape, size_t rank) {
+    return tensor->have_dtype && !strcmp(tensor->dtype, "BF16") &&
+           tensor->have_shape && tensor->rank == rank &&
+           !memcmp(tensor->shape, shape, rank * sizeof(*shape));
+}
+
+static bool safetensors_parse_projector_metadata(
+    manifest_json_parser *jp, unsigned *metadata_seen) {
+    if (!manifest_json_open(jp, '{')) return false;
+    manifest_json_ws(jp);
+    if (jp->p < jp->end && *jp->p == '}') {
+        return manifest_json_close(jp, '}');
+    }
+    bool more = true;
+    while (more) {
+        char key[DS4_HF_METADATA_MAX];
+        if (!manifest_json_key(jp, key, sizeof(key))) return false;
+        unsigned bit = 0;
+        const char *expected = NULL;
+        if (!strcmp(key, "encoder_dim")) {
+            bit = 1u;
+            expected = "896";
+        } else if (!strcmp(key, "hidden")) {
+            bit = 2u;
+            expected = "4096";
+        } else if (!strcmp(key, "image_token_id")) {
+            bit = 4u;
+            expected = "129279";
+        }
+        if (bit) {
+            char value[32];
+            if ((*metadata_seen & bit) || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, value, sizeof(value)) ||
+                strcmp(value, expected)) return false;
+            *metadata_seen |= bit;
+        } else if (!manifest_json_skip_value(jp)) {
+            return false;
+        }
+        if (!manifest_json_next(jp, '}', &more)) return false;
+    }
+    return true;
+}
+
+static bool safetensors_semantics_valid(const char *json, size_t json_len,
+                                        ds4_hf_artifact_role role) {
+    char parse_error[256] = {0};
+    manifest_json_parser jp = {
+        json, json + json_len, 0, 0, parse_error, sizeof(parse_error),
+    };
+    if (!manifest_json_open(&jp, '{')) return false;
+    manifest_json_ws(&jp);
+    if (jp.p < jp.end && *jp.p == '}') return false;
+
+    unsigned tensors_seen = 0;
+    unsigned metadata_seen = 0;
+    bool sam_namespace = false;
+    bool qwen_namespace = false;
+    bool more = true;
+    while (more) {
+        char name[DS4_HF_PATH_MAX];
+        if (!manifest_json_key(&jp, name, sizeof(name))) return false;
+        if (!strcmp(name, "__metadata__")) {
+            if (role == DS4_HF_ROLE_VISION_PROJECTOR) {
+                if (!safetensors_parse_projector_metadata(&jp,
+                                                          &metadata_seen)) {
+                    return false;
+                }
+            } else if (!manifest_json_skip_value(&jp)) {
+                return false;
+            }
+        } else {
+            safetensors_tensor tensor;
+            if (!safetensors_parse_tensor(&jp, &tensor)) return false;
+            if (role == DS4_HF_ROLE_VISION_TOWER) {
+                static const uint64_t patch[] = {768, 3, 16, 16};
+                static const uint64_t pos[] = {1, 64, 64, 768};
+                static const uint64_t neck[] = {256, 768, 1, 1};
+                static const uint64_t q_proj[] = {896, 896};
+                static const uint64_t norm[] = {896};
+                sam_namespace |= !strncmp(name, "model.sam_model.", 16);
+                qwen_namespace |= !strncmp(name, "model.qwen2_model.", 18);
+                if (!strcmp(name, "model.sam_model.patch_embed.proj.weight")) {
+                    if ((tensors_seen & 1u) ||
+                        !safetensors_tensor_is(&tensor, patch, 4)) return false;
+                    tensors_seen |= 1u;
+                } else if (!strcmp(name, "model.sam_model.pos_embed")) {
+                    if ((tensors_seen & 2u) ||
+                        !safetensors_tensor_is(&tensor, pos, 4)) return false;
+                    tensors_seen |= 2u;
+                } else if (!strcmp(name, "model.sam_model.neck.0.weight")) {
+                    if ((tensors_seen & 4u) ||
+                        !safetensors_tensor_is(&tensor, neck, 4)) return false;
+                    tensors_seen |= 4u;
+                } else if (!strcmp(name, "model.qwen2_model.model.model.layers.0.self_attn.q_proj.weight")) {
+                    if ((tensors_seen & 8u) ||
+                        !safetensors_tensor_is(&tensor, q_proj, 2)) return false;
+                    tensors_seen |= 8u;
+                } else if (!strcmp(name, "model.qwen2_model.model.model.layers.23.self_attn.q_proj.weight")) {
+                    if ((tensors_seen & 16u) ||
+                        !safetensors_tensor_is(&tensor, q_proj, 2)) return false;
+                    tensors_seen |= 16u;
+                } else if (!strcmp(name, "model.qwen2_model.model.model.norm.weight")) {
+                    if ((tensors_seen & 32u) ||
+                        !safetensors_tensor_is(&tensor, norm, 1)) return false;
+                    tensors_seen |= 32u;
+                }
+            } else {
+                static const uint64_t proj0[] = {4096, 896};
+                static const uint64_t proj2[] = {4096, 4096};
+                static const uint64_t separator[] = {4096};
+                if (!strcmp(name, "proj.0.weight")) {
+                    if ((tensors_seen & 1u) ||
+                        !safetensors_tensor_is(&tensor, proj0, 2)) return false;
+                    tensors_seen |= 1u;
+                } else if (!strcmp(name, "proj.2.weight")) {
+                    if ((tensors_seen & 2u) ||
+                        !safetensors_tensor_is(&tensor, proj2, 2)) return false;
+                    tensors_seen |= 2u;
+                } else if (!strcmp(name, "view_seperator")) {
+                    if ((tensors_seen & 4u) ||
+                        !safetensors_tensor_is(&tensor, separator, 1)) return false;
+                    tensors_seen |= 4u;
+                }
+            }
+        }
+        if (!manifest_json_next(&jp, '}', &more)) return false;
+    }
+    manifest_json_ws(&jp);
+    if (jp.p != jp.end) return false;
+    if (role == DS4_HF_ROLE_VISION_TOWER) {
+        return tensors_seen == 63u && sam_namespace && qwen_namespace;
+    }
+    return role == DS4_HF_ROLE_VISION_PROJECTOR && tensors_seen == 7u &&
+           metadata_seen == 7u;
+}
+
+static int runtime_verified_role_fd(const ds4_hf_runtime *runtime,
+                                    ds4_hf_artifact_role role) {
+    if (!runtime) return -1;
+    for (size_t i = 0; i < runtime->plan.artifact_count; i++) {
+        if (runtime->plan.artifacts[i].role == role) {
+            return runtime->verified_fds[i];
+        }
+    }
+    return -1;
+}
+
+static bool pread_exact(int fd, void *buffer, size_t bytes, off_t offset) {
+    unsigned char *out = buffer;
+    while (bytes) {
+        ssize_t got = pread(fd, out, bytes, offset);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) return false;
+        out += (size_t)got;
+        bytes -= (size_t)got;
+        offset += got;
+    }
+    return true;
+}
+
+static bool runtime_safetensors_role_compatible(
+    const ds4_hf_runtime *runtime, ds4_hf_artifact_role role,
+    char *err, size_t errlen) {
+    int fd = runtime_verified_role_fd(runtime, role);
+    unsigned char prefix[8];
+    struct stat st;
+    if (fd < 0 || fstat(fd, &st) || !S_ISREG(st.st_mode) ||
+        !pread_exact(fd, prefix, sizeof(prefix), 0)) {
+        return fail(err, errlen,
+                    "catalog vision role '%s' has an unreadable safetensors header",
+                    ds4_hf_artifact_role_name(role));
+    }
+    uint64_t header_len = 0;
+    for (unsigned i = 0; i < sizeof(prefix); i++) {
+        header_len |= (uint64_t)prefix[i] << (8u * i);
+    }
+    if (!header_len || header_len > DS4_HF_SAFETENSORS_HEADER_MAX ||
+        header_len > (uint64_t)st.st_size -
+                         ((uint64_t)st.st_size >= sizeof(prefix) ?
+                              sizeof(prefix) : (uint64_t)st.st_size)) {
+        return fail(err, errlen,
+                    "catalog vision role '%s' has an invalid bounded safetensors header",
+                    ds4_hf_artifact_role_name(role));
+    }
+    char *header = malloc((size_t)header_len + 1u);
+    if (!header) {
+        return fail(err, errlen,
+                    "catalog vision role '%s' safetensors header allocation failed",
+                    ds4_hf_artifact_role_name(role));
+    }
+    bool readable = pread_exact(fd, header, (size_t)header_len,
+                                (off_t)sizeof(prefix));
+    header[header_len] = '\0';
+    bool compatible = readable &&
+                      safetensors_semantics_valid(header, (size_t)header_len,
+                                                  role);
+    free(header);
+    if (!compatible) {
+        return fail(err, errlen,
+                    "catalog vision role '%s' has an incompatible safetensors semantic header",
+                    ds4_hf_artifact_role_name(role));
+    }
+    return true;
+}
+
 void ds4_hf_runtime_close_verified(ds4_hf_runtime *runtime) {
     if (!runtime || !runtime->repository) return;
     for (size_t i = 0; i < DS4_HF_ACQUISITION_MAX_ARTIFACTS; i++) {
@@ -3391,10 +3669,8 @@ bool ds4_hf_runtime_role_verified(const ds4_hf_runtime *runtime,
            (runtime->verified_roles & (1u << (unsigned)role)) != 0;
 }
 
-bool ds4_hf_runtime_vision_compatible(const ds4_hf_runtime *runtime,
-                                      uint32_t receiver_image_token_id,
-                                      char *err,
-                                      size_t errlen) {
+bool ds4_hf_runtime_vision_artifacts_compatible(
+    const ds4_hf_runtime *runtime, char *err, size_t errlen) {
     static const ds4_hf_artifact_role required[] = {
         DS4_HF_ROLE_VISION_TOWER,
         DS4_HF_ROLE_VISION_PROJECTOR,
@@ -3412,6 +3688,22 @@ bool ds4_hf_runtime_vision_compatible(const ds4_hf_runtime *runtime,
     }
     if (!runtime->vision_bundle_verified) {
         return fail(err, errlen, "catalog DS4 vision bundle is incomplete");
+    }
+    if (!runtime_safetensors_role_compatible(
+            runtime, DS4_HF_ROLE_VISION_TOWER, err, errlen) ||
+        !runtime_safetensors_role_compatible(
+            runtime, DS4_HF_ROLE_VISION_PROJECTOR, err, errlen)) {
+        return false;
+    }
+    return true;
+}
+
+bool ds4_hf_runtime_vision_compatible(const ds4_hf_runtime *runtime,
+                                      uint32_t receiver_image_token_id,
+                                      char *err,
+                                      size_t errlen) {
+    if (!ds4_hf_runtime_vision_artifacts_compatible(runtime, err, errlen)) {
+        return false;
     }
     if (runtime->vision_metadata.image_token_id != 129279) {
         return fail(err, errlen,

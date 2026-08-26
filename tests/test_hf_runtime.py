@@ -26,6 +26,43 @@ def sha256(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def build_safetensors(tensors, metadata=None):
+    header = {}
+    if metadata is not None:
+        header["__metadata__"] = metadata
+    for name, shape in tensors.items():
+        header[name] = {"dtype": "BF16", "shape": shape,
+                        "data_offsets": [0, 0]}
+    encoded = json.dumps(header, separators=(",", ":")).encode("utf-8")
+    encoded += b" " * (-len(encoded) % 8)
+    return struct.pack("<Q", len(encoded)) + encoded
+
+
+def build_vision_tower():
+    return build_safetensors({
+        "model.sam_model.patch_embed.proj.weight": [768, 3, 16, 16],
+        "model.sam_model.pos_embed": [1, 64, 64, 768],
+        "model.sam_model.neck.0.weight": [256, 768, 1, 1],
+        "model.qwen2_model.model.model.layers.0.self_attn.q_proj.weight":
+            [896, 896],
+        "model.qwen2_model.model.model.layers.23.self_attn.q_proj.weight":
+            [896, 896],
+        "model.qwen2_model.model.model.norm.weight": [896],
+    })
+
+
+def build_vision_projector(proj0_shape=(4096, 896)):
+    return build_safetensors({
+        "proj.0.weight": list(proj0_shape),
+        "proj.2.weight": [4096, 4096],
+        "view_seperator": [4096],
+    }, {
+        "encoder_dim": "896",
+        "hidden": "4096",
+        "image_token_id": "129279",
+    })
+
+
 def build_tokenizer_gguf():
     """Build a metadata-only DeepSeek4 GGUF accepted by --dump-tokens."""
     uint32 = 4
@@ -154,8 +191,9 @@ class RuntimeWiringTests(unittest.TestCase):
         variant = manifest["variants"][0]
         payloads = {
             variant["receiver"]["path"]: build_tokenizer_gguf(),
-            variant["ds4_vision"]["tower"]["path"]: b"verified-tower",
-            variant["ds4_vision"]["projector"]["path"]: b"verified-projector",
+            variant["ds4_vision"]["tower"]["path"]: build_vision_tower(),
+            variant["ds4_vision"]["projector"]["path"]:
+                build_vision_projector(),
             variant["ds4_vision"]["config"]["path"]: b'{"verified":true}',
         }
         for artifact in (
@@ -298,10 +336,7 @@ class RuntimeWiringTests(unittest.TestCase):
 
     def test_missing_and_mismatched_catalog_artifacts_name_exact_role(self):
         variant = self.good_manifest["variants"][0]
-        for role, corrupt in (
-            ("tower", b"corrupt!-tower"),
-            ("projector", b"corrupt!-projector"),
-        ):
+        for role in ("tower", "projector"):
             artifact = variant["ds4_vision"][role]
             with self.subTest(role=role, failure="missing"):
                 self.reset_cache()
@@ -316,12 +351,44 @@ class RuntimeWiringTests(unittest.TestCase):
                 self.reset_cache()
                 RuntimeHubHandler.requests = []
                 RuntimeHubHandler.payloads = dict(self.good_payloads)
-                self.assertEqual(len(corrupt), artifact["bytes"])
+                original = RuntimeHubHandler.payloads[artifact["path"]]
+                corrupt = bytes([original[0] ^ 0xff]) + original[1:]
                 RuntimeHubHandler.payloads[artifact["path"]] = corrupt
                 mismatch = self.run_probe_failure("server")
                 self.assertNotEqual(mismatch.returncode, 0)
                 self.assertIn(f"role='ds4_vision.{role}'", mismatch.stderr)
                 self.assertIn("SHA-256", mismatch.stderr)
+
+    def test_semantically_mismatched_vision_roles_fail_after_hash_verification(self):
+        cases = (
+            ("wrong-role", "tower", build_vision_projector(),
+             "incompatible safetensors semantic header"),
+            ("wrong-shape", "projector",
+             build_vision_projector(proj0_shape=(896, 4096)),
+             "incompatible safetensors semantic header"),
+            ("oversized-header", "tower",
+             struct.pack("<Q", 1024 * 1024 + 1),
+             "invalid bounded safetensors header"),
+        )
+        for case, role, payload, expected in cases:
+            with self.subTest(case=case, role=role):
+                self.reset_cache()
+                RuntimeHubHandler.requests = []
+                manifest = json.loads(json.dumps(self.good_manifest))
+                artifact = manifest["variants"][0]["ds4_vision"][role]
+                artifact["bytes"] = len(payload)
+                artifact["sha256"] = sha256(payload)
+                RuntimeHubHandler.manifest = json.dumps(manifest).encode("utf-8")
+                RuntimeHubHandler.payloads = dict(self.good_payloads)
+                RuntimeHubHandler.payloads[artifact["path"]] = payload
+
+                result = self.run_probe_failure("server")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(
+                    f"catalog vision role 'ds4_vision.{role}' has an "
+                    f"{expected}",
+                    result.stderr,
+                )
 
     def test_hf_and_local_model_paths_produce_identical_deterministic_output(self):
         env = os.environ.copy()
@@ -358,11 +425,14 @@ class RuntimeWiringTests(unittest.TestCase):
     def test_server_handoffs_verified_receiver_before_weight_binding(self):
         env = os.environ.copy()
         env["HF_ENDPOINT"] = self.endpoint
-        with tempfile.TemporaryDirectory() as cache:
+        with tempfile.TemporaryDirectory() as cache, \
+                tempfile.NamedTemporaryFile(suffix=".py") as encoder:
             env["DS4_LOCK_FILE"] = str(Path(cache) / "ds4.lock")
             result = subprocess.run(
                 [str(ROOT / "ds4-server"), "--cpu", "--hf", "owner/repo",
-                 "--hf-cache-dir", cache],
+                 "--hf-cache-dir", cache,
+                 "--vision-python", "/bin/sh",
+                 "--vision-encoder", encoder.name],
                 cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE, timeout=10, check=False,
             )
@@ -373,6 +443,44 @@ class RuntimeWiringTests(unittest.TestCase):
         self.assertIn("verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=verified-pending-receiver", output)
         self.assertIn("dspark=not-requested", output)
         self.assertIn("required tensor is missing: token_embd.weight", output)
+
+    def test_vision_runtime_paths_fail_before_receiver_binding(self):
+        env = os.environ.copy()
+        env["HF_ENDPOINT"] = self.endpoint
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            python = root / "python"
+            python.write_text("#!/bin/sh\n", encoding="utf-8")
+            python.chmod(0o600)
+            encoder = root / "encoder.py"
+            encoder.write_text("# fixture\n", encoding="utf-8")
+            encoder_dir = root / "encoder-dir"
+            encoder_dir.mkdir()
+            cases = (
+                ("missing-python", [], "vision role python is missing"),
+                ("non-executable-python",
+                 ["--vision-python", str(python),
+                  "--vision-encoder", str(encoder)],
+                 "vision role python is not a trusted executable regular file"),
+                ("non-regular-encoder",
+                 ["--vision-python", "/bin/sh",
+                  "--vision-encoder", str(encoder_dir)],
+                 "vision role encoder is not a readable regular file"),
+            )
+            for name, extra, expected in cases:
+                with self.subTest(case=name), tempfile.TemporaryDirectory() as cache:
+                    env["DS4_LOCK_FILE"] = str(Path(cache) / "ds4.lock")
+                    result = subprocess.run(
+                        [str(ROOT / "ds4-server"), "--cpu", "--hf",
+                         "owner/repo", "--hf-cache-dir", cache, *extra],
+                        cwd=ROOT, env=env, text=True,
+                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        timeout=10, check=False,
+                    )
+                    output = result.stdout + result.stderr
+                    self.assertNotEqual(result.returncode, 0, output)
+                    self.assertIn(expected, output)
+                    self.assertNotIn("required tensor is missing", output)
 
 
 if __name__ == "__main__":
