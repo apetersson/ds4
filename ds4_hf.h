@@ -7,6 +7,9 @@
 
 #define DS4_HF_REPO_MAX 256
 #define DS4_HF_SELECTOR_MAX 128
+#define DS4_HF_ENDPOINT_MAX 512
+#define DS4_HF_COMMIT_SHA_LEN 40
+#define DS4_HF_URL_MAX 4096
 
 typedef enum {
     DS4_HF_CLI_NO_MATCH,
@@ -85,5 +88,46 @@ bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
                          size_t errlen);
 
 bool ds4_hf_selector_equal(const char *left, const char *right);
+
+typedef enum {
+    DS4_HF_RESOLVE_OK = 0,
+    DS4_HF_RESOLVE_PRIVATE_OR_GATED,
+    DS4_HF_RESOLVE_REPOSITORY_NOT_FOUND,
+    DS4_HF_RESOLVE_REVISION_NOT_FOUND,
+    DS4_HF_RESOLVE_AUTHENTICATION_FAILED,
+    DS4_HF_RESOLVE_NETWORK_FAILED,
+    DS4_HF_RESOLVE_TIMEOUT,
+    DS4_HF_RESOLVE_MALFORMED_RESPONSE,
+    DS4_HF_RESOLVE_INVALID_ARGUMENT,
+} ds4_hf_resolve_status;
+
+/* A launch-scoped repository identity. Every metadata or artifact URL must be
+ * derived from this record so a moving branch cannot mix repository states. */
+typedef struct {
+    char endpoint[DS4_HF_ENDPOINT_MAX];
+    char repo[DS4_HF_REPO_MAX];
+    char commit[DS4_HF_COMMIT_SHA_LEN + 1];
+} ds4_hf_resolved_repo;
+
+/* Resolve cfg->revision (or the repository default) through the Hub model API.
+ * Credentials are sent as an in-memory HTTP header and are never logged or
+ * passed to another process. timeout_ms <= 0 selects the 30 second default. */
+ds4_hf_resolve_status ds4_hf_resolve_repository(
+    const ds4_hf_cli_config *cfg,
+    long timeout_ms,
+    ds4_hf_resolved_repo *resolved,
+    char *err,
+    size_t errlen);
+
+/* Build an immutable /resolve/<commit>/ URL for a manifest or artifact path.
+ * This performs no network access or acquisition. */
+bool ds4_hf_resolved_file_url(const ds4_hf_resolved_repo *resolved,
+                              const char *repo_path,
+                              char *url,
+                              size_t url_len,
+                              char *err,
+                              size_t errlen);
+
+const char *ds4_hf_resolve_status_name(ds4_hf_resolve_status status);
 
 #endif
