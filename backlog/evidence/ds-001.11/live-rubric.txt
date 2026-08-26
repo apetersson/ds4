@@ -1,0 +1,13 @@
+Use the attached dashboard image only. Transcribe the visible text; do not infer
+or repair values from context. Output exactly these seven labeled lines:
+
+Title: <visible title>
+Throughput: <visible value and unit>
+Latency: <all visible digits and unit>
+Memory: <visible value and unit>
+Flow: <four visible nodes in order, separated by ->>
+Snapshot: <visible date>
+Status: <visible status>
+
+The latency card contains a three-digit value. Preserve all three visible
+digits. Preserve the title's exact spelling and accents, if any.

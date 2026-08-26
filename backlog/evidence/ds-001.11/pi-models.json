@@ -1,0 +1,91 @@
+{
+  "providers": {
+    "ds4-encoder": {
+      "baseUrl": "http://127.0.0.1:18082/v1",
+      "api": "openai-completions",
+      "apiKey": "local-evidence-only",
+      "authHeader": false,
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "name": "DS4 encoder image path",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 2048,
+          "maxTokens": 192,
+          "samplingParams": {"temperature": 0},
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          }
+        }
+      ]
+    },
+    "ds4-real": {
+      "baseUrl": "http://127.0.0.1:18082/v1",
+      "api": "openai-completions",
+      "apiKey": "local-evidence-only",
+      "authHeader": false,
+      "headers": {"X-DS4-Vision-Control": "real"},
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "name": "DS4 trusted real control",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 2048,
+          "maxTokens": 192,
+          "samplingParams": {"temperature": 0},
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          }
+        }
+      ]
+    },
+    "ds4-zero": {
+      "baseUrl": "http://127.0.0.1:18082/v1",
+      "api": "openai-completions",
+      "apiKey": "local-evidence-only",
+      "authHeader": false,
+      "headers": {"X-DS4-Vision-Control": "zero"},
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "name": "DS4 trusted zero control",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 2048,
+          "maxTokens": 192,
+          "samplingParams": {"temperature": 0},
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          }
+        }
+      ]
+    },
+    "ds4-shuffle": {
+      "baseUrl": "http://127.0.0.1:18082/v1",
+      "api": "openai-completions",
+      "apiKey": "local-evidence-only",
+      "authHeader": false,
+      "headers": {"X-DS4-Vision-Control": "shuffle"},
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "name": "DS4 trusted shuffle control",
+          "reasoning": false,
+          "input": ["text", "image"],
+          "contextWindow": 2048,
+          "maxTokens": 192,
+          "samplingParams": {"temperature": 0},
+          "compat": {
+            "supportsDeveloperRole": false,
+            "supportsReasoningEffort": false
+          }
+        }
+      ]
+    }
+  }
+}
