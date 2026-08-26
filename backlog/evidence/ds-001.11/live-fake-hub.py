@@ -2,6 +2,7 @@
 """Pinned metadata-only Hub for the already verified DS-001.11 cache."""
 
 import json
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -11,6 +12,7 @@ REVISION = "0123456789abcdef0123456789abcdef01234567"
 REPOSITORY = "apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision"
 ROOT = Path(__file__).resolve().parents[3]
 FIXTURE = ROOT / "tests/fixtures/hf/variants-v2.json"
+LOG = Path("/private/tmp/ds00111-review-fix-live/hub-requests.txt")
 
 manifest = json.loads(FIXTURE.read_text(encoding="utf-8"))
 manifest["repository"] = REPOSITORY
@@ -49,7 +51,11 @@ manifest_body = json.dumps(
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        print(fmt % args, flush=True)
+        message = fmt % args
+        line = f"{datetime.now(timezone.utc).isoformat()} {message}\n"
+        print(message, flush=True)
+        with LOG.open("a", encoding="utf-8") as stream:
+            stream.write(line)
 
     def send_bytes(self, status, payload, content_type):
         self.send_response(status)
@@ -68,5 +74,6 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.send_bytes(404, b"cached-artifacts-only", "text/plain")
 
-
+LOG.parent.mkdir(parents=True, exist_ok=True)
+LOG.write_text("", encoding="utf-8")
 ThreadingHTTPServer(("127.0.0.1", 18081), Handler).serve_forever()
