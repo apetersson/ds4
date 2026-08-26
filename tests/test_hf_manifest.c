@@ -163,6 +163,14 @@ static void test_llama_discovery_without_manifest(void) {
     CHECK("directory-only selector does not falsely prove primary selection",
           !ds4_hf_llama_primary_selectable(
               "Headroom128", "catalog/Headroom128/main.gguf"));
+    CHECK("llama.cpp first split shard is not a schema-v2 primary",
+          !ds4_hf_llama_primary_selectable(
+              "Headroom128",
+              "catalog/DeepSeek-Headroom128-00001-of-00002.gguf"));
+    CHECK("llama.cpp non-first split shard is not a schema-v2 primary",
+          !ds4_hf_llama_primary_selectable(
+              "Headroom128",
+              "catalog/DeepSeek-Headroom128-00002-of-00002.gguf"));
     const char *excluded_primary_names[] = {
         "DeepSeek-mmproj-copy-Headroom128.gguf",
         "DeepSeek-imatrix-Headroom128.gguf",
@@ -338,6 +346,10 @@ static void test_schema_rejections(const char *json) {
     expect_rejected("directory-only selector cannot select primary GGUF", json,
                     "Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf",
                     "Headroom128-IQ2_XXS/main.gguf",
+                    "selector cannot select its primary GGUF");
+    expect_rejected("split receiver cannot satisfy schema-v2 primary artifact", json,
+                    "Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf",
+                    "Headroom128-IQ2_XXS/DeepSeek-Headroom128-IQ2_XXS-00001-of-00002.gguf",
                     "selector cannot select its primary GGUF");
 
     const char *bad_repositories[] = {

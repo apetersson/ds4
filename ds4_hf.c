@@ -1104,6 +1104,17 @@ static const char *manifest_basename(const char *path) {
     return slash ? slash + 1 : path;
 }
 
+static bool manifest_split_gguf_name(const char *filename) {
+    size_t len = strlen(filename);
+    if (len <= 20) return false;
+    const char *tail = filename + len - 20;
+    if (tail[0] != '-' || memcmp(tail + 6, "-of-", 4) ||
+        strcmp(tail + 15, ".gguf")) return false;
+    for (unsigned i = 1; i <= 5; i++) if (!isdigit((unsigned char)tail[i])) return false;
+    for (unsigned i = 10; i <= 14; i++) if (!isdigit((unsigned char)tail[i])) return false;
+    return true;
+}
+
 bool ds4_hf_llama_primary_selectable(const char *selector,
                                      const char *receiver_path) {
     if (!selector || !selector[0] || !manifest_safe_path(receiver_path)) return false;
@@ -1111,7 +1122,7 @@ bool ds4_hf_llama_primary_selectable(const char *selector,
     static const char *const excluded[] = {
         "mmproj", "imatrix", "mtp-", "eagle3-", "dflash-", "dspark-",
     };
-    if (!manifest_suffix(filename, ".gguf")) return false;
+    if (!manifest_suffix(filename, ".gguf") || manifest_split_gguf_name(filename)) return false;
     for (size_t i = 0; i < sizeof(excluded) / sizeof(excluded[0]); i++) {
         if (strstr(filename, excluded[i])) return false;
     }
