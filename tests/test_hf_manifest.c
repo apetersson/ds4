@@ -163,6 +163,24 @@ static void test_llama_discovery_without_manifest(void) {
     CHECK("directory-only selector does not falsely prove primary selection",
           !ds4_hf_llama_primary_selectable(
               "Headroom128", "catalog/Headroom128/main.gguf"));
+    const char *excluded_primary_names[] = {
+        "DeepSeek-mmproj-copy-Headroom128.gguf",
+        "DeepSeek-imatrix-Headroom128.gguf",
+        "DeepSeek-mtp-support-Headroom128.gguf",
+        "DeepSeek-eagle3-draft-Headroom128.gguf",
+        "DeepSeek-dflash-draft-Headroom128.gguf",
+        "DeepSeek-dspark-support-Headroom128.gguf",
+    };
+    for (size_t i = 0;
+         i < sizeof(excluded_primary_names) / sizeof(excluded_primary_names[0]);
+         i++) {
+        char path[DS4_HF_PATH_MAX];
+        char name[256];
+        snprintf(path, sizeof(path), "catalog/%s", excluded_primary_names[i]);
+        snprintf(name, sizeof(name), "llama.cpp primary exclusion rejects %s",
+                 excluded_primary_names[i]);
+        CHECK(name, !ds4_hf_llama_primary_selectable("Headroom128", path));
+    }
     CHECK("llama.cpp discovery rejects cross-directory mmproj decoy",
           !ds4_hf_llama_siblings_valid(
               "Headroom128-IQ2_XXS/main.gguf",

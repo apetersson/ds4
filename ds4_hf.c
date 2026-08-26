@@ -1106,8 +1106,15 @@ static const char *manifest_basename(const char *path) {
 
 bool ds4_hf_llama_primary_selectable(const char *selector,
                                      const char *receiver_path) {
-    if (!selector || !selector[0] || !receiver_path) return false;
+    if (!selector || !selector[0] || !manifest_safe_path(receiver_path)) return false;
     const char *filename = manifest_basename(receiver_path);
+    static const char *const excluded[] = {
+        "mmproj", "imatrix", "mtp-", "eagle3-", "dflash-", "dspark-",
+    };
+    if (!manifest_suffix(filename, ".gguf")) return false;
+    for (size_t i = 0; i < sizeof(excluded) / sizeof(excluded[0]); i++) {
+        if (strstr(filename, excluded[i])) return false;
+    }
     size_t selector_len = strlen(selector);
     for (const char *candidate = filename; *candidate; candidate++) {
         size_t i = 0;
