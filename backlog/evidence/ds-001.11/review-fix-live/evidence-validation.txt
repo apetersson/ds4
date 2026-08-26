@@ -1,0 +1,12 @@
+direct_encoder_equals_real=true
+direct_zero_shuffle_causally_distinct=true
+pi_encoder_equals_real=true
+pi_zero_shuffle_causally_distinct=true
+literal_visible_facts_recovered=title,throughput,memory,flow,snapshot,status
+preserved_ocr_miss=latency_238_to_338
+negative_file_url_and_public_span_errors=true
+server_hf_active_encoder_769_exact_image_hash=true
+fake_hub_request_count=2
+preflight=PASS
+postflight=PASS
+evidence_validation=PASS

@@ -1,0 +1,25 @@
+{
+  "id": "chatcmpl-5",
+  "object": "chat.completion",
+  "created": 1787732436,
+  "model": "deepseek-chat",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "Title: Memory Status\nThroughput: 4.2 GB/s\nLatency: 114 ms\nMemory: 38 GB\nFlow: Snapshot -> Encoder -> Memory -> Status\nSnapshot: 2026-08-01\nStatus: Memory Status"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 893,
+    "completion_tokens": 54,
+    "total_tokens": 947,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 0
+    }
+  }
+}

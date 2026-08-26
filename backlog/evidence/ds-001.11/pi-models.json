@@ -11,7 +11,7 @@
           "name": "DS4 encoder image path",
           "reasoning": false,
           "input": ["text", "image"],
-          "contextWindow": 2048,
+          "contextWindow": 131072,
           "maxTokens": 192,
           "samplingParams": {"temperature": 0},
           "compat": {
@@ -33,7 +33,7 @@
           "name": "DS4 trusted real control",
           "reasoning": false,
           "input": ["text", "image"],
-          "contextWindow": 2048,
+          "contextWindow": 131072,
           "maxTokens": 192,
           "samplingParams": {"temperature": 0},
           "compat": {
@@ -55,7 +55,7 @@
           "name": "DS4 trusted zero control",
           "reasoning": false,
           "input": ["text", "image"],
-          "contextWindow": 2048,
+          "contextWindow": 131072,
           "maxTokens": 192,
           "samplingParams": {"temperature": 0},
           "compat": {
@@ -77,7 +77,7 @@
           "name": "DS4 trusted shuffle control",
           "reasoning": false,
           "input": ["text", "image"],
-          "contextWindow": 2048,
+          "contextWindow": 131072,
           "maxTokens": 192,
           "samplingParams": {"temperature": 0},
           "compat": {

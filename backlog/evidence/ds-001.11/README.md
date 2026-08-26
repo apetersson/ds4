@@ -1,5 +1,57 @@
 # DS-001.11 serialized HF vision evidence
 
+## Review-fix literal replay (superseding AC #7 evidence)
+
+The `review-fix-live/` directory is the fresh literal replay from committed
+implementation HEAD `182c3c3e68c8f639436934e9faa5b9aeeea1d4dd`, still based on exact
+DS-001.06 HEAD `1f6f19a1a9d8861246f4096c322908eb7341fb48`. It supersedes the
+interpretation of the older live samples below for AC #7 while retaining every
+older file as historical evidence.
+
+The fresh preflight passed at `2026-08-26T08:03:41Z`. It recorded absent global
+and task locks, no competing model/support process or exact artifact handle,
+port 18082 free, exact cached receiver/tower/projector/config identities, three
+matching 769-row DS4V controls with route token 129279 and image SHA-256
+`78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11`,
+91% memory free, and the acknowledged unrelated oMLX/Pi state. Two earlier
+preflight-script format mistakes failed closed before acquisition and are
+retained as `preflight-attempt1-failed.txt` and
+`preflight-attempt2-failed.txt`.
+
+The metadata-only fake Hub served only the pinned repository identity and
+manifest; `hub-requests.txt` contains exactly those two requests and no artifact
+request. The supervisor atomically created and exclusively held global lock
+inode 173495365 before starting the single exact cached Headroom server. The
+server log proves HF activation of receiver plus verified
+DeepEncoderV2-BF16 tower, 896-to-4096 BF16 projector, and config metadata. The
+production encoder used inherited verified descriptors, BF16 weights, adapter
+step 4800, three views, 769 rows, and the exact image hash; no mmproj or DSpark
+artifact was passed to the sidecar.
+
+`direct-matrix.txt` preserves the literal direct OpenAI results. Encoder-real
+and trusted-real are byte-for-byte identical in content; zero and shuffled rows
+produce materially different invented facts. Text succeeds, while a `file://`
+image and public `ds4_embedding_span_path` both fail with HTTP 400. Against the
+visible rubric, both real paths recover the title, throughput, memory, flow,
+snapshot, and NOMINAL status, but misread visible `Latency: 238 ms` as
+`Latency: 338 ms`. This OCR imperfection is retained and is not described as an
+exact factual match.
+
+The first vanilla-Pi run exposed evidence-harness metadata failures rather than
+a DS4 implementation failure. The exact empty text probe, raw one-token JSON
+event streams, and disposition are retained in `harness-failures.txt`. After
+correcting only Pi's descriptive catalog context window to 131072 (the server
+launch remained strictly `--ctx 2048 --tokens 192`), the literal offline/no-tool
+Pi matrix completed all four providers. Encoder-real and trusted-real again
+match, including the same preserved 238-to-338 miss; zero and shuffle materially
+diverge. Raw successful outputs are `pi-matrix.txt` and `pi-ds4-*.txt`.
+
+Immediate postflight passed at `2026-08-26T08:25:13Z`: the exact lane inode was
+released, all global/task locks were absent, ports 18081/18082 were free, no
+DS4/fake-Hub/encoder/test process or exact artifact handle remained, memory was
+87% free, and unrelated oMLX/Pi processes were left untouched. Checksums for the
+packaged replay are in `review-fix-live/checksums.txt`.
+
 Captured on 2026-08-26 from clean branch `worker/DS-001.11-hf-vision` at
 `d70d1c8f344cf292709c88b7336a6df0bf5c9d17`, whose merge base is the exact
 completed DS-001.06 head `1f6f19a1a9d8861246f4096c322908eb7341fb48`.
@@ -72,4 +124,3 @@ unchanged unrelated oMLX/Pi processes immediately before atomic acquisition.
 free, zero lane processes, no exact handles, 89% memory free, and unchanged
 unrelated oMLX/Pi immediately after release. The temporary task-only flock
 semantics file was verified unheld and removed; its audit is preserved.
-
