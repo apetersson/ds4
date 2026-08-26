@@ -36,6 +36,7 @@
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -44,6 +45,8 @@ static volatile sig_atomic_t g_listen_fd = -1;
 
 #define DS4_SERVER_IO_TIMEOUT_SEC 10
 #define DS4_SERVER_SEND_STALL_TIMEOUT_MS 2000
+#define DS4_IMAGE_MARKER "\x1d" "DS4_IMAGE" "\x1d"
+#define DS4_IMAGE_TOKEN  "<｜image｜>"
 
 #if defined(__GNUC__) || defined(__clang__)
 #define DS4_SERVER_MAYBE_UNUSED __attribute__((unused))
@@ -526,6 +529,156 @@ static bool json_content_replace(const char **p, char **dst) {
     return true;
 }
 
+static bool json_image_url_value(const char **p, char **out) {
+    json_ws(p);
+    if (**p == '"') return json_string(p, out);
+    if (**p != '{') return json_skip_value(p);
+    (*p)++;
+    json_ws(p);
+    while (**p && **p != '}') {
+        char *key = NULL;
+        if (!json_string(p, &key)) return false;
+        json_ws(p);
+        if (**p != ':') {
+            free(key);
+            return false;
+        }
+        (*p)++;
+        if (!strcmp(key, "url")) {
+            char *url = NULL;
+            if (!json_string(p, &url)) {
+                free(key);
+                return false;
+            }
+            free(*out);
+            *out = url;
+        } else if (!json_skip_value(p)) {
+            free(key);
+            return false;
+        }
+        free(key);
+        json_ws(p);
+        if (**p == ',') (*p)++;
+        json_ws(p);
+    }
+    if (**p != '}') return false;
+    (*p)++;
+    return true;
+}
+
+static bool json_message_content_object(const char **p, buf *b,
+                                        char **image_url, int *image_count) {
+    if (**p != '{') return false;
+    (*p)++;
+    char *type = NULL;
+    char *text = NULL;
+    char *url = NULL;
+    bool ok = true;
+    json_ws(p);
+    while (ok && **p && **p != '}') {
+        char *key = NULL;
+        if (!json_string(p, &key)) {
+            ok = false;
+            break;
+        }
+        json_ws(p);
+        if (**p != ':') {
+            free(key);
+            ok = false;
+            break;
+        }
+        (*p)++;
+        if (!strcmp(key, "type")) {
+            ok = json_string_replace(p, &type);
+        } else if (!strcmp(key, "text")) {
+            ok = json_content_replace(p, &text);
+        } else if (!strcmp(key, "image_url") || !strcmp(key, "image")) {
+            ok = json_image_url_value(p, &url);
+        } else {
+            ok = json_skip_value(p);
+        }
+        free(key);
+        json_ws(p);
+        if (**p == ',') (*p)++;
+        json_ws(p);
+    }
+    if (!ok || **p != '}') {
+        free(type);
+        free(text);
+        free(url);
+        return false;
+    }
+    (*p)++;
+    if (url && (!type || !strcmp(type, "image_url") ||
+                !strcmp(type, "input_image") || !strcmp(type, "image"))) {
+        (*image_count)++;
+        free(*image_url);
+        *image_url = url;
+        url = NULL;
+        buf_puts(b, DS4_IMAGE_MARKER);
+    } else if (text) {
+        buf_puts(b, text);
+    }
+    free(type);
+    free(text);
+    free(url);
+    return true;
+}
+
+/* OpenAI message content parser that preserves text order and replaces one
+ * image block with an internal marker.  The marker is expanded to the exact
+ * number of route tokens after the image encoder has produced DS4VEMB1. */
+static bool json_message_content(const char **p, char **out,
+                                 char **image_url, int *image_count) {
+    json_ws(p);
+    if (**p == '"') return json_string(p, out);
+    if (json_lit(p, "null")) {
+        *out = xstrdup("");
+        return true;
+    }
+    if (**p != '[') {
+        if (!json_skip_value(p)) return false;
+        *out = xstrdup("");
+        return true;
+    }
+
+    (*p)++;
+    buf b = {0};
+    json_ws(p);
+    while (**p && **p != ']') {
+        if (**p == '"') {
+            char *s = NULL;
+            if (!json_string(p, &s)) goto fail;
+            buf_puts(&b, s);
+            free(s);
+        } else if (**p == '{') {
+            if (!json_message_content_object(p, &b, image_url, image_count))
+                goto fail;
+        } else if (!json_skip_value(p)) {
+            goto fail;
+        }
+        json_ws(p);
+        if (**p == ',') (*p)++;
+        json_ws(p);
+    }
+    if (**p != ']') goto fail;
+    (*p)++;
+    *out = buf_take(&b);
+    return true;
+fail:
+    buf_free(&b);
+    return false;
+}
+
+static bool json_message_content_replace(const char **p, char **dst,
+                                         char **image_url, int *image_count) {
+    char *tmp = NULL;
+    if (!json_message_content(p, &tmp, image_url, image_count)) return false;
+    free(*dst);
+    *dst = tmp;
+    return true;
+}
+
 typedef enum {
     REQ_CHAT,
     REQ_COMPLETION,
@@ -565,6 +718,14 @@ static void random_tool_id(char *dst, size_t dstlen, api_style api) {
 }
 
 typedef struct server server;
+
+typedef struct {
+    const char *python;
+    const char *encoder;
+    const char *tower;
+    const char *adapter;
+    pthread_mutex_t *mu;
+} server_vision_config;
 
 typedef struct {
     char *id;
@@ -621,6 +782,27 @@ typedef struct {
     int cap;
 } chat_msgs;
 
+enum { DS4V_FLAG_BEGIN_END = 1u };
+
+typedef struct {
+    char magic[8];
+    uint32_t version;
+    uint32_t header_bytes;
+    uint32_t token_count;
+    uint32_t hidden_size;
+    uint32_t flags;
+    int32_t begin_token;
+    int32_t end_token;
+    uint32_t reserved;
+    uint8_t image_sha256[32];
+} ds4v_header;
+
+typedef struct {
+    ds4v_header header;
+    int32_t *routes;
+    float *rows;
+} ds4v_payload;
+
 static void tool_memory_attach_to_messages(server *s, chat_msgs *msgs,
                                            tool_replay_stats *stats);
 static bool tool_memory_has_id(server *s, const char *id);
@@ -650,6 +832,11 @@ typedef struct {
     stop_list stops;
     char *raw_body;
     char *prompt_text;
+    char *embedding_span_path;
+    char *image_url;
+    bool embedding_span_owned;
+    ds4v_payload embedding_payload;
+    ds4_embedding_span embedding_span;
     tool_schema_orders tool_orders;
     int max_tokens;
     int top_k;
@@ -831,6 +1018,18 @@ static void request_free(request *r) {
     free(r->stops.v);
     free(r->raw_body);
     free(r->prompt_text);
+    if (r->embedding_span_owned && r->embedding_span_path) {
+        unlink(r->embedding_span_path);
+        size_t n = strlen(r->embedding_span_path);
+        char *metadata = xmalloc(n + 6);
+        snprintf(metadata, n + 6, "%s.json", r->embedding_span_path);
+        unlink(metadata);
+        free(metadata);
+    }
+    free(r->embedding_span_path);
+    free(r->image_url);
+    free(r->embedding_payload.routes);
+    free(r->embedding_payload.rows);
     stop_list_clear(&r->responses_live_call_ids);
     free(r->responses_live_call_ids.v);
     free(r->responses_live_suffix_text);
@@ -839,6 +1038,250 @@ static void request_free(request *r) {
     free(r->anthropic_live_suffix_text);
     tool_schema_orders_free(&r->tool_orders);
     memset(r, 0, sizeof(*r));
+}
+
+static bool load_ds4v_payload(const char *path, ds4v_payload *out,
+                              char *err, size_t errlen) {
+    memset(out, 0, sizeof(*out));
+    FILE *fp = fopen(path, "rb");
+    if (!fp) {
+        if (err && errlen)
+            snprintf(err, errlen, "cannot open embedding span: %s", strerror(errno));
+        return false;
+    }
+
+    bool ok = fread(&out->header, 1, sizeof(out->header), fp) == sizeof(out->header);
+    const uint32_t count = out->header.token_count;
+    if (!ok || memcmp(out->header.magic, "DS4VEMB1", 8) != 0 ||
+        out->header.version != 1 ||
+        out->header.header_bytes != sizeof(out->header) ||
+        (count != 257 && count != 769 && count != 1281) ||
+        out->header.hidden_size != 4096 ||
+        (out->header.flags & ~DS4V_FLAG_BEGIN_END) != 0) {
+        if (err && errlen) snprintf(err, errlen, "invalid or unsupported DS4VEMB1 payload");
+        fclose(fp);
+        memset(out, 0, sizeof(*out));
+        return false;
+    }
+
+    const size_t route_bytes = (size_t)count * sizeof(out->routes[0]);
+    const size_t row_values = (size_t)count * (size_t)out->header.hidden_size;
+    const size_t row_bytes = row_values * sizeof(out->rows[0]);
+    out->routes = xmalloc(route_bytes);
+    out->rows = xmalloc(row_bytes);
+    ok = fread(out->routes, 1, route_bytes, fp) == route_bytes &&
+         fread(out->rows, 1, row_bytes, fp) == row_bytes &&
+         fgetc(fp) == EOF;
+    fclose(fp);
+    if (ok) {
+        for (uint32_t i = 0; i < count; i++) {
+            if (out->routes[i] < 0 || out->routes[i] >= 129280) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if (ok) {
+        for (size_t i = 0; i < row_values; i++) {
+            if (!isfinite(out->rows[i])) {
+                ok = false;
+                break;
+            }
+        }
+    }
+    if (!ok) {
+        if (err && errlen) snprintf(err, errlen, "truncated or invalid DS4VEMB1 payload");
+        free(out->routes);
+        free(out->rows);
+        memset(out, 0, sizeof(*out));
+    }
+    return ok;
+}
+
+static bool write_all_file_descriptor(int fd, const char *data, size_t len) {
+    while (len) {
+        ssize_t n = write(fd, data, len);
+        if (n < 0 && errno == EINTR) continue;
+        if (n <= 0) return false;
+        data += (size_t)n;
+        len -= (size_t)n;
+    }
+    return true;
+}
+
+static void unlink_encoder_output(const char *path) {
+    if (!path) return;
+    unlink(path);
+    size_t n = strlen(path);
+    char *metadata = xmalloc(n + 6);
+    snprintf(metadata, n + 6, "%s.json", path);
+    unlink(metadata);
+    free(metadata);
+}
+
+static bool vision_config_complete(const server_vision_config *vision) {
+    return vision && vision->python && vision->encoder &&
+           vision->tower && vision->adapter;
+}
+
+static bool run_vision_encoder(const server_vision_config *vision,
+                               const char *image_url, char **output,
+                               char *err, size_t errlen) {
+    if (!vision_config_complete(vision)) {
+        snprintf(err, errlen,
+                 "image input requires --vision-python, --vision-encoder, --vision-tower, and --vision-adapter");
+        return false;
+    }
+    char input_template[] = "/tmp/ds4-image-url-XXXXXX";
+    char output_template[] = "/tmp/ds4-vision-XXXXXX";
+    int input_fd = mkstemp(input_template);
+    if (input_fd < 0) {
+        snprintf(err, errlen, "cannot create image URL input: %s", strerror(errno));
+        return false;
+    }
+    bool ok = write_all_file_descriptor(input_fd, image_url, strlen(image_url));
+    if (close(input_fd) != 0) ok = false;
+    if (!ok) {
+        snprintf(err, errlen, "cannot write image URL input: %s", strerror(errno));
+        unlink(input_template);
+        return false;
+    }
+
+    int output_fd = mkstemp(output_template);
+    if (output_fd < 0) {
+        snprintf(err, errlen, "cannot create vision output: %s", strerror(errno));
+        unlink(input_template);
+        return false;
+    }
+    close(output_fd);
+
+    if (vision->mu) pthread_mutex_lock(vision->mu);
+    pid_t pid = fork();
+    if (pid == 0) {
+        long max_fd = sysconf(_SC_OPEN_MAX);
+        if (max_fd < 0) max_fd = 1024;
+        for (int fd = 3; fd < max_fd; fd++) close(fd);
+        execl(vision->python, vision->python, vision->encoder,
+              "--image-url-file", input_template,
+              "--output", output_template,
+              "--tower", vision->tower,
+              "--adapter", vision->adapter,
+              (char *)NULL);
+        _exit(127);
+    }
+    const int fork_errno = pid < 0 ? errno : 0;
+    int status = 0;
+    if (pid < 0) {
+        ok = false;
+    } else {
+        while (waitpid(pid, &status, 0) < 0) {
+            if (errno == EINTR) continue;
+            status = -1;
+            break;
+        }
+        ok = status >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    }
+    if (vision->mu) pthread_mutex_unlock(vision->mu);
+    unlink(input_template);
+    if (!ok) {
+        if (pid < 0) {
+            snprintf(err, errlen, "cannot start vision encoder: %s",
+                     strerror(fork_errno));
+        } else if (status >= 0 && WIFEXITED(status)) {
+            snprintf(err, errlen, "vision encoder failed with exit status %d",
+                     WEXITSTATUS(status));
+        } else if (status >= 0 && WIFSIGNALED(status)) {
+            snprintf(err, errlen, "vision encoder terminated by signal %d",
+                     WTERMSIG(status));
+        } else {
+            snprintf(err, errlen, "vision encoder failed while waiting for completion");
+        }
+        unlink_encoder_output(output_template);
+        return false;
+    }
+    *output = xstrdup(output_template);
+    return true;
+}
+
+static char *repeat_image_token(uint32_t count) {
+    const size_t token_len = strlen(DS4_IMAGE_TOKEN);
+    if (count > SIZE_MAX / token_len) return NULL;
+    const size_t total = (size_t)count * token_len;
+    char *out = xmalloc(total + 1);
+    for (uint32_t i = 0; i < count; i++)
+        memcpy(out + (size_t)i * token_len, DS4_IMAGE_TOKEN, token_len);
+    out[total] = '\0';
+    return out;
+}
+
+static bool replace_image_marker(char **text, const char *replacement) {
+    if (!text || !*text) return false;
+    const char *mark = strstr(*text, DS4_IMAGE_MARKER);
+    if (!mark || strstr(mark + strlen(DS4_IMAGE_MARKER), DS4_IMAGE_MARKER))
+        return false;
+    const size_t before = (size_t)(mark - *text);
+    const size_t marker_len = strlen(DS4_IMAGE_MARKER);
+    const size_t replacement_len = strlen(replacement);
+    const size_t after = strlen(mark + marker_len);
+    char *out = xmalloc(before + replacement_len + after + 1);
+    memcpy(out, *text, before);
+    memcpy(out + before, replacement, replacement_len);
+    memcpy(out + before + replacement_len, mark + marker_len, after + 1);
+    free(*text);
+    *text = out;
+    return true;
+}
+
+static bool prepare_openai_image(const server_vision_config *vision,
+                                 request *r, chat_msgs *msgs,
+                                 char *err, size_t errlen) {
+    if (!r->image_url) return true;
+    if (r->embedding_span_path) {
+        snprintf(err, errlen,
+                 "image_url and ds4_embedding_span_path cannot be combined");
+        return false;
+    }
+    if (!run_vision_encoder(vision, r->image_url,
+                            &r->embedding_span_path, err, errlen))
+        return false;
+    r->embedding_span_owned = true;
+    if (!load_ds4v_payload(r->embedding_span_path, &r->embedding_payload,
+                           err, errlen))
+        return false;
+    char *tokens = repeat_image_token(r->embedding_payload.header.token_count);
+    if (!tokens) {
+        snprintf(err, errlen, "image route-token expansion overflow");
+        return false;
+    }
+    int replacements = 0;
+    for (int i = 0; i < msgs->len; i++) {
+        if (replace_image_marker(&msgs->v[i].content, tokens)) replacements++;
+    }
+    free(tokens);
+    if (replacements != 1) {
+        snprintf(err, errlen, "image marker is missing or duplicated");
+        return false;
+    }
+    return true;
+}
+
+static int find_embedding_route_span(const ds4_tokens *prompt,
+                                     const ds4v_payload *payload) {
+    if (!prompt || !payload || !payload->routes || payload->header.token_count == 0 ||
+        payload->header.token_count > (uint32_t)prompt->len)
+        return -1;
+    const int count = (int)payload->header.token_count;
+    for (int start = prompt->len - count; start >= 0; start--) {
+        bool match = true;
+        for (int i = 0; i < count; i++) {
+            if (prompt->v[start + i] != payload->routes[i]) {
+                match = false;
+                break;
+            }
+        }
+        if (match) return start;
+    }
+    return -1;
 }
 
 static ds4_think_mode think_mode_from_enabled(bool enabled, ds4_think_mode effort) {
@@ -983,6 +1426,8 @@ static bool server_model_alias_known(const char *id) {
     return id &&
            (!strcmp(id, "deepseek-v4-flash") ||
             !strcmp(id, "deepseek-v4-pro") ||
+            !strcmp(id, "deepseek-chat") ||
+            !strcmp(id, "deepseek-reasoner") ||
             !strcmp(id, "glm-5.2") ||
             !strcmp(id, "glm-5.2-chat") ||
             !strcmp(id, "glm-5.2-no-think") ||
@@ -1670,7 +2115,8 @@ bad:
     return false;
 }
 
-static bool parse_messages(const char **p, chat_msgs *msgs) {
+static bool parse_messages(const char **p, chat_msgs *msgs,
+                           char **image_url, int *image_count) {
     json_ws(p);
     if (**p != '[') return false;
     (*p)++;
@@ -1696,7 +2142,8 @@ static bool parse_messages(const char **p, chat_msgs *msgs) {
                     goto fail;
                 }
             } else if (!strcmp(key, "content")) {
-                if (!json_content_replace(p, &msg.content)) {
+                if (!json_message_content_replace(p, &msg.content,
+                                                  image_url, image_count)) {
                     free(key);
                     goto fail;
                 }
@@ -2968,7 +3415,9 @@ static void anthropic_prepare_live_continuation(request *r,
  * fields that affect model semantics, rendering, streaming, or cache keys, and
  * skip extension fields.  The output is always a rendered DS4 chat/completion
  * prompt plus the small amount of protocol state needed to translate the reply. */
-static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int def_tokens,
+static bool parse_chat_request(ds4_engine *e, server *s,
+                               const server_vision_config *vision,
+                               const char *body, int def_tokens,
                                int ctx_size, request *r, char *err, size_t errlen) {
     request_init(r, REQ_CHAT, def_tokens);
     r->model_syntax = server_model_syntax_for_engine(e);
@@ -2980,6 +3429,7 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
     ds4_think_mode reasoning_effort = DS4_THINK_HIGH;
     chat_msgs msgs = {0};
     char *tool_schemas = NULL;
+    int image_count = 0;
 
     json_ws(&p);
     if (*p != '{') goto bad;
@@ -2996,11 +3446,16 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
         p++;
         if (!strcmp(key, "messages")) {
             chat_msgs_free(&msgs);
-            if (!parse_messages(&p, &msgs)) {
+            if (!parse_messages(&p, &msgs, &r->image_url, &image_count)) {
                 free(key);
                 goto bad;
             }
             got_messages = true;
+        } else if (!strcmp(key, "ds4_embedding_span_path")) {
+            if (!json_string_replace(&p, &r->embedding_span_path)) {
+                free(key);
+                goto bad;
+            }
         } else if (!strcmp(key, "tools")) {
             free(tool_schemas);
             tool_schemas = NULL;
@@ -3119,6 +3574,19 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
         request_free(r);
         return false;
     }
+    if (image_count > 1) {
+        snprintf(err, errlen, "currently supports exactly one image per request");
+        chat_msgs_free(&msgs);
+        free(tool_schemas);
+        request_free(r);
+        return false;
+    }
+    if (!prepare_openai_image(vision, r, &msgs, err, errlen)) {
+        chat_msgs_free(&msgs);
+        free(tool_schemas);
+        request_free(r);
+        return false;
+    }
     r->has_tools = tool_schemas && tool_schemas[0] && !tool_choice_none;
     if (!got_thinking && model_alias_disables_thinking(r->model)) thinking_enabled = false;
     if (!got_thinking && model_alias_enables_thinking(r->model)) thinking_enabled = true;
@@ -3133,6 +3601,30 @@ static bool parse_chat_request(ds4_engine *e, server *s, const char *body, int d
         r->model_syntax, &msgs, active_tool_schemas,
         &r->tool_orders, r->think_mode);
     ds4_tokenize_rendered_chat(e, r->prompt_text, &r->prompt);
+    if (r->embedding_span_path) {
+        if (!r->embedding_payload.rows &&
+            !load_ds4v_payload(r->embedding_span_path, &r->embedding_payload,
+                               err, errlen)) {
+            chat_msgs_free(&msgs);
+            free(tool_schemas);
+            request_free(r);
+            return false;
+        }
+        const int start = find_embedding_route_span(&r->prompt,
+                                                     &r->embedding_payload);
+        if (start < 0) {
+            snprintf(err, errlen,
+                     "embedding span route tokens are not present in the rendered prompt");
+            chat_msgs_free(&msgs);
+            free(tool_schemas);
+            request_free(r);
+            return false;
+        }
+        r->embedding_span.rows = r->embedding_payload.rows;
+        r->embedding_span.start = (uint32_t)start;
+        r->embedding_span.count = r->embedding_payload.header.token_count;
+        r->embedding_span.width = r->embedding_payload.header.hidden_size;
+    }
     chat_msgs_free(&msgs);
     free(tool_schemas);
     return true;
@@ -8444,6 +8936,7 @@ static void id_list_push_unique(stop_list *ids, const char *id);
 
 struct server {
     ds4_engine *engine;
+    server_vision_config vision;
     server_slot *slots;
     int slot_count;
     int ctx_size;
@@ -8476,6 +8969,7 @@ struct server {
     uint64_t seq;
     FILE *trace;
     pthread_mutex_t trace_mu;
+    pthread_mutex_t vision_mu;
     uint64_t trace_seq;
 };
 
@@ -10197,6 +10691,7 @@ typedef struct {
     bool enable_cors;
     bool headers_sent;
     bool stream_failed;
+    bool disable_kv_store;
     double last_keepalive;
     job *request_job;
 } server_prefill_progress;
@@ -10515,6 +11010,18 @@ static int server_session_sync(server *s, server_slot *slot,
            DS4_SESSION_SYNC_INTERRUPTED : 0;
 }
 
+static int server_session_sync_embedding_span(server *s, server_slot *slot,
+                                              const ds4_tokens *prompt,
+                                              const ds4_embedding_span *span,
+                                              char *err, size_t errlen) {
+    if (!s || !slot || !prompt || !span) return 1;
+    if (!server_prefill_enter(s, slot)) return DS4_SESSION_SYNC_INTERRUPTED;
+    const int rc = ds4_session_sync_embedding_span(slot->session, prompt, span,
+                                                   err, errlen);
+    server_prefill_leave(s);
+    return rc;
+}
+
 static bool append_rendered_suffix_to_live_session(server *s, server_slot *slot,
                                                    const char *suffix,
                                                    int *tokens_appended,
@@ -10627,7 +11134,8 @@ static void server_progress_cb(void *ud, const char *event, int current, int tot
     if (is_display) return;
     double elapsed = now - p->t0;
     if (p->seen && current == p->last_current) {
-        if (p->srv && p->slot && current > p->cached_tokens) {
+        if (!p->disable_kv_store && p->srv && p->slot &&
+            current > p->cached_tokens) {
             kv_cache_maybe_store_continued(p->srv, p->slot);
         }
         return;
@@ -10668,7 +11176,8 @@ static void server_progress_cb(void *ud, const char *event, int current, int tot
                chunk_tps,
                avg_tps,
                elapsed);
-    if (p->srv && p->slot && current > p->cached_tokens) {
+    if (!p->disable_kv_store && p->srv && p->slot &&
+        current > p->cached_tokens) {
         kv_cache_maybe_store_continued(p->srv, p->slot);
     }
 }
@@ -11323,6 +11832,21 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
             prompt_for_sync = &effective_prompt;
         }
     }
+    const bool has_embedding_span = j->req.embedding_span.rows != NULL;
+    if (has_embedding_span) {
+        /* Placeholder token ids do not identify the image.  The external-span
+         * API deliberately rebuilds from token zero, so do not report or
+         * persist token-only cache state for this request. */
+        ds4_tokens_free(&effective_prompt);
+        prompt_for_sync = &j->req.prompt;
+        cached = 0;
+        disk_cached = 0;
+        cache_source = "embedding-span";
+        free(disk_cache_path);
+        disk_cache_path = NULL;
+        disk_cache_ext_flags = 0;
+        slot->continued_last_store_tokens = 0;
+    }
     const bool responses_reasoning_state_preserved =
         cached > 0 &&
         ((!strcmp(cache_source, "responses-visible") ||
@@ -11339,6 +11863,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
      * the live KV cache and can be reused by the next request. */
     j->req.cache_read_tokens = cached;
     j->req.cache_write_tokens = prompt_tokens > cached ? prompt_tokens - cached : 0;
+    if (has_embedding_span) j->req.cache_write_tokens = 0;
 
     const double t0 = now_sec();
     uint64_t trace_id = trace_begin(s, j, cached, prompt_tokens, &cache_diag,
@@ -11353,6 +11878,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
         .cached_tokens = cached,
         .has_tools = j->req.has_tools,
         .responses_protocol = responses_protocol,
+        .disable_kv_store = has_embedding_span,
         .t0 = t0,
         .fd = j->fd,
         .stream = j->req.stream,
@@ -11409,7 +11935,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
     ds4_session_set_display_progress(slot->session, server_progress_cb, &progress);
 
     int cold_store_len = 0;
-    if (cached == 0 &&
+    if (!has_embedding_span && cached == 0 &&
         s->kv.enabled &&
         prompt_for_sync->len >= s->kv.opt.min_tokens &&
         s->kv.opt.cold_max_tokens > 0 &&
@@ -11469,8 +11995,12 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
         ds4_tokens_free(&prefix);
     }
 
-    if (server_session_sync(s, slot, prompt_for_sync,
-                            err, sizeof(err)) != 0) {
+    const int sync_rc = has_embedding_span ?
+        server_session_sync_embedding_span(s, slot, prompt_for_sync,
+                                           &j->req.embedding_span,
+                                           err, sizeof(err)) :
+        server_session_sync(s, slot, prompt_for_sync, err, sizeof(err));
+    if (sync_rc != 0) {
         ds4_tokens_free(&effective_prompt);
         ds4_session_set_progress(slot->session, NULL, NULL);
         ds4_session_set_display_progress(slot->session, NULL, NULL);
@@ -11503,7 +12033,7 @@ static void generate_job_inner(server *s, server_slot *slot, job *j) {
     if (!thinking_live_continuation) thinking_live_clear(s, slot);
     ds4_session_set_progress(slot->session, NULL, NULL);
     ds4_session_set_display_progress(slot->session, NULL, NULL);
-    kv_cache_maybe_store_continued(s, slot);
+    if (!has_embedding_span) kv_cache_maybe_store_continued(s, slot);
     server_log(DS4_LOG_PREFILL,
                "ds4-server: %s ctx=%s%s%s prompt done %.3fs",
                j->req.kind == REQ_CHAT ? "chat" : "completion",
@@ -12678,6 +13208,10 @@ static bool send_models(server *s, int fd) {
         append_model_json(&b, s, "deepseek-v4-flash");
         buf_putc(&b, ',');
         append_model_json(&b, s, "deepseek-v4-pro");
+        buf_putc(&b, ',');
+        append_model_json(&b, s, "deepseek-chat");
+        buf_putc(&b, ',');
+        append_model_json(&b, s, "deepseek-reasoner");
     }
     buf_puts(&b, "]}\n");
     bool ok = http_response(fd, s->enable_cors, 200, "application/json", b.ptr);
@@ -12830,7 +13364,8 @@ static void *client_main(void *arg) {
         ok = parse_anthropic_request(s->engine, s, hr.body, s->default_tokens,
                                      ctx_size, &req, err, sizeof(err));
     } else if (!strcmp(hr.method, "POST") && !strcmp(hr.path, "/v1/chat/completions")) {
-        ok = parse_chat_request(s->engine, s, hr.body, s->default_tokens,
+        ok = parse_chat_request(s->engine, s, &s->vision,
+                                hr.body, s->default_tokens,
                                 ctx_size, &req, err, sizeof(err));
     } else if (!strcmp(hr.method, "POST") && !strcmp(hr.path, "/v1/responses")) {
         ok = parse_responses_request(s->engine, s, hr.body, s->default_tokens,
@@ -12930,6 +13465,7 @@ static void set_client_socket_nonblocking(int fd) {
 
 typedef struct {
     ds4_engine_options engine;
+    server_vision_config vision;
     const char *gpu_vram_arg;
     const char *gpu_devices_arg;
     const char *host;
@@ -13033,6 +13569,7 @@ static void server_close_resources(server *s) {
     pthread_mutex_destroy(&s->inference_mu);
     pthread_mutex_destroy(&s->model_mu);
     pthread_mutex_destroy(&s->trace_mu);
+    pthread_mutex_destroy(&s->vision_mu);
     pthread_cond_destroy(&s->model_cv);
     pthread_cond_destroy(&s->clients_cv);
     pthread_cond_destroy(&s->cv);
@@ -13117,6 +13654,14 @@ static server_config parse_options(int argc, char **argv) {
 
         if (!strcmp(arg, "-m") || !strcmp(arg, "--model")) {
             c.engine.model_path = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--vision-python")) {
+            c.vision.python = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--vision-encoder")) {
+            c.vision.encoder = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--vision-tower")) {
+            c.vision.tower = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--vision-adapter")) {
+            c.vision.adapter = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--mtp")) {
             c.engine.mtp_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--mtp-draft")) {
@@ -13277,6 +13822,13 @@ static server_config parse_options(int argc, char **argv) {
     if (c.engine.directional_steering_file && !directional_steering_scale_set) {
         c.engine.directional_steering_ffn = 1.0f;
     }
+    const bool any_vision = c.vision.python || c.vision.encoder ||
+                            c.vision.tower || c.vision.adapter;
+    if (any_vision && !vision_config_complete(&c.vision)) {
+        server_log(DS4_LOG_DEFAULT,
+                   "ds4-server: vision requires --vision-python, --vision-encoder, --vision-tower, and --vision-adapter");
+        exit(2);
+    }
     char dist_err[256];
     if (ds4_dist_prepare_engine_options(&c.engine.distributed,
                                         &c.engine,
@@ -13375,6 +13927,7 @@ int main(int argc, char **argv) {
 
     server s = {0};
     s.engine = engine;
+    s.vision = cfg.vision;
     s.ctx_size = cfg.ctx_size;
     s.slot_count = slot_count;
     s.batched_mode = cfg.batched_sessions > 0;
@@ -13404,6 +13957,8 @@ int main(int argc, char **argv) {
     pthread_mutex_init(&s.model_mu, NULL);
     pthread_cond_init(&s.model_cv, NULL);
     pthread_mutex_init(&s.trace_mu, NULL);
+    pthread_mutex_init(&s.vision_mu, NULL);
+    s.vision.mu = &s.vision_mu;
 
     for (int i = 0; i < slot_count; i++) {
         server_slot *slot = &s.slots[i];
@@ -14956,6 +15511,8 @@ static void test_model_alias_thinking_controls(void) {
     TEST_ASSERT(model_alias_disables_thinking("zai/glm-5.2-chat"));
     TEST_ASSERT(!model_alias_disables_thinking("glm-5.2"));
     TEST_ASSERT(model_alias_enables_thinking("deepseek-reasoner"));
+    TEST_ASSERT(server_model_alias_known("deepseek-chat"));
+    TEST_ASSERT(server_model_alias_known("deepseek-reasoner"));
     TEST_ASSERT(model_alias_enables_thinking("glm-5.2-reasoner"));
     TEST_ASSERT(model_alias_enables_thinking("zai/glm-5.2-reasoner"));
     TEST_ASSERT(server_model_alias_known("glm-5.2-chat"));
@@ -16692,7 +17249,7 @@ static void test_request_parsers_reject_malformed_duplicate_owned_fields(void) {
     TEST_ASSERT(!ok);
     if (ok) request_free(&r);
 
-    ok = parse_chat_request(NULL, NULL,
+    ok = parse_chat_request(NULL, NULL, NULL,
         "{\"model\":\"deepseek-v4-flash\",\"model\":\"bad\\q\","
         "\"max_tokens\":1,\"messages\":[{\"role\":\"user\","
         "\"content\":\"hello\"}]}",
@@ -16712,6 +17269,48 @@ static void test_request_parsers_reject_malformed_duplicate_owned_fields(void) {
         1, 100, &r, err, sizeof(err));
     TEST_ASSERT(!ok);
     if (ok) request_free(&r);
+}
+
+static void test_openai_image_content_preserves_order(void) {
+    const char *p =
+        "[{\"role\":\"user\",\"content\":["
+        "{\"type\":\"text\",\"text\":\"before \"},"
+        "{\"type\":\"image_url\",\"image_url\":{\"url\":"
+        "\"data:image/png;base64,AA==\"}},"
+        "{\"type\":\"text\",\"text\":\" after\"}]}]";
+    chat_msgs msgs = {0};
+    char *image_url = NULL;
+    int image_count = 0;
+    TEST_ASSERT(parse_messages(&p, &msgs, &image_url, &image_count));
+    TEST_ASSERT(*p == '\0');
+    TEST_ASSERT(image_count == 1);
+    TEST_ASSERT(image_url != NULL &&
+                !strcmp(image_url, "data:image/png;base64,AA=="));
+    TEST_ASSERT(msgs.len == 1);
+
+    buf expected = {0};
+    buf_puts(&expected, "before ");
+    buf_puts(&expected, DS4_IMAGE_MARKER);
+    buf_puts(&expected, " after");
+    TEST_ASSERT(msgs.len == 1 && msgs.v[0].content != NULL &&
+                !strcmp(msgs.v[0].content, expected.ptr));
+
+    char *route_tokens = repeat_image_token(2);
+    TEST_ASSERT(route_tokens != NULL);
+    TEST_ASSERT(replace_image_marker(&msgs.v[0].content, route_tokens));
+    buf replaced = {0};
+    buf_puts(&replaced, "before ");
+    buf_puts(&replaced, DS4_IMAGE_TOKEN);
+    buf_puts(&replaced, DS4_IMAGE_TOKEN);
+    buf_puts(&replaced, " after");
+    TEST_ASSERT(!strcmp(msgs.v[0].content, replaced.ptr));
+    TEST_ASSERT(!replace_image_marker(&msgs.v[0].content, route_tokens));
+
+    free(route_tokens);
+    free(image_url);
+    buf_free(&expected);
+    buf_free(&replaced);
+    chat_msgs_free(&msgs);
 }
 
 static void append_tool_heavy_schema(buf *b, int idx) {
@@ -16816,7 +17415,10 @@ static void test_json_parser_handles_tool_heavy_requests(void) {
 
         const char *mp = messages.ptr;
         chat_msgs msgs = {0};
-        TEST_ASSERT(parse_messages(&mp, &msgs));
+        char *image_url = NULL;
+        int image_count = 0;
+        TEST_ASSERT(parse_messages(&mp, &msgs, &image_url, &image_count));
+        free(image_url);
         json_ws(&mp);
         TEST_ASSERT(*mp == '\0');
         TEST_ASSERT(msgs.len == 98);
@@ -18397,6 +18999,7 @@ static void ds4_server_unit_tests_run(void) {
     test_stop_list_streaming_holds_and_trims_stop_text();
     test_json_skip_has_nesting_limit();
     test_request_parsers_reject_malformed_duplicate_owned_fields();
+    test_openai_image_content_preserves_order();
     test_json_parser_handles_tool_heavy_requests();
     test_json_string_handles_surrogates();
     test_json_int_handles_non_finite_values();
