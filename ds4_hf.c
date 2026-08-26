@@ -4081,10 +4081,16 @@ static void print_json_variant(FILE *fp,
 static void print_human_artifact(FILE *fp, const char *role,
                                  const ds4_hf_manifest_artifact *artifact) {
     fprintf(fp,
-            "  %s: path=%s bytes=%" PRIu64 " precision=%s ds4=%s llama_cpp=%s required=",
+            "  %s: path=%s bytes=%" PRIu64
+            " precision=%s ds4=%s llama_cpp=%s"
+            " ds4_minimum_revision=%s llama_cpp_minimum_revision=%s required=",
             role, artifact->path, artifact->bytes, artifact->precision,
             artifact->supports_ds4 ? "yes" : "no",
-            artifact->supports_llama_cpp ? "yes" : "no");
+            artifact->supports_llama_cpp ? "yes" : "no",
+            artifact->ds4_minimum_revision[0]
+                ? artifact->ds4_minimum_revision : "unavailable",
+            artifact->llama_cpp_minimum_revision[0]
+                ? artifact->llama_cpp_minimum_revision : "unavailable");
     hf_human_capabilities(fp, artifact->required_capabilities);
     fputs(" optional=", fp);
     hf_human_capabilities(fp, artifact->optional_capabilities);
@@ -4108,6 +4114,8 @@ static void print_human_variant(FILE *fp,
                          &variant->llama_cpp_mmproj);
     if (variant->has_dspark)
         print_human_artifact(fp, "dspark", &variant->dspark);
+    else
+        fputs("  dspark: unavailable\n", fp);
     fprintf(fp,
             "  selection: manifest=yes llama_primary_filename=%s llama_sibling_layout=%s\n",
             primary ? "match" : "mismatch",

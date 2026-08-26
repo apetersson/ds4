@@ -244,6 +244,14 @@ class HFDiagnosticsTests(unittest.TestCase):
                     result.stdout,
                     (GOLDEN / golden).read_text(encoding="utf-8"),
                 )
+        listing = self.run_binary("ds4", "--list-hf-variants")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertEqual(
+            listing.stdout,
+            (GOLDEN / "diagnostics-list-no-dspark-human.txt").read_text(
+                encoding="utf-8"
+            ),
+        )
 
     def test_offline_uses_only_complete_verified_requested_snapshot(self):
         online = self.run_binary("ds4", "--list-hf-variants", "--json")
