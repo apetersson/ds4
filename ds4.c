@@ -9914,6 +9914,7 @@ static void hc_from_plain_embedding(float *out_hc, const float *x, uint32_t n_em
     }
 }
 
+#ifndef DS4_NO_GPU
 /* The backend's fused HC embedding kernel reads an F16 table.  Native-preserved
  * models intentionally retain BF16 source embeddings as exact F32, so route
  * non-F16 tables through the type-aware CPU decoder and upload the resulting
@@ -9950,6 +9951,7 @@ static bool metal_graph_embed_token_hc(
     free(plain);
     return ok;
 }
+#endif
 
 /* HC post step for one sublayer output.  It injects the new block output and
  * mixes the previous HC streams through the learned combine matrix. */
