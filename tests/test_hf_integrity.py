@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import hashlib
 import os
 import socket
 import subprocess
@@ -10,6 +11,13 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from test_hf_cache import FakeArtifactHub, PROBE, ROOT, SHA, payload_for
+
+
+def endpoint_cache_identity(endpoint):
+    normalized = endpoint.rstrip("/")
+    return hashlib.sha256(
+        b"ds4-hf-cache-endpoint-v1\0" + normalized.encode("utf-8")
+    ).hexdigest()
 
 
 class IntegrityTests(unittest.TestCase):
@@ -282,10 +290,10 @@ class IntegrityTests(unittest.TestCase):
             self.assertTrue(destination.is_symlink())
 
         with self.subTest("special file"), tempfile.TemporaryDirectory() as cache:
-            destination = (Path(cache) / "repos" / "owner%2Frepo" /
-                           "snapshots" / SHA / "Headroom128" /
-                           "H-receiver.gguf")
-            destination.parent.mkdir(parents=True)
+            valid = self.run_probe(cache)
+            self.assert_ok(valid)
+            destination = self.plan(valid, "receiver")["destination"]
+            destination.unlink()
             os.mkfifo(destination)
             failed = self.run_probe(cache, modes="text,offline")
             self.assertEqual(failed.returncode, 2, failed.stdout + failed.stderr)
@@ -294,7 +302,9 @@ class IntegrityTests(unittest.TestCase):
         with self.subTest("snapshot symlink escape"), \
                 tempfile.TemporaryDirectory() as cache, \
                 tempfile.TemporaryDirectory() as outside:
-            snapshots = Path(cache) / "repos" / "owner%2Frepo" / "snapshots"
+            snapshots = (Path(cache) / "endpoints" /
+                         endpoint_cache_identity(self.endpoint) / "repos" /
+                         "owner%2Frepo" / "snapshots")
             snapshots.mkdir(parents=True)
             (snapshots / SHA).symlink_to(outside, target_is_directory=True)
             failed = self.run_probe(cache)

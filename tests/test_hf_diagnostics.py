@@ -25,6 +25,7 @@ SHA_UPPER_REF = "4444444444444444444444444444444444444444"
 SHA_COMPOSED_REF = "5555555555555555555555555555555555555555"
 SHA_DECOMPOSED_REF = "6666666666666666666666666666666666666666"
 SHA_BOUNDARY_REF = "7777777777777777777777777777777777777777"
+SHA_SECONDARY_HUB = "8888888888888888888888888888888888888888"
 LOCK = "/tmp/ds4-ds00108-hf-diagnostics.lock"
 
 
@@ -75,8 +76,9 @@ class HubHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = unquote(urlsplit(self.path).path)
         type(self).requests.append(path)
+        default_sha = getattr(self.server, "default_sha", SHA)
         if path == "/api/models/owner/repo":
-            self.send_bytes(200, json.dumps({"sha": SHA}).encode(),
+            self.send_bytes(200, json.dumps({"sha": default_sha}).encode(),
                             "application/json")
             return
         revision_prefix = "/api/models/owner/repo/revision/"
@@ -93,13 +95,16 @@ class HubHandler(BaseHTTPRequestHandler):
         resolved = path.removeprefix(resolve_prefix)
         commit, separator, artifact_path = resolved.partition("/")
         if (path.startswith(resolve_prefix) and separator and
-                commit in {SHA, *type(self).revisions.values()} and
+                commit in {default_sha, *type(self).revisions.values()} and
                 artifact_path == "variants.json"):
-            self.send_bytes(200, type(self).manifest, "application/json")
+            self.send_bytes(200, getattr(self.server, "manifest",
+                                         type(self).manifest),
+                            "application/json")
             return
-        payload = (type(self).payloads.get(artifact_path)
+        payloads = getattr(self.server, "payloads", type(self).payloads)
+        payload = (payloads.get(artifact_path)
                    if path.startswith(resolve_prefix) and separator and
-                   commit in {SHA, *type(self).revisions.values()}
+                   commit in {default_sha, *type(self).revisions.values()}
                    else None)
         if payload is None:
             self.send_bytes(404, b"missing")
@@ -126,6 +131,7 @@ class HFDiagnosticsTests(unittest.TestCase):
         cls.full_manifest_bytes = HubHandler.manifest
         HubHandler.payloads = payloads
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), HubHandler)
+        cls.server.default_sha = SHA
         cls.thread = threading.Thread(target=cls.server.serve_forever,
                                       daemon=True)
         cls.thread.start()
@@ -261,8 +267,9 @@ class HFDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(json.loads(result.stdout)["revision"],
                                  expected_commit)
 
-        ref_directory = (Path(self.cache.name) / "repos" /
-                         "owner%2Frepo" / "refs")
+        endpoint_roots = list((Path(self.cache.name) / "endpoints").iterdir())
+        self.assertEqual(len(endpoint_roots), 1)
+        ref_directory = endpoint_roots[0] / "repos" / "owner%2Frepo" / "refs"
         keys = [entry.parent.relative_to(ref_directory).as_posix()
                 for entry in ref_directory.rglob("commit")]
         normalized_keys = {
@@ -278,7 +285,7 @@ class HFDiagnosticsTests(unittest.TestCase):
                 if revision is not None:
                     args.extend(("--hf-revision", revision))
                 result = self.run_binary(
-                    "ds4", *args, endpoint="http://127.0.0.1:1"
+                    "ds4", *args, endpoint=self.endpoint
                 )
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["revision"],
@@ -292,6 +299,71 @@ class HFDiagnosticsTests(unittest.TestCase):
         self.assertNotEqual(too_long.returncode, 0)
         self.assertIn("expected 1-127 nonspace bytes", too_long.stderr)
         self.assertEqual(HubHandler.requests, [])
+
+    def test_endpoint_namespaces_isolate_offline_snapshots(self):
+        servers = []
+        threads = []
+        endpoints = []
+        for commit in (SHA, SHA_SECONDARY_HUB):
+            server = ThreadingHTTPServer(("127.0.0.1", 0), HubHandler)
+            server.default_sha = commit
+            server.manifest = self.full_manifest_bytes
+            server.payloads = HubHandler.payloads
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            servers.append(server)
+            threads.append(thread)
+            endpoints.append(f"http://127.0.0.1:{server.server_port}")
+        try:
+            for endpoint, expected_commit in zip(
+                    endpoints, (SHA, SHA_SECONDARY_HUB)):
+                result = self.run_binary(
+                    "ds4", "--list-hf-variants", "--json",
+                    endpoint=endpoint,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["revision"],
+                                 expected_commit)
+                populate_env = os.environ.copy()
+                populate_env["DS4_LOCK_FILE"] = LOCK
+                populated = subprocess.run(
+                    [str(PROBE), endpoint, self.cache.name,
+                     "populate-server-dspark"],
+                    cwd=ROOT, env=populate_env, text=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    timeout=10, check=False,
+                )
+                self.assertEqual(populated.returncode, 0, populated.stderr)
+        finally:
+            for server in servers:
+                server.shutdown()
+                server.server_close()
+            for thread in threads:
+                thread.join()
+
+        HubHandler.requests = []
+        for endpoint, expected_commit in zip(
+                endpoints, (SHA, SHA_SECONDARY_HUB)):
+            result = self.run_binary(
+                "ds4-server", "--hf-dry-run", "--dspark",
+                "--hf-offline", "--json",
+                endpoint=endpoint,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["revision"],
+                             expected_commit)
+        self.assertEqual(HubHandler.requests, [])
+
+        endpoint_roots = list((Path(self.cache.name) / "endpoints").iterdir())
+        self.assertEqual(len(endpoint_roots), 2)
+        for root in endpoint_roots:
+            metadata = next(root.rglob("variants.json.ds4-meta")).read_text()
+            self.assertIn(f"endpoint_sha256={root.name}\n", metadata)
+            artifact_root = root / "repos" / "owner%2Frepo"
+            self.assertTrue(artifact_root.is_dir())
+            artifact_metadata = next(artifact_root.rglob("*.gguf.ds4-meta"))
+            self.assertIn(f"endpoint_sha256={root.name}\n",
+                          artifact_metadata.read_text())
 
     def test_runtime_totals_never_mix_raw_vision_and_mmproj(self):
         server = self.run_binary("ds4-server", "--hf-dry-run", "--json")
@@ -346,7 +418,7 @@ class HFDiagnosticsTests(unittest.TestCase):
         HubHandler.requests = []
         offline_list = self.run_binary(
             "ds4", "--list-hf-variants", "--offline", "--json",
-            endpoint="http://127.0.0.1:1",
+            endpoint=self.endpoint,
         )
         self.assertEqual(offline_list.returncode, 0, offline_list.stderr)
         self.assertEqual(json.loads(offline_list.stdout)["metadata_source"],
@@ -355,7 +427,7 @@ class HFDiagnosticsTests(unittest.TestCase):
 
         missing = self.run_binary(
             "ds4", "--hf-dry-run", "--offline", "--json",
-            endpoint="http://127.0.0.1:1",
+            endpoint=self.endpoint,
         )
         self.assertNotEqual(missing.returncode, 0)
         self.assertIn("complete verified snapshot", missing.stderr)
@@ -374,7 +446,7 @@ class HFDiagnosticsTests(unittest.TestCase):
         HubHandler.requests = []
         complete = self.run_binary(
             "ds4-server", "--hf-dry-run", "--dspark", "--hf-offline",
-            "--json", endpoint="http://127.0.0.1:1",
+            "--json", endpoint=self.endpoint,
         )
         self.assertEqual(complete.returncode, 0, complete.stderr)
         payload = json.loads(complete.stdout)
@@ -398,7 +470,7 @@ class HFDiagnosticsTests(unittest.TestCase):
         HubHandler.requests = []
         receiver_only = self.run_binary(
             "ds4", "--hf-dry-run", "--hf-offline", "--json",
-            endpoint="http://127.0.0.1:1",
+            endpoint=self.endpoint,
         )
         self.assertEqual(receiver_only.returncode, 0, receiver_only.stderr)
         files = {entry["role"]: entry
@@ -418,7 +490,7 @@ class HFDiagnosticsTests(unittest.TestCase):
         HubHandler.requests = []
         requested_invalid = self.run_binary(
             "ds4-server", "--hf-dry-run", "--dspark", "--hf-offline",
-            "--json", endpoint="http://127.0.0.1:1",
+            "--json", endpoint=self.endpoint,
         )
         self.assertNotEqual(requested_invalid.returncode, 0)
         self.assertIn("complete verified immutable role snapshot",
