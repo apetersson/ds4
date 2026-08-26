@@ -82,6 +82,11 @@ size_t ds4_test_compute_glm_entry_bytes_sum_with_sessions(
                                          int n_tensors,
                                          int placement_ctx_hint,
                                          int placement_session_count_hint);
+bool ds4_test_engine_dspark_active(bool requested,
+                                   bool dspark_support,
+                                   bool weights_complete,
+                                   bool graph_backend,
+                                   bool strict);
 
 /* DS4_N_LAYER constant is private to ds4.c; for the test we use
  * the same value. (The packer header doesn't expose it.) */
@@ -178,6 +183,22 @@ static void test_null_config(void) {
     CHECK(rc == 0, "NULL cfg returns success");
     CHECK(multi_tier == 0, "NULL cfg -> multi_tier 0");
     CHECK(n_entries == 0, "NULL cfg -> n_entries 0");
+}
+
+static void test_effective_dspark_readiness(void) {
+    fprintf(stderr, "RUN: test_effective_dspark_readiness\n");
+    CHECK(ds4_test_engine_dspark_active(true, true, true, true, false),
+          "complete requested DSpark support is active");
+    CHECK(!ds4_test_engine_dspark_active(false, true, true, true, false),
+          "unrequested DSpark support is inactive");
+    CHECK(!ds4_test_engine_dspark_active(true, false, true, true, false),
+          "legacy MTP support is not active DSpark");
+    CHECK(!ds4_test_engine_dspark_active(true, true, false, true, false),
+          "incomplete DSpark weights are inactive");
+    CHECK(!ds4_test_engine_dspark_active(true, true, true, false, false),
+          "CPU backend cannot activate DSpark");
+    CHECK(!ds4_test_engine_dspark_active(true, true, true, true, true),
+          "strict target-only mode does not advertise active DSpark");
 }
 
 /* Build a synthetic, model-shaped tensor list: 1 embedding + 43 layers
@@ -669,6 +690,7 @@ static void test_cuda_tp_output_head_moves_to_lower_half(void) {
 int main(void) {
     test_tensor_to_entry();
     test_null_config();
+    test_effective_dspark_readiness();
     test_forced_two_tier_no_spill();
     test_cpu_spill();
     test_zero_budget_guard();

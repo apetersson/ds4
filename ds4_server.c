@@ -13416,7 +13416,7 @@ int main(int argc, char **argv) {
                    hf_runtime.vision_bundle_verified ?
                        "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
                        "[receiver]",
-                   cfg.engine.dspark ? "active" : "inactive");
+                   cfg.engine.dspark ? "requested" : "not-requested");
     }
     if (cfg.chdir_path && chdir(cfg.chdir_path) != 0) {
         server_log(DS4_LOG_DEFAULT, "ds4-server: failed to chdir to %s: %s",
@@ -13495,7 +13495,18 @@ int main(int argc, char **argv) {
     /* DS-001.11 wires the trusted encoder sidecar; verified files alone do
      * not make image requests executable or advertise multimodal support. */
     s.vision_active = false;
-    s.dspark_active = cfg.engine.dspark;
+    s.dspark_active = ds4_engine_has_dspark(engine);
+    if (s.hf_repository) {
+        const ds4_hf_acquisition_artifact *receiver = &s.hf_plan.artifacts[0];
+        server_log(DS4_LOG_DEFAULT,
+                   "ds4-server: HF runtime repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=inactive dspark=%s",
+                   s.hf_plan.repository, s.hf_plan.revision,
+                   s.hf_plan.selector, receiver->repo_path,
+                   s.hf_vision_verified ?
+                       "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
+                       "[receiver]",
+                   s.dspark_active ? "active" : "inactive");
+    }
     s.ctx_size = cfg.ctx_size;
     s.slot_count = slot_count;
     s.batched_mode = cfg.batched_sessions > 0;
@@ -17086,6 +17097,16 @@ static void test_hf_model_metadata_is_complete_and_capability_gated(void) {
     append_hf_catalog_json(&b, &s);
     TEST_ASSERT(strstr(b.ptr, "\"vision_active\":true") != NULL);
     TEST_ASSERT(strstr(b.ptr, "\"multimodal\":true") != NULL);
+    buf_free(&b);
+
+    s.vision_active = false;
+    s.dspark_active = true;
+    append_model_json_values(&b, "deepseek-v4-flash", "DeepSeek V4 Flash",
+                             32768, 4096);
+    append_hf_catalog_json(&b, &s);
+    TEST_ASSERT(strstr(b.ptr, "\"vision_active\":false") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"dspark_active\":true") != NULL);
+    TEST_ASSERT(strstr(b.ptr, "\"multimodal\":false") != NULL);
     buf_free(&b);
 
     s.hf_repository = false;

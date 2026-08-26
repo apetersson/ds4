@@ -51234,6 +51234,18 @@ bool ds4_engine_has_mtp(ds4_engine *e) {
            e->mtp_ready;
 }
 
+bool ds4_engine_has_dspark(ds4_engine *e) {
+    return e && e->backend != DS4_BACKEND_CPU &&
+           e->distributed.role == DS4_DISTRIBUTED_NONE &&
+           e->support_kind == DS4_SUPPORT_DSPARK &&
+           e->dspark && !e->quality && !e->dspark_strict &&
+           e->dspark_weights.n_stages != 0 &&
+           e->dspark_weights.block_size > 1 &&
+           e->dspark_weights.missing_tensors == 0 &&
+           e->dspark_weights.invalid_tensors == 0 &&
+           e->dspark_weights.metadata_errors == 0;
+}
+
 int ds4_engine_mtp_draft_tokens(ds4_engine *e) {
     if (e && DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
         return e->glm_mtp && DS4_N_NEXTN_PREDICT != 0 ? 2 : 0;
@@ -57151,6 +57163,24 @@ typedef struct {
     const char *name;
     uint64_t bytes;
 } ds4_test_fake_tensor;
+
+bool ds4_test_engine_dspark_active(bool requested,
+                                   bool dspark_support,
+                                   bool weights_complete,
+                                   bool graph_backend,
+                                   bool strict) {
+    ds4_engine eng;
+    memset(&eng, 0, sizeof(eng));
+    eng.backend = graph_backend ? DS4_BACKEND_METAL : DS4_BACKEND_CPU;
+    eng.support_kind = dspark_support ?
+        DS4_SUPPORT_DSPARK : DS4_SUPPORT_MTP_LEGACY;
+    eng.dspark = requested;
+    eng.dspark_strict = strict;
+    eng.dspark_weights.n_stages = 3;
+    eng.dspark_weights.block_size = 4;
+    eng.dspark_weights.missing_tensors = weights_complete ? 0 : 1;
+    return ds4_engine_has_dspark(&eng);
+}
 
 int ds4_test_tensor_to_entry(const char *name, int name_len) {
     ds4_tensor fake;

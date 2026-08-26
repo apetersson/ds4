@@ -489,7 +489,7 @@ tests/test_hf_cache_probe: tests/test_hf_cache_probe.c ds4_hf.c ds4_hf.h
 tests/test_hf_runtime_probe: tests/test_hf_runtime_probe.c ds4_hf.c ds4_hf.h
 	$(CC) $(CFLAGS) -I. -o $@ tests/test_hf_runtime_probe.c ds4_hf.c -lcurl
 
-test-hf-runtime: tests/test_hf_runtime_probe
+test-hf-runtime: ds4 ds4-server tests/test_hf_runtime_probe
 	python3 tests/test_hf_runtime.py
 
 test-hf-cache: tests/test_hf_cache_probe

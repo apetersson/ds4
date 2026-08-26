@@ -267,6 +267,7 @@ class RuntimeWiringTests(unittest.TestCase):
             self.assertIn(f"revision='{SHA}'", by_hf.stderr)
             self.assertIn("selector='Headroom128-IQ2_XXS'", by_hf.stderr)
             self.assertIn("verified_roles=[receiver] vision=inactive", by_hf.stderr)
+            self.assertIn("dspark=not-requested", by_hf.stderr)
 
             receiver_path = next(Path(cache).rglob("*.gguf"))
             by_local_model = subprocess.run(
@@ -295,6 +296,7 @@ class RuntimeWiringTests(unittest.TestCase):
         self.assertIn("repository='owner/repo'", output)
         self.assertIn(f"revision='{SHA}'", output)
         self.assertIn("verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=inactive", output)
+        self.assertIn("dspark=not-requested", output)
         self.assertIn("required tensor is missing: token_embd.weight", output)
 
 

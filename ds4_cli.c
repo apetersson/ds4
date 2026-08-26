@@ -2105,7 +2105,7 @@ int main(int argc, char **argv) {
                 "ds4: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=[receiver] vision=inactive dspark=%s\n",
                 hf_runtime.plan.repository, hf_runtime.plan.revision,
                 hf_runtime.plan.selector, receiver->repo_path,
-                cfg.engine.dspark ? "active" : "inactive");
+                cfg.engine.dspark ? "requested" : "not-requested");
     }
     if (cfg.gen.dump_tokens) {
         if (cfg.gen.prompt == NULL) {
@@ -2175,6 +2175,15 @@ int main(int argc, char **argv) {
     }
     /* The engine owns its duplicate file descriptor and mmap from here. */
     ds4_hf_runtime_close_verified(&hf_runtime);
+    if (hf_runtime.repository) {
+        const ds4_hf_acquisition_artifact *receiver =
+            &hf_runtime.plan.artifacts[0];
+        fprintf(stderr,
+                "ds4: HF runtime repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=[receiver] vision=inactive dspark=%s\n",
+                hf_runtime.plan.repository, hf_runtime.plan.revision,
+                hf_runtime.plan.selector, receiver->repo_path,
+                ds4_engine_has_dspark(engine) ? "active" : "inactive");
+    }
     cli_apply_model_sampling_defaults(engine, &cfg.gen);
     if (cfg.engine.tp.role == DS4_TP_WORKER) {
         int rc = ds4_tp_worker_run(engine, &cfg.engine.tp);
