@@ -39,6 +39,12 @@ PAYLOADS = {
 }
 
 
+def cache_identity_path(value):
+    encoded = value.encode("utf-8").hex()
+    return Path(*(encoded[offset:offset + 64]
+                  for offset in range(0, len(encoded), 64)))
+
+
 def artifact_roles(variant):
     yield "receiver", variant["receiver"]
     yield "ds4_vision.tower", variant["ds4_vision"]["tower"]
@@ -269,7 +275,9 @@ class HFDiagnosticsTests(unittest.TestCase):
 
         endpoint_roots = list((Path(self.cache.name) / "endpoints").iterdir())
         self.assertEqual(len(endpoint_roots), 1)
-        ref_directory = endpoint_roots[0] / "repos" / "owner%2Frepo" / "refs"
+        repo_root = (endpoint_roots[0] / "repos" /
+                     cache_identity_path("owner/repo"))
+        ref_directory = repo_root / "refs"
         keys = [entry.parent.relative_to(ref_directory).as_posix()
                 for entry in ref_directory.rglob("commit")]
         normalized_keys = {
@@ -359,7 +367,7 @@ class HFDiagnosticsTests(unittest.TestCase):
         for root in endpoint_roots:
             metadata = next(root.rglob("variants.json.ds4-meta")).read_text()
             self.assertIn(f"endpoint_sha256={root.name}\n", metadata)
-            artifact_root = root / "repos" / "owner%2Frepo"
+            artifact_root = root / "repos" / cache_identity_path("owner/repo")
             self.assertTrue(artifact_root.is_dir())
             artifact_metadata = next(artifact_root.rglob("*.gguf.ds4-meta"))
             self.assertIn(f"endpoint_sha256={root.name}\n",

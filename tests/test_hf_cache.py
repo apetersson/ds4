@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -16,6 +17,12 @@ ROOT = Path(__file__).resolve().parents[1]
 PROBE = ROOT / "tests" / "test_hf_cache_probe"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 SECRET = "cache-test-secret"
+
+
+def cache_identity_path(value):
+    encoded = value.encode("utf-8").hex()
+    return Path(*(encoded[offset:offset + 64]
+                  for offset in range(0, len(encoded), 64)))
 
 
 def payload_for(path):
@@ -66,8 +73,13 @@ class FakeArtifactHub(BaseHTTPRequestHandler):
         authorization = self.headers.get("Authorization")
         type(self).requests.append((path, range_header, authorization))
 
-        prefix = f"/owner/repo/resolve/{SHA}/"
-        if path.startswith(prefix):
+        prefixes = (
+            f"/owner/repo/resolve/{SHA}/",
+            f"/Owner/Repo/resolve/{SHA}/",
+        )
+        prefix = next((candidate for candidate in prefixes
+                       if path.startswith(candidate)), None)
+        if prefix:
             repo_path = path[len(prefix):]
             if repo_path == type(self).fail_path:
                 self.send_error(503, "deterministic failure")
@@ -230,7 +242,11 @@ class CacheTests(unittest.TestCase):
             self.assertEqual(self.values(result, "cache_root"), [str(configured)])
             plan = self.values(result, "plan")[0].split("|")
             destination = Path(plan[4])
-            self.assertIn("owner%2Frepo", str(destination))
+            parts = destination.relative_to(configured).parts
+            repo_index = parts.index("repos")
+            snapshot_index = parts.index("snapshots")
+            self.assertEqual("".join(parts[repo_index + 1:snapshot_index]),
+                             "owner/repo".encode("utf-8").hex())
             self.assertIn(SHA, str(destination))
             metadata = Path(str(destination) + ".ds4-meta").read_text()
             self.assertIn("repository=owner/repo\n", metadata)
@@ -262,6 +278,48 @@ class CacheTests(unittest.TestCase):
             self.assert_ok(home_result)
             self.assertEqual(self.values(home_result, "cache_root"),
                              [str(home / ".cache" / "huggingface" / "ds4")])
+
+    def test_case_and_unicode_cache_identities_remain_distinct_offline(self):
+        cases = (
+            ("text", "owner/repo", "Headroom128/H-receiver.gguf"),
+            ("text,repo-case", "Owner/Repo", "Headroom128/H-receiver.gguf"),
+            ("text,artifact-case", "owner/repo", "Headroom128/h-receiver.gguf"),
+            ("text,artifact-composed", "owner/repo",
+             "Headroom128/caf\u00e9-receiver.gguf"),
+            ("text,artifact-decomposed", "owner/repo",
+             "Headroom128/cafe\u0301-receiver.gguf"),
+        )
+        with tempfile.TemporaryDirectory() as cache:
+            destinations = []
+            for modes, repository, repo_path in cases:
+                with self.subTest(mode="populate", modes=modes):
+                    FakeArtifactHub.reset()
+                    result = self.run_probe(cache, modes=modes)
+                    self.assert_ok(result)
+                    receiver = next(
+                        value.split("|") for value in self.values(result, "plan")
+                        if value.startswith("receiver|")
+                    )
+                    self.assertEqual(receiver[1], repo_path)
+                    destination = Path(receiver[4])
+                    self.assertTrue(destination.is_file())
+                    destinations.append(destination.relative_to(cache).as_posix())
+                    metadata = Path(str(destination) + ".ds4-meta").read_text()
+                    self.assertIn(f"repository={repository}\n", metadata)
+                    self.assertIn(f"path={repo_path}\n", metadata)
+
+            normalized = {
+                unicodedata.normalize("NFD", path).casefold()
+                for path in destinations
+            }
+            self.assertEqual(len(normalized), len(cases))
+
+            for modes, _repository, _repo_path in cases:
+                with self.subTest(mode="offline", modes=modes):
+                    FakeArtifactHub.reset()
+                    result = self.run_probe(cache, modes=f"{modes},offline")
+                    self.assert_ok(result)
+                    self.assertEqual(FakeArtifactHub.requests, [])
 
     def test_interrupted_redirected_transfer_resumes_without_public_partial(self):
         repo_path = "Headroom128/H-receiver.gguf"

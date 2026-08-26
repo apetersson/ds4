@@ -83,7 +83,9 @@ int main(int argc, char **argv) {
 
     ds4_hf_cli_config cfg;
     ds4_hf_cli_init(&cfg);
-    snprintf(cfg.repo, sizeof(cfg.repo), "%s", "owner/repo");
+    const char *repository = has_mode(argv[4], "repo-case") ?
+                             "Owner/Repo" : "owner/repo";
+    snprintf(cfg.repo, sizeof(cfg.repo), "%s", repository);
     snprintf(cfg.selector, sizeof(cfg.selector), "%s", argv[3]);
     cfg.selector_set = true;
     cfg.cache_dir = strcmp(argv[1], "-") ? argv[1] : NULL;
@@ -96,18 +98,34 @@ int main(int argc, char **argv) {
 
     ds4_hf_resolved_repo resolved = {0};
     snprintf(resolved.endpoint, sizeof(resolved.endpoint), "%s", argv[2]);
-    snprintf(resolved.repo, sizeof(resolved.repo), "%s", "owner/repo");
+    snprintf(resolved.repo, sizeof(resolved.repo), "%s", repository);
     snprintf(resolved.commit, sizeof(resolved.commit), "%s", sha);
 
     ds4_hf_manifest manifest = {0};
     manifest.schema_version = DS4_HF_MANIFEST_VERSION;
-    snprintf(manifest.repository, sizeof(manifest.repository), "%s", "owner/repo");
+    snprintf(manifest.repository, sizeof(manifest.repository), "%s", repository);
     snprintf(manifest.default_selector, sizeof(manifest.default_selector),
              "%s", "Headroom128");
     manifest.variant_count = 2;
     set_variant(&manifest.variants[0], "Headroom128", "Headroom128", 'H');
     manifest.variants[0].is_default = true;
     set_variant(&manifest.variants[1], "Quality128", "Quality128", 'Q');
+    if (has_mode(argv[4], "artifact-case")) {
+        set_artifact(
+            &manifest.variants[0].receiver,
+            "Headroom128/h-receiver.gguf", UINT64_C(19),
+            "58843fb97d5fe1e00ba6de8a81bf28488d8de13ee1eb692d47fc36284d51a33e");
+    } else if (has_mode(argv[4], "artifact-composed")) {
+        set_artifact(
+            &manifest.variants[0].receiver,
+            "Headroom128/caf\xC3\xA9-receiver.gguf", UINT64_C(19),
+            "af998e6101111b2cfbee2b09c07f9d7d2124262cc10d4f404e9444c90c43ecd3");
+    } else if (has_mode(argv[4], "artifact-decomposed")) {
+        set_artifact(
+            &manifest.variants[0].receiver,
+            "Headroom128/cafe\xCC\x81-receiver.gguf", UINT64_C(19),
+            "f34c15f11fd6e298fe61e31a5d97ffbef3daddb9bc95ca971ee7b9082b94f1cd");
+    }
     if (has_mode(argv[4], "sha-multiblock")) {
         set_artifact(
             &manifest.variants[0].receiver,

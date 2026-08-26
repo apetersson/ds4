@@ -14290,7 +14290,7 @@ int main(int argc, char **argv) {
         cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT;
     ds4_hf_runtime hf_runtime = {0};
     if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
-        char hf_err[512] = {0};
+        char hf_err[1024] = {0};
         if (!ds4_hf_runtime_prepare(&cfg.hf, &hf_runtime,
                                     hf_err, sizeof(hf_err))) {
             server_log(DS4_LOG_DEFAULT, "ds4-server: %s",

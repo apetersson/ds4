@@ -10,7 +10,8 @@ import unittest
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
-from test_hf_cache import FakeArtifactHub, PROBE, ROOT, SHA, payload_for
+from test_hf_cache import (FakeArtifactHub, PROBE, ROOT, SHA,
+                           cache_identity_path, payload_for)
 
 
 def endpoint_cache_identity(endpoint):
@@ -304,7 +305,7 @@ class IntegrityTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as outside:
             snapshots = (Path(cache) / "endpoints" /
                          endpoint_cache_identity(self.endpoint) / "repos" /
-                         "owner%2Frepo" / "snapshots")
+                         cache_identity_path("owner/repo") / "snapshots")
             snapshots.mkdir(parents=True)
             (snapshots / SHA).symlink_to(outside, target_is_directory=True)
             failed = self.run_probe(cache)

@@ -2535,28 +2535,8 @@ static bool endpoint_cache_identity(
     return true;
 }
 
-static bool cache_component_encode(const char *value, char *encoded,
-                                   size_t encoded_len) {
-    static const char hex[] = "0123456789ABCDEF";
-    size_t used = 0;
-    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
-        if (*p == '/' || *p == '%') {
-            if (used + 3 >= encoded_len) return false;
-            encoded[used++] = '%';
-            encoded[used++] = hex[*p >> 4];
-            encoded[used++] = hex[*p & 15];
-        } else {
-            if (used + 1 >= encoded_len) return false;
-            encoded[used++] = (char)*p;
-        }
-    }
-    if (!used || used >= encoded_len) return false;
-    encoded[used] = '\0';
-    return true;
-}
-
-static bool cache_reference_encode(const char *value, char *encoded,
-                                   size_t encoded_len) {
+static bool cache_identity_encode(const char *value, char *encoded,
+                                  size_t encoded_len) {
     static const char hex[] = "0123456789abcdef";
     size_t used = 0;
     for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
@@ -2567,6 +2547,58 @@ static bool cache_reference_encode(const char *value, char *encoded,
     if (!used || used >= encoded_len) return false;
     encoded[used] = '\0';
     return true;
+}
+
+static bool cache_identity_path(const char *value, const char *prefix,
+                                char *path, size_t path_len) {
+    char encoded[DS4_HF_PATH_MAX * 2];
+    if (!prefix || !prefix[0] ||
+        !cache_identity_encode(value, encoded, sizeof(encoded))) return false;
+    int written = snprintf(path, path_len, "%s", prefix);
+    if (written <= 0 || (size_t)written >= path_len) return false;
+    size_t used = (size_t)written;
+    size_t encoded_len = strlen(encoded);
+    for (size_t offset = 0; offset < encoded_len; offset += 64) {
+        size_t chunk = encoded_len - offset;
+        if (chunk > 64) chunk = 64;
+        if (used + 1 + chunk >= path_len) return false;
+        path[used++] = '/';
+        memcpy(path + used, encoded + offset, chunk);
+        used += chunk;
+        path[used] = '\0';
+    }
+    return true;
+}
+
+static bool cache_artifact_identity(
+    const char *repo_path,
+    char identity[DS4_HF_SHA256_HEX_SIZE]) {
+    hf_sha256 hash;
+    unsigned char digest[32];
+    static const char domain[] = "ds4-hf-cache-artifact-path-v1";
+    sha256_init(&hash);
+    sha256_update(&hash, domain, sizeof(domain));
+    if (!sha256_bounded_field(&hash, repo_path, DS4_HF_PATH_MAX)) {
+        secure_clear(&hash, sizeof(hash));
+        return false;
+    }
+    sha256_final(&hash, digest);
+    sha256_hex(digest, identity);
+    secure_clear(digest, sizeof(digest));
+    return true;
+}
+
+static const char *cache_artifact_leaf(ds4_hf_artifact_role role) {
+    switch (role) {
+        case DS4_HF_ROLE_RECEIVER: return "receiver.gguf";
+        case DS4_HF_ROLE_VISION_TOWER: return "vision-tower.safetensors";
+        case DS4_HF_ROLE_VISION_PROJECTOR:
+            return "vision-projector.safetensors";
+        case DS4_HF_ROLE_VISION_CONFIG: return "vision-config.json";
+        case DS4_HF_ROLE_LLAMA_CPP_MMPROJ: return "llama-mmproj.gguf";
+        case DS4_HF_ROLE_DSPARK: return "dspark.gguf";
+    }
+    return NULL;
 }
 
 static bool cache_path(const char *base, const char *suffix,
@@ -2608,7 +2640,7 @@ static bool plan_add_artifact(ds4_hf_acquisition_plan *plan,
                               ds4_hf_artifact_role role,
                               const ds4_hf_manifest_artifact *source,
                               bool requested, const char *endpoint_component,
-                              const char *repo_component) {
+                              const char *repo_namespace) {
     if (plan->artifact_count >= DS4_HF_ACQUISITION_MAX_ARTIFACTS) return false;
     ds4_hf_acquisition_artifact *artifact =
         &plan->artifacts[plan->artifact_count++];
@@ -2622,15 +2654,27 @@ static bool plan_add_artifact(ds4_hf_acquisition_plan *plan,
                      source->sha256)) return false;
     sha256_text_lower(artifact->sha256);
 
+    char artifact_identity[DS4_HF_SHA256_HEX_SIZE];
+    char artifact_filename[DS4_HF_SHA256_HEX_SIZE + 40];
     char snapshot_suffix[DS4_HF_CACHE_PATH_MAX];
     char snapshot[DS4_HF_CACHE_PATH_MAX];
+    char object[DS4_HF_CACHE_PATH_MAX];
+    const char *leaf = cache_artifact_leaf(role);
     int written = snprintf(snapshot_suffix, sizeof(snapshot_suffix),
-                           "endpoints/%s/repos/%s/snapshots/%s",
-                           endpoint_component, repo_component, plan->revision);
-    return written > 0 && (size_t)written < sizeof(snapshot_suffix) &&
+                           "endpoints/%s/%s/snapshots/%s",
+                           endpoint_component, repo_namespace, plan->revision);
+    int filename_written = -1;
+    return leaf && written > 0 &&
+           (size_t)written < sizeof(snapshot_suffix) &&
+           cache_artifact_identity(artifact->repo_path, artifact_identity) &&
+           (filename_written = snprintf(artifact_filename,
+                                        sizeof(artifact_filename), "%s-%s",
+                                        artifact_identity, leaf)) > 0 &&
+           (size_t)filename_written < sizeof(artifact_filename) &&
            cache_path(plan->cache_root, snapshot_suffix, snapshot,
                       sizeof(snapshot)) &&
-           cache_path(snapshot, artifact->repo_path, artifact->destination,
+           cache_path(snapshot, "objects", object, sizeof(object)) &&
+           cache_path(object, artifact_filename, artifact->destination,
                       sizeof(artifact->destination));
 }
 
@@ -2711,28 +2755,28 @@ bool ds4_hf_acquisition_plan_build(
     }
 
     char endpoint_component[DS4_HF_SHA256_HEX_SIZE];
-    char repo_component[DS4_HF_REPO_MAX + 4];
+    char repo_namespace[DS4_HF_CACHE_PATH_MAX];
     if (!endpoint_cache_identity(plan->endpoint, endpoint_component) ||
-        !cache_component_encode(plan->repository, repo_component,
-                                sizeof(repo_component)) ||
+        !cache_identity_path(plan->repository, "repos", repo_namespace,
+                             sizeof(repo_namespace)) ||
         !plan_add_artifact(plan, DS4_HF_ROLE_RECEIVER, &variant->receiver,
-                           true, endpoint_component, repo_component) ||
+                           true, endpoint_component, repo_namespace) ||
         !plan_add_artifact(plan, DS4_HF_ROLE_VISION_TOWER,
                            &variant->ds4_vision.tower,
                            cfg->vision_source == DS4_HF_VISION_CATALOG,
-                           endpoint_component, repo_component) ||
+                           endpoint_component, repo_namespace) ||
         !plan_add_artifact(plan, DS4_HF_ROLE_VISION_PROJECTOR,
                            &variant->ds4_vision.projector,
                            cfg->vision_source == DS4_HF_VISION_CATALOG,
-                           endpoint_component, repo_component) ||
+                           endpoint_component, repo_namespace) ||
         !plan_add_artifact(plan, DS4_HF_ROLE_VISION_CONFIG,
                            &variant->ds4_vision.config,
                            cfg->vision_source == DS4_HF_VISION_CATALOG,
-                           endpoint_component, repo_component) ||
+                           endpoint_component, repo_namespace) ||
         !plan_add_artifact(plan, DS4_HF_ROLE_LLAMA_CPP_MMPROJ,
                            &variant->llama_cpp_mmproj,
                            materialize_llama_cpp_mmproj,
-                           endpoint_component, repo_component)) {
+                           endpoint_component, repo_namespace)) {
         return acquisition_context_fail(err, errlen, plan, NULL,
                                         "cache destination is too long");
     }
@@ -2743,7 +2787,7 @@ bool ds4_hf_acquisition_plan_build(
     if (variant->has_dspark &&
         !plan_add_artifact(plan, DS4_HF_ROLE_DSPARK, &variant->dspark,
                            cfg->dspark_source == DS4_HF_DSPARK_CATALOG,
-                           endpoint_component, repo_component)) {
+                           endpoint_component, repo_namespace)) {
         return acquisition_context_fail(err, errlen, plan, NULL,
                                         "cache destination is too long");
     }
@@ -3576,16 +3620,16 @@ static bool metadata_cache_parts(const ds4_hf_cli_config *cfg,
                                  const char *revision,
                                  char cache_root[DS4_HF_CACHE_PATH_MAX],
                                  char endpoint_component[DS4_HF_SHA256_HEX_SIZE],
-                                 char repo_component[DS4_HF_REPO_MAX + 4],
+                                 char repo_namespace[DS4_HF_CACHE_PATH_MAX],
                                  char snapshot_parent[DS4_HF_CACHE_PATH_MAX]) {
     int written;
     return cache_root_resolve(cfg, cache_root) &&
            endpoint_cache_identity(cfg->endpoint, endpoint_component) &&
-           cache_component_encode(repo, repo_component,
-                                  DS4_HF_REPO_MAX + 4) &&
+           cache_identity_path(repo, "repos", repo_namespace,
+                               DS4_HF_CACHE_PATH_MAX) &&
            (written = snprintf(snapshot_parent, DS4_HF_CACHE_PATH_MAX,
-                               "endpoints/%s/repos/%s/snapshots/%s",
-                               endpoint_component, repo_component,
+                               "endpoints/%s/%s/snapshots/%s",
+                               endpoint_component, repo_namespace,
                                revision)) > 0 &&
            written < DS4_HF_CACHE_PATH_MAX;
 }
@@ -3690,10 +3734,10 @@ static bool manifest_cache_load(const ds4_hf_cli_config *cfg,
     *json_len_out = 0;
     char cache_root[DS4_HF_CACHE_PATH_MAX];
     char endpoint_component[DS4_HF_SHA256_HEX_SIZE];
-    char repo_component[DS4_HF_REPO_MAX + 4];
+    char repo_namespace[DS4_HF_CACHE_PATH_MAX];
     char parent[DS4_HF_CACHE_PATH_MAX];
     if (!metadata_cache_parts(cfg, repo, revision, cache_root,
-                              endpoint_component, repo_component, parent)) {
+                              endpoint_component, repo_namespace, parent)) {
         return fail(err, errlen, "HF offline metadata cache path is unavailable");
     }
     int parent_fd = metadata_parent_open(cache_root, parent, false);
@@ -3783,11 +3827,11 @@ static bool manifest_cache_publish(const ds4_hf_cli_config *cfg,
                                    size_t errlen) {
     char cache_root[DS4_HF_CACHE_PATH_MAX];
     char endpoint_component[DS4_HF_SHA256_HEX_SIZE];
-    char repo_component[DS4_HF_REPO_MAX + 4];
+    char repo_namespace[DS4_HF_CACHE_PATH_MAX];
     char parent[DS4_HF_CACHE_PATH_MAX];
     if (!metadata_cache_parts(cfg, resolved->repo, resolved->commit,
                               cache_root, endpoint_component,
-                              repo_component, parent)) {
+                              repo_namespace, parent)) {
         return fail(err, errlen, "HF metadata cache path is unavailable");
     }
     char digest[DS4_HF_SHA256_HEX_SIZE];
@@ -3875,33 +3919,24 @@ static bool reference_cache_path(const ds4_hf_cli_config *cfg,
                                  char endpoint_component[DS4_HF_SHA256_HEX_SIZE],
                                  char parent[DS4_HF_CACHE_PATH_MAX],
                                  char leaf[DS4_HF_PATH_MAX]) {
-    char repo_component[DS4_HF_REPO_MAX + 4];
-    char reference_component[DS4_HF_METADATA_MAX * 2];
+    char repo_namespace[DS4_HF_CACHE_PATH_MAX];
+    char reference_namespace[DS4_HF_CACHE_PATH_MAX];
     bool explicit_reference = cfg->revision != NULL;
     const char *reference = explicit_reference ? cfg->revision : "default";
     if ((explicit_reference && !valid_reference(reference)) ||
         !cache_root_resolve(cfg, cache_root) ||
         !endpoint_cache_identity(cfg->endpoint, endpoint_component) ||
-        !cache_component_encode(repo, repo_component,
-                                sizeof(repo_component)) ||
-        !cache_reference_encode(reference, reference_component,
-                                sizeof(reference_component))) return false;
+        !cache_identity_path(repo, "repos", repo_namespace,
+                             sizeof(repo_namespace)) ||
+        !cache_identity_path(reference,
+                             explicit_reference ? "refs/ref" :
+                                                  "refs/default",
+                             reference_namespace,
+                             sizeof(reference_namespace))) return false;
     int written = snprintf(parent, DS4_HF_CACHE_PATH_MAX,
-                           "endpoints/%s/repos/%s/refs/%s",
-                           endpoint_component, repo_component,
-                           explicit_reference ? "ref" : "default");
+                           "endpoints/%s/%s/%s", endpoint_component,
+                           repo_namespace, reference_namespace);
     if (written <= 0 || written >= DS4_HF_CACHE_PATH_MAX) return false;
-    size_t used = (size_t)written;
-    size_t reference_len = strlen(reference_component);
-    for (size_t offset = 0; offset < reference_len; offset += 64) {
-        size_t chunk = reference_len - offset;
-        if (chunk > 64) chunk = 64;
-        if (used + 1 + chunk >= DS4_HF_CACHE_PATH_MAX) return false;
-        parent[used++] = '/';
-        memcpy(parent + used, reference_component + offset, chunk);
-        used += chunk;
-        parent[used] = '\0';
-    }
     return copy_string(leaf, DS4_HF_PATH_MAX, "commit");
 }
 
