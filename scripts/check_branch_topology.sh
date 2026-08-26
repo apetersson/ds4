@@ -4,6 +4,7 @@
 set -euo pipefail
 
 base=52ed7f4123e1267f95b4ce2d2e89a97154f9e523
+promoted_head=9402d363300ecfb430a5feb1706bbfcd6f378765
 feature_refs=(
   feature/vision
   feature/native-preserved-gguf
@@ -19,32 +20,65 @@ merge_trees=(
   da38af0df1f50653664cf356e84dbf94b5d76154
   87b8a9180ab075b13445305d8278fd8c5c17dfe3
 )
-approved_makefile_blob=eba268897e08dab725e63e439573ac0b6f3b7f6f
-approved_merge_helper_blob=413663d91e5cde12d4cd6b32216191ad7b0a8a00
+approved_gate_blob_pairs=(
+  "eba268897e08dab725e63e439573ac0b6f3b7f6f 413663d91e5cde12d4cd6b32216191ad7b0a8a00"
+  "29212d83bd37492e125d9b036fb785c0d135be1a 0a42cc7ab92a9b47fa1ac89e1a5911040d57fb3d"
+)
 allowed_integration_paths=(
   "backlog/tasks/ds-005.02 - Establish-repeatable-integration-merge-and-conflict-gates.md"
   "backlog/tasks/ds-005.02.01 - Pin-semantic-merge-identity-in-topology-gates.md"
   "backlog/tasks/ds-005.02.02 - Accept-semantically-identical-merge-replays.md"
   "backlog/tasks/ds-005.02.03 - Pin-approved-post-merge-gate-blobs.md"
+  "backlog/tasks/ds-005.02.04 - Make-integration-topology-gates-valid-after-promotion.md"
   Makefile
   scripts/check_branch_topology.sh
   scripts/merge_integration.sh
+  tests/test_branch_topology.sh
 )
+
+usage() {
+  cat <<'EOF'
+usage: scripts/check_branch_topology.sh MODE [REVISION]
+
+  --pre-promotion   Validate a worker revision while integration/dev remains
+                    pinned to the immutable pre-merge base.
+  --post-promotion  Validate integration/dev and REVISION on the lineage rooted
+                    at the exact reviewed promoted head.
+EOF
+}
 
 die() {
   echo "check_branch_topology: $*" >&2
   exit 1
 }
 
-revision=${1:-HEAD}
+mode=${1:-}
+revision=${2:-HEAD}
+if [[ $# -gt 2 ]] || [[ $mode != --pre-promotion && $mode != --post-promotion ]]; then
+  usage >&2
+  exit 64
+fi
+
 repo=$(git rev-parse --show-toplevel 2>/dev/null) || die "run inside the target Git worktree"
 cd "$repo"
 revision=$(git rev-parse --verify "$revision^{commit}") || die "invalid integration revision"
 
 integration_ref=$(git rev-parse --verify refs/heads/integration/dev 2>/dev/null) ||
   die "missing refs/heads/integration/dev"
-[[ $integration_ref == "$base" ]] ||
-  die "integration/dev moved: expected $base, found $integration_ref"
+case "$mode" in
+  --pre-promotion)
+    [[ $integration_ref == "$base" ]] ||
+      die "pre-promotion integration/dev moved: expected $base, found $integration_ref"
+    ;;
+  --post-promotion)
+    git merge-base --is-ancestor "$promoted_head" "$integration_ref" ||
+      die "post-promotion integration/dev $integration_ref is not on promoted lineage $promoted_head"
+    git merge-base --is-ancestor "$integration_ref" "$revision" ||
+      die "post-promotion integration/dev $integration_ref is not an ancestor of revision $revision"
+    git merge-base --is-ancestor "$promoted_head" "$revision" ||
+      die "revision $revision is not on promoted lineage $promoted_head"
+    ;;
+esac
 
 main=$(git rev-parse --verify refs/heads/main 2>/dev/null) || die "missing local main"
 upstream_main=$(git rev-parse --verify refs/remotes/upstream/main 2>/dev/null) ||
@@ -89,12 +123,18 @@ final_feature_merge=${merges[2]}
 if [[ $revision != "$final_feature_merge" ]]; then
   makefile_blob=$(git rev-parse --verify "$revision:Makefile" 2>/dev/null) ||
     die "revision has no Makefile"
-  [[ $makefile_blob == "$approved_makefile_blob" ]] ||
-    die "post-merge Makefile blob is $makefile_blob, expected $approved_makefile_blob"
   merge_helper_blob=$(git rev-parse --verify "$revision:scripts/merge_integration.sh" 2>/dev/null) ||
     die "revision has no merge replay helper"
-  [[ $merge_helper_blob == "$approved_merge_helper_blob" ]] ||
-    die "post-merge replay helper blob is $merge_helper_blob, expected $approved_merge_helper_blob"
+  gate_blob_pair="$makefile_blob $merge_helper_blob"
+  approved=false
+  for approved_pair in "${approved_gate_blob_pairs[@]}"; do
+    if [[ $gate_blob_pair == "$approved_pair" ]]; then
+      approved=true
+      break
+    fi
+  done
+  [[ $approved == true ]] ||
+    die "post-merge gate blobs are not an approved pair: Makefile $makefile_blob, merge helper $merge_helper_blob"
 fi
 
 expected=$(mktemp "${TMPDIR:-/tmp}/ds005-expected.XXXXXX")
@@ -127,8 +167,11 @@ if [[ -s $extra ]]; then
 fi
 
 echo "check_branch_topology: PASS"
+echo "  mode: ${mode#--}"
 echo "  integration revision: $revision"
+echo "  integration/dev: $integration_ref"
 echo "  base: $base"
+[[ $mode != --post-promotion ]] || echo "  promoted lineage root: $promoted_head"
 for i in "${!merges[@]}"; do
   echo "  merge $((i + 1)): ${merges[$i]} <- ${feature_heads[$i]}"
   echo "    tree: ${merge_trees[$i]}"

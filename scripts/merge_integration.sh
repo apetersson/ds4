@@ -27,6 +27,10 @@ usage: scripts/merge_integration.sh [--check|--apply]
   --check  Verify the immutable base, feature refs, and recorded order (default).
   --apply  Merge the exact heads with --no-ff on a clean non-governed branch.
 
+Before promotion, --apply finishes by running the topology verifier in
+--pre-promotion mode. After the reviewed worker is promoted, use
+`make integration-gates`; its topology target uses --post-promotion mode.
+
 If a semantic conflict occurs, resolve only the reported files, stage them, and
 rerun --apply. The script verifies MERGE_HEAD, commits the pending merge, and
 continues in the same recorded order.
@@ -110,3 +114,5 @@ for i in "${!feature_heads[@]}"; do
 done
 
 echo "merge_integration: all validated heads are present"
+echo "merge_integration: verifying worker topology before promotion"
+"$repo/scripts/check_branch_topology.sh" --pre-promotion HEAD

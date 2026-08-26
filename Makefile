@@ -492,8 +492,11 @@ test: ds4_test ds4_agent_test ds4-eval q4k-dot-test mxfp4-dot-test dspark-mxfp4-
 integration-merge-plan:
 	./scripts/merge_integration.sh --check
 
+INTEGRATION_TOPOLOGY_MODE ?= post-promotion
+
 integration-topology:
-	./scripts/check_branch_topology.sh HEAD
+	./scripts/check_branch_topology.sh --$(INTEGRATION_TOPOLOGY_MODE) HEAD
+	./tests/test_branch_topology.sh
 
 integration-non-model-test:
 	$(MAKE) -B cpu
