@@ -1,10 +1,10 @@
 ---
 id: DS-003
 title: 'Epic: Extract and revalidate the existing native-preserving GGUF path'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-25 23:46'
-updated_date: '2026-08-26 00:09'
+updated_date: '2026-08-26 00:13'
 labels:
   - epic
   - 'branch:native-preserved-gguf'
