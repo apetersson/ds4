@@ -3971,12 +3971,12 @@ typedef struct {
 
 static const hf_capability_name hf_capability_names[] = {
     {DS4_HF_CAP_DEEPSEEK4, "deepseek4"},
-    {DS4_HF_CAP_TEXT_GENERATION, "text_generation"},
-    {DS4_HF_CAP_DS4_VISION, "ds4_vision"},
-    {DS4_HF_CAP_LLAMA_CPP_MMPROJ, "llama_cpp_mmproj"},
+    {DS4_HF_CAP_TEXT_GENERATION, "text-generation"},
+    {DS4_HF_CAP_DS4_VISION, "ds4-vision"},
+    {DS4_HF_CAP_LLAMA_CPP_MMPROJ, "llama-cpp-mmproj"},
     {DS4_HF_CAP_DSPARK, "dspark"},
-    {DS4_HF_CAP_ROUTE_TOKEN_ID, "route_token_id"},
-    {DS4_HF_CAP_SSD_STREAMING, "ssd_streaming"},
+    {DS4_HF_CAP_ROUTE_TOKEN_ID, "route-token-id"},
+    {DS4_HF_CAP_SSD_STREAMING, "ssd-streaming"},
 };
 
 static void hf_json_capabilities(FILE *fp, uint32_t capabilities,

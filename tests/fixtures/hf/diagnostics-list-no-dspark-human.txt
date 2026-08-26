@@ -3,20 +3,20 @@ repository: owner/repo
 revision: 0123456789abcdef0123456789abcdef01234567
 metadata_source: network
 variant Headroom128-IQ2_XXS (default)
-  receiver: path=Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf bytes=10 precision=IQ2_XXS ds4=yes llama_cpp=yes ds4_minimum_revision=52bba7525122fe8a6cac57c1d0bf45a409bed5b1 llama_cpp_minimum_revision=deepseek4-main-v1 required=deepseek4,text_generation optional=ssd_streaming
-  ds4_vision.tower: path=Headroom128-IQ2_XXS/DeepEncoderV2-BF16.safetensors bytes=5 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4_vision optional=future-optional-capability
-  ds4_vision.projector: path=Headroom128-IQ2_XXS/DeepSeek-V4-0731-Projector-BF16.safetensors bytes=7 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4_vision optional=none
-  ds4_vision.config: path=Headroom128-IQ2_XXS/upstream-config.json bytes=3 precision=JSON ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4_vision optional=none
-  llama_cpp_mmproj: path=Headroom128-IQ2_XXS/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf bytes=11 precision=BF16 ds4=no llama_cpp=yes ds4_minimum_revision=unavailable llama_cpp_minimum_revision=deepencoder-v2-dsv4-route-token-v1 required=llama_cpp_mmproj,route_token_id optional=none
+  receiver: path=Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf bytes=10 precision=IQ2_XXS ds4=yes llama_cpp=yes ds4_minimum_revision=52bba7525122fe8a6cac57c1d0bf45a409bed5b1 llama_cpp_minimum_revision=deepseek4-main-v1 required=deepseek4,text-generation optional=ssd-streaming
+  ds4_vision.tower: path=Headroom128-IQ2_XXS/DeepEncoderV2-BF16.safetensors bytes=5 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4-vision optional=future-optional-capability
+  ds4_vision.projector: path=Headroom128-IQ2_XXS/DeepSeek-V4-0731-Projector-BF16.safetensors bytes=7 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4-vision optional=none
+  ds4_vision.config: path=Headroom128-IQ2_XXS/upstream-config.json bytes=3 precision=JSON ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4-vision optional=none
+  llama_cpp_mmproj: path=Headroom128-IQ2_XXS/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf bytes=11 precision=BF16 ds4=no llama_cpp=yes ds4_minimum_revision=unavailable llama_cpp_minimum_revision=deepencoder-v2-dsv4-route-token-v1 required=llama-cpp-mmproj,route-token-id optional=none
   dspark: unavailable
   selection: manifest=yes llama_primary_filename=match llama_sibling_layout=match
-  declared_capabilities: required=deepseek4,text_generation,ds4_vision,llama_cpp_mmproj,route_token_id optional=ssd_streaming,future-optional-capability
+  declared_capabilities: required=deepseek4,text-generation,ds4-vision,llama-cpp-mmproj,route-token-id optional=ssd-streaming,future-optional-capability
 variant Quality128-IQ2_XXS_XL
-  receiver: path=Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf bytes=10 precision=IQ2_XXS_XL ds4=yes llama_cpp=yes ds4_minimum_revision=52bba7525122fe8a6cac57c1d0bf45a409bed5b1 llama_cpp_minimum_revision=deepseek4-main-v1 required=deepseek4,text_generation optional=ssd_streaming
-  ds4_vision.tower: path=Quality128-IQ2_XXS_XL/DeepEncoderV2-BF16.safetensors bytes=5 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4_vision optional=none
-  ds4_vision.projector: path=Quality128-IQ2_XXS_XL/DeepSeek-V4-0731-Projector-BF16.safetensors bytes=7 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4_vision optional=none
-  ds4_vision.config: path=Quality128-IQ2_XXS_XL/upstream-config.json bytes=3 precision=JSON ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4_vision optional=none
-  llama_cpp_mmproj: path=Quality128-IQ2_XXS_XL/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf bytes=11 precision=BF16 ds4=no llama_cpp=yes ds4_minimum_revision=unavailable llama_cpp_minimum_revision=deepencoder-v2-dsv4-route-token-v1 required=llama_cpp_mmproj,route_token_id optional=none
-  dspark: path=Quality128-IQ2_XXS_XL/dspark-DeepSeek-V4-Flash-0731-Quality128-Q8_0.gguf bytes=14 precision=Q8_0 ds4=yes llama_cpp=yes ds4_minimum_revision=dspark-v1 llama_cpp_minimum_revision=dspark-companion-v1 required=dspark optional=ssd_streaming
+  receiver: path=Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf bytes=10 precision=IQ2_XXS_XL ds4=yes llama_cpp=yes ds4_minimum_revision=52bba7525122fe8a6cac57c1d0bf45a409bed5b1 llama_cpp_minimum_revision=deepseek4-main-v1 required=deepseek4,text-generation optional=ssd-streaming
+  ds4_vision.tower: path=Quality128-IQ2_XXS_XL/DeepEncoderV2-BF16.safetensors bytes=5 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4-vision optional=none
+  ds4_vision.projector: path=Quality128-IQ2_XXS_XL/DeepSeek-V4-0731-Projector-BF16.safetensors bytes=7 precision=BF16 ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4-vision optional=none
+  ds4_vision.config: path=Quality128-IQ2_XXS_XL/upstream-config.json bytes=3 precision=JSON ds4=yes llama_cpp=no ds4_minimum_revision=ds4-vision-v1 llama_cpp_minimum_revision=unavailable required=ds4-vision optional=none
+  llama_cpp_mmproj: path=Quality128-IQ2_XXS_XL/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf bytes=11 precision=BF16 ds4=no llama_cpp=yes ds4_minimum_revision=unavailable llama_cpp_minimum_revision=deepencoder-v2-dsv4-route-token-v1 required=llama-cpp-mmproj,route-token-id optional=none
+  dspark: path=Quality128-IQ2_XXS_XL/dspark-DeepSeek-V4-Flash-0731-Quality128-Q8_0.gguf bytes=14 precision=Q8_0 ds4=yes llama_cpp=yes ds4_minimum_revision=dspark-v1 llama_cpp_minimum_revision=dspark-companion-v1 required=dspark optional=ssd-streaming
   selection: manifest=yes llama_primary_filename=match llama_sibling_layout=match
-  declared_capabilities: required=deepseek4,text_generation,ds4_vision,llama_cpp_mmproj,dspark,route_token_id optional=ssd_streaming
+  declared_capabilities: required=deepseek4,text-generation,ds4-vision,llama-cpp-mmproj,dspark,route-token-id optional=ssd-streaming
