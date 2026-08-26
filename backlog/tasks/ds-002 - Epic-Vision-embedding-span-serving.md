@@ -1,7 +1,7 @@
 ---
 id: DS-002
 title: 'Epic: Extract and revalidate existing vision embedding-span serving'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-25 23:46'
 updated_date: '2026-08-26 00:13'

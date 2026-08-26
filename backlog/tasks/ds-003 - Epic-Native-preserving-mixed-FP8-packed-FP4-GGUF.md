@@ -1,7 +1,7 @@
 ---
 id: DS-003
 title: 'Epic: Extract and revalidate existing native-preserving GGUF support'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-25 23:46'
 updated_date: '2026-08-26 00:13'

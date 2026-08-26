@@ -1,10 +1,10 @@
 ---
 id: DS-005
 title: 'Epic: Integrate clean feature branches and qualify HF release'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-08-25 23:46'
-updated_date: '2026-08-26 00:12'
+updated_date: '2026-08-26 00:13'
 labels:
   - epic
   - 'branch:integration-dev'
