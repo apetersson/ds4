@@ -2512,7 +2512,7 @@ static bool cache_component_encode(const char *value, char *encoded,
     static const char hex[] = "0123456789ABCDEF";
     size_t used = 0;
     for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
-        if (*p == '/') {
+        if (*p == '/' || *p == '%') {
             if (used + 3 >= encoded_len) return false;
             encoded[used++] = '%';
             encoded[used++] = hex[*p >> 4];
@@ -3811,15 +3811,18 @@ static bool reference_cache_path(const ds4_hf_cli_config *cfg,
                                  char parent[DS4_HF_CACHE_PATH_MAX],
                                  char leaf[DS4_HF_PATH_MAX]) {
     char repo_component[DS4_HF_REPO_MAX + 4];
-    char reference_component[DS4_HF_METADATA_MAX * 3 + 4];
-    const char *reference = cfg->revision && cfg->revision[0] ?
-                            cfg->revision : "default";
+    char reference_component[DS4_HF_METADATA_MAX * 3 + 5];
+    bool explicit_reference = cfg->revision && cfg->revision[0];
+    const char *reference = explicit_reference ? cfg->revision : "default";
     int written;
     return cache_root_resolve(cfg, cache_root) &&
            cache_component_encode(repo, repo_component,
                                   sizeof(repo_component)) &&
-           cache_component_encode(reference, reference_component,
-                                  sizeof(reference_component)) &&
+           copy_string(reference_component,
+                       sizeof(reference_component),
+                       explicit_reference ? "ref-" : "def-") &&
+           cache_component_encode(reference, reference_component + 4,
+                                  sizeof(reference_component) - 4) &&
            (written = snprintf(parent, DS4_HF_CACHE_PATH_MAX,
                                "repos/%s/refs", repo_component)) > 0 &&
            written < DS4_HF_CACHE_PATH_MAX &&

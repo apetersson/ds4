@@ -17,6 +17,9 @@ FIXTURE = ROOT / "tests" / "fixtures" / "hf" / "variants-v2.json"
 GOLDEN = ROOT / "tests" / "fixtures" / "hf"
 PROBE = ROOT / "tests" / "test_hf_diagnostics_probe"
 SHA = "0123456789abcdef0123456789abcdef01234567"
+SHA_SLASH_REF = "1111111111111111111111111111111111111111"
+SHA_PERCENT_REF = "2222222222222222222222222222222222222222"
+SHA_DEFAULT_REF = "3333333333333333333333333333333333333333"
 LOCK = "/tmp/ds4-ds00108-hf-diagnostics.lock"
 
 
@@ -44,6 +47,11 @@ class HubHandler(BaseHTTPRequestHandler):
     requests = []
     manifest = b""
     payloads = {}
+    revisions = {
+        "feature/x": SHA_SLASH_REF,
+        "feature%2Fx": SHA_PERCENT_REF,
+        "default": SHA_DEFAULT_REF,
+    }
 
     def log_message(self, _format, *_args):
         pass
@@ -62,11 +70,28 @@ class HubHandler(BaseHTTPRequestHandler):
             self.send_bytes(200, json.dumps({"sha": SHA}).encode(),
                             "application/json")
             return
-        prefix = f"/owner/repo/resolve/{SHA}/"
-        if path == prefix + "variants.json":
+        revision_prefix = "/api/models/owner/repo/revision/"
+        if path.startswith(revision_prefix):
+            revision = path.removeprefix(revision_prefix)
+            commit = type(self).revisions.get(revision)
+            if commit is None:
+                self.send_bytes(404, b"missing")
+            else:
+                self.send_bytes(200, json.dumps({"sha": commit}).encode(),
+                                "application/json")
+            return
+        resolve_prefix = "/owner/repo/resolve/"
+        resolved = path.removeprefix(resolve_prefix)
+        commit, separator, artifact_path = resolved.partition("/")
+        if (path.startswith(resolve_prefix) and separator and
+                commit in {SHA, *type(self).revisions.values()} and
+                artifact_path == "variants.json"):
             self.send_bytes(200, type(self).manifest, "application/json")
             return
-        payload = type(self).payloads.get(path.removeprefix(prefix))
+        payload = (type(self).payloads.get(artifact_path)
+                   if path.startswith(resolve_prefix) and separator and
+                   commit in {SHA, *type(self).revisions.values()}
+                   else None)
         if payload is None:
             self.send_bytes(404, b"missing")
         else:
@@ -205,6 +230,37 @@ class HFDiagnosticsTests(unittest.TestCase):
         for process, (stdout, stderr) in zip(processes, results):
             self.assertEqual(process.returncode, 0, stderr)
             self.assertEqual(json.loads(stdout)["revision"], SHA)
+
+    def test_reference_cache_keys_are_injective(self):
+        cases = (
+            (None, SHA),
+            ("default", SHA_DEFAULT_REF),
+            ("feature/x", SHA_SLASH_REF),
+            ("feature%2Fx", SHA_PERCENT_REF),
+        )
+        for revision, expected_commit in cases:
+            with self.subTest(mode="populate", revision=revision):
+                args = ["--list-hf-variants", "--json"]
+                if revision is not None:
+                    args.extend(("--hf-revision", revision))
+                result = self.run_binary("ds4", *args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["revision"],
+                                 expected_commit)
+
+        HubHandler.requests = []
+        for revision, expected_commit in cases:
+            with self.subTest(mode="offline", revision=revision):
+                args = ["--list-hf-variants", "--hf-offline", "--json"]
+                if revision is not None:
+                    args.extend(("--hf-revision", revision))
+                result = self.run_binary(
+                    "ds4", *args, endpoint="http://127.0.0.1:1"
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["revision"],
+                                 expected_commit)
+        self.assertEqual(HubHandler.requests, [])
 
     def test_runtime_totals_never_mix_raw_vision_and_mmproj(self):
         server = self.run_binary("ds4-server", "--hf-dry-run", "--json")
