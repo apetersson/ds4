@@ -20,6 +20,7 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 SHA_SLASH_REF = "1111111111111111111111111111111111111111"
 SHA_PERCENT_REF = "2222222222222222222222222222222222222222"
 SHA_DEFAULT_REF = "3333333333333333333333333333333333333333"
+SHA_UPPER_REF = "4444444444444444444444444444444444444444"
 LOCK = "/tmp/ds4-ds00108-hf-diagnostics.lock"
 
 
@@ -48,6 +49,7 @@ class HubHandler(BaseHTTPRequestHandler):
     manifest = b""
     payloads = {}
     revisions = {
+        "Feature/X": SHA_UPPER_REF,
         "feature/x": SHA_SLASH_REF,
         "feature%2Fx": SHA_PERCENT_REF,
         "default": SHA_DEFAULT_REF,
@@ -235,6 +237,7 @@ class HFDiagnosticsTests(unittest.TestCase):
         cases = (
             (None, SHA),
             ("default", SHA_DEFAULT_REF),
+            ("Feature/X", SHA_UPPER_REF),
             ("feature/x", SHA_SLASH_REF),
             ("feature%2Fx", SHA_PERCENT_REF),
         )
@@ -247,6 +250,12 @@ class HFDiagnosticsTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["revision"],
                                  expected_commit)
+
+        ref_directory = (Path(self.cache.name) / "repos" /
+                         "owner%2Frepo" / "refs")
+        leaves = [entry.name for entry in ref_directory.iterdir()]
+        self.assertEqual(len(leaves), len(cases))
+        self.assertEqual(len({leaf.casefold() for leaf in leaves}), len(cases))
 
         HubHandler.requests = []
         for revision, expected_commit in cases:
