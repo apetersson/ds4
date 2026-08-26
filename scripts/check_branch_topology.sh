@@ -19,10 +19,10 @@ merge_trees=(
   da38af0df1f50653664cf356e84dbf94b5d76154
   87b8a9180ab075b13445305d8278fd8c5c17dfe3
 )
-final_feature_merge=ac77d7ec7ea8448679868f90ea4c678fdfbc7400
 allowed_integration_paths=(
   "backlog/tasks/ds-005.02 - Establish-repeatable-integration-merge-and-conflict-gates.md"
   "backlog/tasks/ds-005.02.01 - Pin-semantic-merge-identity-in-topology-gates.md"
+  "backlog/tasks/ds-005.02.02 - Accept-semantically-identical-merge-replays.md"
   Makefile
   scripts/check_branch_topology.sh
   scripts/merge_integration.sh
@@ -82,8 +82,7 @@ for i in "${!merges[@]}"; do
   expected_first_parent=${merges[$i]}
 done
 
-[[ ${merges[2]} == "$final_feature_merge" ]] ||
-  die "final feature merge is ${merges[2]}, expected $final_feature_merge"
+final_feature_merge=${merges[2]}
 
 expected=$(mktemp "${TMPDIR:-/tmp}/ds005-expected.XXXXXX")
 actual=$(mktemp "${TMPDIR:-/tmp}/ds005-actual.XXXXXX")
