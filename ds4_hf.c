@@ -313,6 +313,15 @@ bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
         return fail(err, errlen,
                     "--dspark requires either explicit --mtp FILE or --hf-repo");
     }
+    if (cfg->dry_run && cfg->vision_source == DS4_HF_VISION_EXPLICIT) {
+        return fail(err, errlen,
+                    "--hf-dry-run cannot report explicit local --vision-tower/--vision-adapter weights; use catalog vision or --no-vision");
+    }
+    if (cfg->dry_run &&
+        cfg->dspark_source == DS4_HF_DSPARK_EXPLICIT_MTP) {
+        return fail(err, errlen,
+                    "--hf-dry-run cannot report an explicit local --mtp support file; omit --mtp to plan catalog DSpark");
+    }
     return true;
 }
 

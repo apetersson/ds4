@@ -319,6 +319,32 @@ int main(void) {
               cfg.dspark_source == DS4_HF_DSPARK_CATALOG);
     }
     {
+        char *argv[] = {"ds4-server", "--hf", "owner/repo",
+                        "--hf-dry-run",
+                        "--vision-python", "/usr/bin/python3",
+                        "--vision-encoder", "/opt/local/encoder.py",
+                        "--vision-tower", "/models/tower.safetensors",
+                        "--vision-adapter", "/models/adapter.safetensors"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, true, 12, argv, false, false,
+                               err, sizeof(err));
+        CHECK("dry run rejects unreported explicit local vision weights",
+              !ok && strstr(err, "cannot report explicit local") &&
+              strstr(err, "--vision-tower/--vision-adapter"));
+    }
+    {
+        char *argv[] = {"ds4", "--hf", "owner/repo", "--hf-dry-run",
+                        "--dspark", "--mtp", "/models/support.gguf"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, false, 7, argv, false, false,
+                               err, sizeof(err));
+        CHECK("dry run rejects an unreported explicit local MTP file",
+              !ok && strstr(err, "cannot report an explicit local --mtp") &&
+              strstr(err, "catalog DSpark"));
+    }
+    {
         char *argv[] = {"ds4", "--list-hf-variants"};
         ds4_hf_cli_config cfg;
         char err[256] = {0};
