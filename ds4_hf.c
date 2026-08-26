@@ -31,6 +31,9 @@ enum {
     SEEN_VISION_ADAPTER = 1u << 10,
     SEEN_MTP = 1u << 11,
     SEEN_DSPARK = 1u << 12,
+    SEEN_LIST_VARIANTS = 1u << 13,
+    SEEN_DRY_RUN = 1u << 14,
+    SEEN_DIAGNOSTICS_JSON = 1u << 15,
 };
 
 static bool fail(char *err, size_t errlen, const char *fmt, ...) {
@@ -167,6 +170,18 @@ ds4_hf_cli_parse_result ds4_hf_cli_parse_arg(ds4_hf_cli_config *cfg,
         if (!mark_once(cfg, SEEN_OFFLINE, arg, err, errlen)) return DS4_HF_CLI_ERROR;
         cfg->offline = true;
         return DS4_HF_CLI_MATCHED;
+    } else if (!strcmp(arg, "--list-hf-variants")) {
+        if (!mark_once(cfg, SEEN_LIST_VARIANTS, arg, err, errlen)) return DS4_HF_CLI_ERROR;
+        cfg->list_variants = true;
+        return DS4_HF_CLI_MATCHED;
+    } else if (!strcmp(arg, "--hf-dry-run")) {
+        if (!mark_once(cfg, SEEN_DRY_RUN, arg, err, errlen)) return DS4_HF_CLI_ERROR;
+        cfg->dry_run = true;
+        return DS4_HF_CLI_MATCHED;
+    } else if (!strcmp(arg, "--json") || !strcmp(arg, "--hf-json")) {
+        if (!mark_once(cfg, SEEN_DIAGNOSTICS_JSON, arg, err, errlen)) return DS4_HF_CLI_ERROR;
+        cfg->diagnostics_json = true;
+        return DS4_HF_CLI_MATCHED;
     } else if (!strcmp(arg, "--mtp")) {
         bit = SEEN_MTP;
         target = &cfg->mtp_path;
@@ -226,6 +241,18 @@ bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
                          char *err,
                          size_t errlen) {
     bool have_repo = (cfg->seen & SEEN_REPO) != 0;
+    if (cfg->list_variants && cfg->dry_run) {
+        return fail(err, errlen,
+                    "--list-hf-variants and --hf-dry-run are mutually exclusive");
+    }
+    if ((cfg->list_variants || cfg->dry_run) && !have_repo) {
+        return fail(err, errlen,
+                    "HF diagnostics require --hf-repo OWNER/REPO[:SELECTOR]");
+    }
+    if (cfg->diagnostics_json && !cfg->list_variants && !cfg->dry_run) {
+        return fail(err, errlen,
+                    "--json/--hf-json requires --list-hf-variants or --hf-dry-run");
+    }
     if (have_repo && model_explicit) {
         return fail(err, errlen, "--model and --hf-repo are mutually exclusive");
     }
@@ -1249,16 +1276,30 @@ static bool manifest_split_gguf_name(const char *filename) {
     return true;
 }
 
+static bool string_contains_case(const char *haystack, const char *needle) {
+    size_t needle_len = strlen(needle);
+    if (!needle_len) return true;
+    for (const char *p = haystack; *p; p++) {
+        size_t i = 0;
+        while (i < needle_len && p[i] &&
+               tolower((unsigned char)p[i]) ==
+                   tolower((unsigned char)needle[i])) i++;
+        if (i == needle_len) return true;
+    }
+    return false;
+}
+
 bool ds4_hf_llama_primary_selectable(const char *selector,
                                      const char *receiver_path) {
     if (!selector || !selector[0] || !manifest_safe_path(receiver_path)) return false;
     const char *filename = manifest_basename(receiver_path);
     static const char *const excluded[] = {
         "mmproj", "imatrix", "mtp-", "eagle3-", "dflash-", "dspark-",
+        "support",
     };
     if (!manifest_suffix(filename, ".gguf") || manifest_split_gguf_name(filename)) return false;
     for (size_t i = 0; i < sizeof(excluded) / sizeof(excluded[0]); i++) {
-        if (strstr(filename, excluded[i])) return false;
+        if (string_contains_case(filename, excluded[i])) return false;
     }
     size_t selector_len = strlen(selector);
     for (const char *candidate = filename; *candidate; candidate++) {
@@ -3394,6 +3435,858 @@ bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
     return ok;
 }
 
+bool ds4_hf_acquisition_probe_cache(ds4_hf_acquisition_plan *plan,
+                                    bool require_requested,
+                                    char *err,
+                                    size_t errlen) {
+    if (!plan || !acquisition_plan_valid(plan)) {
+        return fail(err, errlen,
+                    "HF cache probe rejected an invalid or manifest-mutated sealed plan");
+    }
+    for (size_t i = 0; i < plan->artifact_count; i++) {
+        ds4_hf_acquisition_artifact *artifact = &plan->artifacts[i];
+        int fd = -1;
+        artifact_cache_state state = artifact_cache_open(plan, artifact, &fd);
+        if (fd >= 0) close(fd);
+        artifact->cache_hit = state == ARTIFACT_CACHE_VALID;
+        if (state == ARTIFACT_CACHE_INVALID) {
+            return acquisition_context_fail(
+                err, errlen, plan, artifact,
+                "cache entry is present but is not a complete verified immutable role snapshot");
+        }
+        if (require_requested && artifact->requested &&
+            state != ARTIFACT_CACHE_VALID) {
+            return acquisition_context_fail(
+                err, errlen, plan, artifact,
+                "offline mode requires a complete verified snapshot for every requested role");
+        }
+    }
+    return true;
+}
+
+static void sha256_memory_hex(const void *data, size_t len,
+                              char output[DS4_HF_SHA256_HEX_SIZE]) {
+    hf_sha256 hash;
+    unsigned char digest[32];
+    sha256_init(&hash);
+    sha256_update(&hash, data, len);
+    sha256_final(&hash, digest);
+    sha256_hex(digest, output);
+    secure_clear(digest, sizeof(digest));
+}
+
+static bool metadata_cache_parts(const ds4_hf_cli_config *cfg,
+                                 const char *repo,
+                                 const char *revision,
+                                 char cache_root[DS4_HF_CACHE_PATH_MAX],
+                                 char repo_component[DS4_HF_REPO_MAX + 4],
+                                 char snapshot_parent[DS4_HF_CACHE_PATH_MAX]) {
+    int written;
+    return cache_root_resolve(cfg, cache_root) &&
+           cache_component_encode(repo, repo_component,
+                                  DS4_HF_REPO_MAX + 4) &&
+           (written = snprintf(snapshot_parent, DS4_HF_CACHE_PATH_MAX,
+                               "repos/%s/snapshots/%s",
+                               repo_component, revision)) > 0 &&
+           written < DS4_HF_CACHE_PATH_MAX;
+}
+
+static int metadata_parent_open(const char *cache_root,
+                                const char *relative,
+                                bool create) {
+    ds4_hf_acquisition_plan root = {0};
+    if (!copy_string(root.cache_root, sizeof(root.cache_root), cache_root)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    int root_fd = cache_root_open(&root, create);
+    if (root_fd < 0) return -1;
+    int parent_fd = directory_chain_open(root_fd, relative, create);
+    int saved_errno = errno;
+    close(root_fd);
+    errno = saved_errno;
+    return parent_fd;
+}
+
+static bool read_regular_small(int parent_fd, const char *leaf,
+                               char *buffer, size_t capacity,
+                               size_t *length_out) {
+    int fd = regular_entry_open(parent_fd, leaf, O_RDONLY, 0);
+    if (fd < 0) return false;
+    struct stat before, after, path_stat;
+    bool ok = !fstat(fd, &before) && before.st_size >= 0 &&
+              (uint64_t)before.st_size < capacity;
+    size_t length = ok ? (size_t)before.st_size : 0;
+    size_t used = 0;
+    while (ok && used < length) {
+        ssize_t got = pread(fd, buffer + used, length - used, (off_t)used);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) {
+            ok = false;
+            break;
+        }
+        used += (size_t)got;
+    }
+    ok = ok && !fstat(fd, &after) &&
+         !fstatat(parent_fd, leaf, &path_stat, AT_SYMLINK_NOFOLLOW) &&
+         S_ISREG(path_stat.st_mode) && path_stat.st_nlink == 1 &&
+         before.st_dev == after.st_dev && before.st_ino == after.st_ino &&
+         before.st_size == after.st_size &&
+         after.st_dev == path_stat.st_dev && after.st_ino == path_stat.st_ino &&
+         after.st_size == path_stat.st_size;
+    close(fd);
+    if (!ok) return false;
+    buffer[length] = '\0';
+    *length_out = length;
+    return true;
+}
+
+static bool publish_regular_exclusive(int parent_fd, const char *leaf,
+                                      const char *data, size_t length,
+                                      char *err, size_t errlen) {
+    char temporary[DS4_HF_PATH_MAX];
+    int fd = -1;
+    for (unsigned attempt = 0; attempt < 64; attempt++) {
+        int written = snprintf(temporary, sizeof(temporary),
+                               ".%s.ds4-tmp.%ld.%u", leaf,
+                               (long)getpid(), attempt);
+        if (written <= 0 || (size_t)written >= sizeof(temporary)) {
+            return fail(err, errlen,
+                        "HF metadata cache temporary path is too long");
+        }
+        fd = regular_entry_open(parent_fd, temporary,
+                                O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (fd >= 0 || errno != EEXIST) break;
+    }
+    if (fd < 0) {
+        return fail(err, errlen, "cannot create HF metadata cache entry: %s",
+                    strerror(errno));
+    }
+    bool ok = write_all(fd, data, length) && !fchmod(fd, 0400) && !fsync(fd);
+    int saved_errno = errno;
+    if (close(fd) && ok) {
+        ok = false;
+        saved_errno = errno;
+    }
+    if (ok && linkat(parent_fd, temporary, parent_fd, leaf, 0)) {
+        ok = false;
+        saved_errno = errno;
+    }
+    unlinkat(parent_fd, temporary, 0);
+    if (!ok) {
+        return fail(err, errlen, "cannot publish HF metadata cache entry: %s",
+                    strerror(saved_errno));
+    }
+    return true;
+}
+
+static bool manifest_cache_load(const ds4_hf_cli_config *cfg,
+                                const char *repo,
+                                const char *revision,
+                                char **json_out,
+                                size_t *json_len_out,
+                                char *err,
+                                size_t errlen) {
+    *json_out = NULL;
+    *json_len_out = 0;
+    char cache_root[DS4_HF_CACHE_PATH_MAX];
+    char repo_component[DS4_HF_REPO_MAX + 4];
+    char parent[DS4_HF_CACHE_PATH_MAX];
+    if (!metadata_cache_parts(cfg, repo, revision, cache_root,
+                              repo_component, parent)) {
+        return fail(err, errlen, "HF offline metadata cache path is unavailable");
+    }
+    int parent_fd = metadata_parent_open(cache_root, parent, false);
+    if (parent_fd < 0) {
+        return fail(err, errlen,
+                    "HF offline snapshot metadata is missing for repository='%s' revision='%s'",
+                    repo, revision);
+    }
+    char metadata[1024];
+    size_t metadata_len = 0;
+    if (!read_regular_small(parent_fd, "variants.json.ds4-meta",
+                            metadata, sizeof(metadata), &metadata_len)) {
+        close(parent_fd);
+        return fail(err, errlen,
+                    "HF offline snapshot manifest metadata is missing or untrusted for repository='%s' revision='%s'",
+                    repo, revision);
+    }
+    char meta_repo[DS4_HF_REPO_MAX] = {0};
+    char meta_revision[DS4_HF_COMMIT_SHA_LEN + 1] = {0};
+    char digest[DS4_HF_SHA256_HEX_SIZE] = {0};
+    uint64_t bytes = 0;
+    char trailing = '\0';
+    int fields = sscanf(metadata,
+                        "version=1\nrepository=%255[^\n]\nrevision=%40[^\n]\nbytes=%" SCNu64 "\nsha256=%64[^\n]\n%c",
+                        meta_repo, meta_revision, &bytes, digest, &trailing);
+    if (fields != 4 || strcmp(meta_repo, repo) ||
+        strcmp(meta_revision, revision) ||
+        !manifest_valid_sha256(digest) ||
+        bytes == 0 || bytes > DS4_HF_MANIFEST_MAX_BYTES) {
+        close(parent_fd);
+        return fail(err, errlen,
+                    "HF offline snapshot manifest metadata is invalid for repository='%s' revision='%s'",
+                    repo, revision);
+    }
+    int manifest_fd = regular_entry_open(parent_fd, "variants.json", O_RDONLY, 0);
+    char actual[DS4_HF_SHA256_HEX_SIZE] = {0};
+    if (manifest_fd < 0 ||
+        !hash_regular_fd_stable(parent_fd, "variants.json", manifest_fd,
+                                bytes, digest, actual)) {
+        if (manifest_fd >= 0) close(manifest_fd);
+        close(parent_fd);
+        return fail(err, errlen,
+                    "HF offline snapshot manifest is missing or fails verification for repository='%s' revision='%s'",
+                    repo, revision);
+    }
+    char *json = malloc((size_t)bytes + 1u);
+    if (!json) {
+        close(manifest_fd);
+        close(parent_fd);
+        return fail(err, errlen, "HF offline manifest allocation failed");
+    }
+    size_t used = 0;
+    while (used < (size_t)bytes) {
+        ssize_t got = pread(manifest_fd, json + used,
+                            (size_t)bytes - used, (off_t)used);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) break;
+        used += (size_t)got;
+    }
+    close(manifest_fd);
+    close(parent_fd);
+    if (used != (size_t)bytes) {
+        free(json);
+        return fail(err, errlen, "HF offline snapshot manifest changed while reading");
+    }
+    char read_digest[DS4_HF_SHA256_HEX_SIZE];
+    sha256_memory_hex(json, used, read_digest);
+    if (strcmp(read_digest, digest)) {
+        free(json);
+        return fail(err, errlen,
+                    "HF offline snapshot manifest changed after verification");
+    }
+    json[used] = '\0';
+    *json_out = json;
+    *json_len_out = used;
+    return true;
+}
+
+static bool manifest_cache_publish(const ds4_hf_cli_config *cfg,
+                                   const ds4_hf_resolved_repo *resolved,
+                                   const char *json,
+                                   size_t json_len,
+                                   char *err,
+                                   size_t errlen) {
+    char cache_root[DS4_HF_CACHE_PATH_MAX];
+    char repo_component[DS4_HF_REPO_MAX + 4];
+    char parent[DS4_HF_CACHE_PATH_MAX];
+    if (!metadata_cache_parts(cfg, resolved->repo, resolved->commit,
+                              cache_root, repo_component, parent)) {
+        return fail(err, errlen, "HF metadata cache path is unavailable");
+    }
+    char digest[DS4_HF_SHA256_HEX_SIZE];
+    sha256_memory_hex(json, json_len, digest);
+    char metadata[1024];
+    int metadata_len = snprintf(
+        metadata, sizeof(metadata),
+        "version=1\nrepository=%s\nrevision=%s\nbytes=%zu\nsha256=%s\n",
+        resolved->repo, resolved->commit, json_len, digest);
+    if (metadata_len <= 0 || (size_t)metadata_len >= sizeof(metadata)) {
+        return fail(err, errlen, "HF manifest metadata is too long");
+    }
+    int parent_fd = metadata_parent_open(cache_root, parent, true);
+    if (parent_fd < 0) {
+        return fail(err, errlen, "cannot create HF metadata snapshot: %s",
+                    strerror(errno));
+    }
+    int lock_fd = -1;
+    for (unsigned attempt = 0; attempt < 64; attempt++) {
+        lock_fd = regular_entry_open(parent_fd, ".variants.lock",
+                                     O_RDWR | O_CREAT, 0600);
+        if (lock_fd >= 0 || (errno != ENOENT && errno != EINTR)) break;
+        sched_yield();
+    }
+    if (lock_fd < 0 || flock(lock_fd, LOCK_EX)) {
+        int saved_errno = errno;
+        if (lock_fd >= 0) close(lock_fd);
+        close(parent_fd);
+        return fail(err, errlen, "cannot lock HF metadata snapshot: %s",
+                    strerror(saved_errno));
+    }
+    struct stat manifest_st, metadata_st;
+    bool manifest_exists = !fstatat(parent_fd, "variants.json", &manifest_st,
+                                    AT_SYMLINK_NOFOLLOW);
+    int manifest_errno = errno;
+    bool metadata_exists = !fstatat(parent_fd, "variants.json.ds4-meta",
+                                    &metadata_st, AT_SYMLINK_NOFOLLOW);
+    int metadata_errno = errno;
+    if (manifest_exists || metadata_exists) {
+        if (!manifest_exists || !metadata_exists ||
+            manifest_errno == ELOOP || metadata_errno == ELOOP) {
+            fail(err, errlen,
+                 "HF immutable metadata snapshot is incomplete or untrusted for revision='%s'",
+                 resolved->commit);
+            flock(lock_fd, LOCK_UN);
+            close(lock_fd);
+            close(parent_fd);
+            return false;
+        }
+        char *cached = NULL;
+        size_t cached_len = 0;
+        bool ok = manifest_cache_load(cfg, resolved->repo, resolved->commit,
+                                      &cached, &cached_len, err, errlen) &&
+                  cached_len == json_len && !memcmp(cached, json, json_len);
+        free(cached);
+        if (!ok && (!err || !err[0])) {
+            fail(err, errlen,
+                 "HF immutable metadata snapshot differs for revision='%s'",
+                 resolved->commit);
+        }
+        flock(lock_fd, LOCK_UN);
+        close(lock_fd);
+        close(parent_fd);
+        return ok;
+    }
+    bool ok = publish_regular_exclusive(parent_fd,
+                                        "variants.json.ds4-meta",
+                                        metadata, (size_t)metadata_len,
+                                        err, errlen) &&
+              publish_regular_exclusive(parent_fd, "variants.json",
+                                        json, json_len, err, errlen) &&
+              !fsync(parent_fd);
+    if (!ok) unlinkat(parent_fd, "variants.json.ds4-meta", 0);
+    flock(lock_fd, LOCK_UN);
+    close(lock_fd);
+    close(parent_fd);
+    return ok;
+}
+
+static bool reference_cache_path(const ds4_hf_cli_config *cfg,
+                                 const char *repo,
+                                 char cache_root[DS4_HF_CACHE_PATH_MAX],
+                                 char parent[DS4_HF_CACHE_PATH_MAX],
+                                 char leaf[DS4_HF_PATH_MAX]) {
+    char repo_component[DS4_HF_REPO_MAX + 4];
+    char reference_component[DS4_HF_METADATA_MAX * 3 + 4];
+    const char *reference = cfg->revision && cfg->revision[0] ?
+                            cfg->revision : "default";
+    int written;
+    return cache_root_resolve(cfg, cache_root) &&
+           cache_component_encode(repo, repo_component,
+                                  sizeof(repo_component)) &&
+           cache_component_encode(reference, reference_component,
+                                  sizeof(reference_component)) &&
+           (written = snprintf(parent, DS4_HF_CACHE_PATH_MAX,
+                               "repos/%s/refs", repo_component)) > 0 &&
+           written < DS4_HF_CACHE_PATH_MAX &&
+           copy_string(leaf, DS4_HF_PATH_MAX, reference_component);
+}
+
+static bool reference_cache_publish(const ds4_hf_cli_config *cfg,
+                                    const ds4_hf_resolved_repo *resolved,
+                                    char *err,
+                                    size_t errlen) {
+    char cache_root[DS4_HF_CACHE_PATH_MAX], parent[DS4_HF_CACHE_PATH_MAX];
+    char leaf[DS4_HF_PATH_MAX], temporary[DS4_HF_PATH_MAX];
+    if (!reference_cache_path(cfg, resolved->repo, cache_root, parent, leaf)) {
+        return fail(err, errlen, "HF reference cache path is unavailable");
+    }
+    int parent_fd = metadata_parent_open(cache_root, parent, true);
+    if (parent_fd < 0) return fail(err, errlen, "cannot create HF reference cache");
+    char content[DS4_HF_COMMIT_SHA_LEN + 2];
+    int content_len = snprintf(content, sizeof(content), "%s\n",
+                               resolved->commit);
+    if (content_len != DS4_HF_COMMIT_SHA_LEN + 1) {
+        close(parent_fd);
+        return fail(err, errlen, "HF reference cache record is invalid");
+    }
+    int fd = -1;
+    for (unsigned attempt = 0; attempt < 64; attempt++) {
+        int written = snprintf(temporary, sizeof(temporary),
+                               ".%s.tmp.%ld.%u", leaf,
+                               (long)getpid(), attempt);
+        if (written <= 0 || (size_t)written >= sizeof(temporary)) break;
+        fd = regular_entry_open(parent_fd, temporary,
+                                O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (fd >= 0 || errno != EEXIST) break;
+    }
+    bool ok = fd >= 0 && write_all(fd, content, (size_t)content_len) &&
+              !fchmod(fd, 0400) && !fsync(fd);
+    if (fd >= 0 && close(fd) && ok) ok = false;
+    if (ok && renameat(parent_fd, temporary, parent_fd, leaf)) ok = false;
+    unlinkat(parent_fd, temporary, 0);
+    if (ok) ok = !fsync(parent_fd);
+    close(parent_fd);
+    return ok ? true : fail(err, errlen, "cannot publish HF reference cache");
+}
+
+static bool reference_cache_load(const ds4_hf_cli_config *cfg,
+                                 const char *repo,
+                                 char commit[DS4_HF_COMMIT_SHA_LEN + 1],
+                                 char *err,
+                                 size_t errlen) {
+    if (cfg->revision && valid_commit(cfg->revision)) {
+        return copy_string(commit, DS4_HF_COMMIT_SHA_LEN + 1, cfg->revision);
+    }
+    char cache_root[DS4_HF_CACHE_PATH_MAX], parent[DS4_HF_CACHE_PATH_MAX];
+    char leaf[DS4_HF_PATH_MAX], content[DS4_HF_COMMIT_SHA_LEN + 2];
+    if (!reference_cache_path(cfg, repo, cache_root, parent, leaf)) {
+        return fail(err, errlen, "HF offline reference cache path is unavailable");
+    }
+    int parent_fd = metadata_parent_open(cache_root, parent, false);
+    size_t content_len = 0;
+    bool ok = parent_fd >= 0 &&
+              read_regular_small(parent_fd, leaf, content, sizeof(content),
+                                 &content_len);
+    if (parent_fd >= 0) close(parent_fd);
+    if (!ok || content_len != DS4_HF_COMMIT_SHA_LEN + 1 ||
+        content[DS4_HF_COMMIT_SHA_LEN] != '\n') {
+        return fail(err, errlen,
+                    "HF offline reference is not cached for repository='%s' reference='%s'",
+                    repo, cfg->revision ? cfg->revision : "default");
+    }
+    content[DS4_HF_COMMIT_SHA_LEN] = '\0';
+    if (!valid_commit(content)) {
+        return fail(err, errlen, "HF offline cached reference is invalid");
+    }
+    return copy_string(commit, DS4_HF_COMMIT_SHA_LEN + 1, content);
+}
+
+static bool repository_metadata_prepare(const ds4_hf_cli_config *cfg,
+                                        ds4_hf_resolved_repo *resolved,
+                                        ds4_hf_manifest *manifest,
+                                        bool *from_cache,
+                                        char *err,
+                                        size_t errlen) {
+    char *json = NULL;
+    size_t json_len = 0;
+    *from_cache = cfg->offline;
+    if (cfg->offline) {
+        if (!safe_repo_id(cfg->repo) ||
+            !normalize_endpoint(cfg->endpoint, resolved->endpoint,
+                                sizeof(resolved->endpoint)) ||
+            !copy_string(resolved->repo, sizeof(resolved->repo), cfg->repo) ||
+            !reference_cache_load(cfg, cfg->repo, resolved->commit,
+                                  err, errlen) ||
+            !manifest_cache_load(cfg, cfg->repo, resolved->commit,
+                                 &json, &json_len, err, errlen)) return false;
+    } else {
+        ds4_hf_resolve_status status = ds4_hf_resolve_repository(
+            cfg, 30000L, resolved, err, errlen);
+        if (status != DS4_HF_RESOLVE_OK ||
+            !manifest_download(cfg, resolved, &json, &json_len,
+                               err, errlen)) return false;
+    }
+    bool parsed = ds4_hf_manifest_parse(json, json_len, manifest,
+                                        err, errlen) &&
+                  !strcmp(manifest->repository, resolved->repo);
+    if (!parsed && err && errlen && !err[0]) {
+        fail(err, errlen, "HF manifest repository does not match the resolved repository");
+    }
+    if (parsed && !cfg->offline) {
+        parsed = manifest_cache_publish(cfg, resolved, json, json_len,
+                                        err, errlen) &&
+                 reference_cache_publish(cfg, resolved, err, errlen);
+    }
+    free(json);
+    return parsed;
+}
+
+bool ds4_hf_diagnostics_prepare(const ds4_hf_cli_config *cfg,
+                                ds4_hf_diagnostics *diagnostics,
+                                char *err,
+                                size_t errlen) {
+    if (!cfg || !diagnostics ||
+        cfg->receiver_source != DS4_HF_RECEIVER_REPOSITORY ||
+        (!cfg->list_variants && !cfg->dry_run)) {
+        return fail(err, errlen, "HF diagnostics require a repository diagnostic mode");
+    }
+    memset(diagnostics, 0, sizeof(*diagnostics));
+    if (!repository_metadata_prepare(cfg, &diagnostics->resolved,
+                                     &diagnostics->manifest,
+                                     &diagnostics->metadata_from_cache,
+                                     err, errlen)) return false;
+    if (cfg->list_variants) return true;
+    if (!ds4_hf_acquisition_plan_build(
+            cfg, &diagnostics->resolved, &diagnostics->manifest, false,
+            &diagnostics->plan, err, errlen)) return false;
+    diagnostics->selected_variant = ds4_hf_manifest_find_variant(
+        &diagnostics->manifest, diagnostics->plan.selector);
+    if (!diagnostics->selected_variant) {
+        return fail(err, errlen,
+                    "HF diagnostics lost the manifest-selected variant");
+    }
+    return ds4_hf_acquisition_probe_cache(&diagnostics->plan, cfg->offline,
+                                          err, errlen);
+}
+
+static void hf_json_string(FILE *fp, const char *value) {
+    fputc('"', fp);
+    for (const unsigned char *p = (const unsigned char *)(value ? value : "");
+         *p; p++) {
+        switch (*p) {
+            case '"': fputs("\\\"", fp); break;
+            case '\\': fputs("\\\\", fp); break;
+            case '\b': fputs("\\b", fp); break;
+            case '\f': fputs("\\f", fp); break;
+            case '\n': fputs("\\n", fp); break;
+            case '\r': fputs("\\r", fp); break;
+            case '\t': fputs("\\t", fp); break;
+            default:
+                if (*p < 0x20) fprintf(fp, "\\u%04x", (unsigned)*p);
+                else fputc(*p, fp);
+        }
+    }
+    fputc('"', fp);
+}
+
+typedef struct {
+    uint32_t bit;
+    const char *name;
+} hf_capability_name;
+
+static const hf_capability_name hf_capability_names[] = {
+    {DS4_HF_CAP_DEEPSEEK4, "deepseek4"},
+    {DS4_HF_CAP_TEXT_GENERATION, "text_generation"},
+    {DS4_HF_CAP_DS4_VISION, "ds4_vision"},
+    {DS4_HF_CAP_LLAMA_CPP_MMPROJ, "llama_cpp_mmproj"},
+    {DS4_HF_CAP_DSPARK, "dspark"},
+    {DS4_HF_CAP_ROUTE_TOKEN_ID, "route_token_id"},
+    {DS4_HF_CAP_SSD_STREAMING, "ssd_streaming"},
+};
+
+static void hf_json_capabilities(FILE *fp, uint32_t capabilities) {
+    fputc('[', fp);
+    bool first = true;
+    for (size_t i = 0; i < sizeof(hf_capability_names) /
+                            sizeof(hf_capability_names[0]); i++) {
+        if (!(capabilities & hf_capability_names[i].bit)) continue;
+        if (!first) fputc(',', fp);
+        hf_json_string(fp, hf_capability_names[i].name);
+        first = false;
+    }
+    fputc(']', fp);
+}
+
+static void hf_human_capabilities(FILE *fp, uint32_t capabilities) {
+    bool first = true;
+    for (size_t i = 0; i < sizeof(hf_capability_names) /
+                            sizeof(hf_capability_names[0]); i++) {
+        if (!(capabilities & hf_capability_names[i].bit)) continue;
+        fprintf(fp, "%s%s", first ? "" : ",",
+                hf_capability_names[i].name);
+        first = false;
+    }
+    if (first) fputs("none", fp);
+}
+
+static void variant_capabilities(const ds4_hf_manifest_variant *variant,
+                                 uint32_t *required,
+                                 uint32_t *optional) {
+    const ds4_hf_manifest_artifact *artifacts[] = {
+        &variant->receiver,
+        &variant->ds4_vision.tower,
+        &variant->ds4_vision.projector,
+        &variant->ds4_vision.config,
+        &variant->llama_cpp_mmproj,
+        variant->has_dspark ? &variant->dspark : NULL,
+    };
+    *required = 0;
+    *optional = 0;
+    for (size_t i = 0; i < sizeof(artifacts) / sizeof(artifacts[0]); i++) {
+        if (!artifacts[i]) continue;
+        *required |= artifacts[i]->required_capabilities;
+        *optional |= artifacts[i]->optional_capabilities;
+    }
+}
+
+static bool variant_llama_heuristics(const ds4_hf_manifest_variant *variant,
+                                     bool *primary,
+                                     bool *siblings) {
+    char ignored[256] = {0};
+    *primary = ds4_hf_llama_primary_selectable(variant->selector,
+                                               variant->receiver.path);
+    *siblings = ds4_hf_llama_siblings_valid(
+        variant->receiver.path, variant->llama_cpp_mmproj.path,
+        variant->has_dspark ? variant->dspark.path : NULL,
+        ignored, sizeof(ignored));
+    return *primary && *siblings;
+}
+
+static void print_json_artifact(FILE *fp,
+                                const ds4_hf_manifest_artifact *artifact) {
+    fputs("{\"path\":", fp);
+    hf_json_string(fp, artifact->path);
+    fprintf(fp, ",\"bytes\":%" PRIu64 ",\"precision\":",
+            artifact->bytes);
+    hf_json_string(fp, artifact->precision);
+    fputs(",\"runtime_compatibility\":{\"ds4\":", fp);
+    fputs(artifact->supports_ds4 ? "true" : "false", fp);
+    fputs(",\"llama_cpp\":", fp);
+    fputs(artifact->supports_llama_cpp ? "true" : "false", fp);
+    fputs(",\"ds4_minimum_revision\":", fp);
+    hf_json_string(fp, artifact->ds4_minimum_revision);
+    fputs(",\"llama_cpp_minimum_revision\":", fp);
+    hf_json_string(fp, artifact->llama_cpp_minimum_revision);
+    fputs("},\"declared_capabilities\":{\"required\":", fp);
+    hf_json_capabilities(fp, artifact->required_capabilities);
+    fputs(",\"optional\":", fp);
+    hf_json_capabilities(fp, artifact->optional_capabilities);
+    fputs("}}", fp);
+}
+
+static void print_json_variant(FILE *fp,
+                               const ds4_hf_manifest_variant *variant) {
+    bool primary = false, siblings = false;
+    variant_llama_heuristics(variant, &primary, &siblings);
+    uint32_t required = 0, optional = 0;
+    variant_capabilities(variant, &required, &optional);
+    fputs("{\"selector\":", fp);
+    hf_json_string(fp, variant->selector);
+    fputs(",\"default\":", fp);
+    fputs(variant->is_default ? "true" : "false", fp);
+    fputs(",\"receiver\":", fp);
+    print_json_artifact(fp, &variant->receiver);
+    fputs(",\"ds4_vision\":{\"tower\":", fp);
+    print_json_artifact(fp, &variant->ds4_vision.tower);
+    fputs(",\"projector\":", fp);
+    print_json_artifact(fp, &variant->ds4_vision.projector);
+    fputs(",\"config\":", fp);
+    print_json_artifact(fp, &variant->ds4_vision.config);
+    fputs("},\"llama_cpp_mmproj\":", fp);
+    print_json_artifact(fp, &variant->llama_cpp_mmproj);
+    fputs(",\"dspark\":", fp);
+    if (variant->has_dspark) print_json_artifact(fp, &variant->dspark);
+    else fputs("null", fp);
+    fputs(",\"manifest_selection\":true,\"llama_cpp_heuristics\":{\"primary_filename_match\":", fp);
+    fputs(primary ? "true" : "false", fp);
+    fputs(",\"sibling_layout_match\":", fp);
+    fputs(siblings ? "true" : "false", fp);
+    fputs("},\"declared_capabilities\":{\"required\":", fp);
+    hf_json_capabilities(fp, required);
+    fputs(",\"optional\":", fp);
+    hf_json_capabilities(fp, optional);
+    fputs("}}", fp);
+}
+
+static void print_human_artifact(FILE *fp, const char *role,
+                                 const ds4_hf_manifest_artifact *artifact) {
+    fprintf(fp,
+            "  %s: path=%s bytes=%" PRIu64 " precision=%s ds4=%s llama_cpp=%s required=",
+            role, artifact->path, artifact->bytes, artifact->precision,
+            artifact->supports_ds4 ? "yes" : "no",
+            artifact->supports_llama_cpp ? "yes" : "no");
+    hf_human_capabilities(fp, artifact->required_capabilities);
+    fputs(" optional=", fp);
+    hf_human_capabilities(fp, artifact->optional_capabilities);
+    fputc('\n', fp);
+}
+
+static void print_human_variant(FILE *fp,
+                                const ds4_hf_manifest_variant *variant) {
+    bool primary = false, siblings = false;
+    variant_llama_heuristics(variant, &primary, &siblings);
+    uint32_t required = 0, optional = 0;
+    variant_capabilities(variant, &required, &optional);
+    fprintf(fp, "variant %s%s\n", variant->selector,
+            variant->is_default ? " (default)" : "");
+    print_human_artifact(fp, "receiver", &variant->receiver);
+    print_human_artifact(fp, "ds4_vision.tower", &variant->ds4_vision.tower);
+    print_human_artifact(fp, "ds4_vision.projector",
+                         &variant->ds4_vision.projector);
+    print_human_artifact(fp, "ds4_vision.config", &variant->ds4_vision.config);
+    print_human_artifact(fp, "llama_cpp_mmproj",
+                         &variant->llama_cpp_mmproj);
+    if (variant->has_dspark)
+        print_human_artifact(fp, "dspark", &variant->dspark);
+    fprintf(fp,
+            "  selection: manifest=yes llama_primary_filename=%s llama_sibling_layout=%s\n",
+            primary ? "match" : "mismatch",
+            siblings ? "match" : "mismatch");
+    fputs("  declared_capabilities: required=", fp);
+    hf_human_capabilities(fp, required);
+    fputs(" optional=", fp);
+    hf_human_capabilities(fp, optional);
+    fputc('\n', fp);
+}
+
+static bool add_total(uint64_t *total, uint64_t value) {
+    if (UINT64_MAX - *total < value) return false;
+    *total += value;
+    return true;
+}
+
+typedef struct {
+    uint64_t transfer;
+    uint64_t selected_weights;
+    uint64_t receiver_only;
+    uint64_t ds4_vision;
+    uint64_t ds4_vision_dspark;
+    uint64_t llama_cpp_mmproj;
+} diagnostic_totals;
+
+static bool diagnostics_totals(const ds4_hf_diagnostics *diagnostics,
+                               diagnostic_totals *totals) {
+    memset(totals, 0, sizeof(*totals));
+    const ds4_hf_manifest_variant *v = diagnostics->selected_variant;
+    totals->receiver_only = v->receiver.bytes;
+    totals->ds4_vision = v->receiver.bytes;
+    totals->ds4_vision_dspark = v->receiver.bytes;
+    totals->llama_cpp_mmproj = v->receiver.bytes;
+    if (!add_total(&totals->ds4_vision, v->ds4_vision.tower.bytes) ||
+        !add_total(&totals->ds4_vision, v->ds4_vision.projector.bytes) ||
+        !add_total(&totals->ds4_vision_dspark, v->ds4_vision.tower.bytes) ||
+        !add_total(&totals->ds4_vision_dspark, v->ds4_vision.projector.bytes) ||
+        (v->has_dspark &&
+         !add_total(&totals->ds4_vision_dspark, v->dspark.bytes)) ||
+        !add_total(&totals->llama_cpp_mmproj,
+                   v->llama_cpp_mmproj.bytes)) return false;
+    for (size_t i = 0; i < diagnostics->plan.artifact_count; i++) {
+        const ds4_hf_acquisition_artifact *artifact =
+            &diagnostics->plan.artifacts[i];
+        if (!artifact->requested) continue;
+        if (!artifact->cache_hit &&
+            !add_total(&totals->transfer, artifact->bytes)) return false;
+        if (artifact->role != DS4_HF_ROLE_VISION_CONFIG &&
+            !add_total(&totals->selected_weights, artifact->bytes)) return false;
+    }
+    return true;
+}
+
+static const char *diagnostic_runtime_name(const ds4_hf_cli_config *cfg) {
+    if (cfg->vision_source == DS4_HF_VISION_CATALOG &&
+        cfg->dspark_source == DS4_HF_DSPARK_CATALOG)
+        return "ds4-receiver+vision+dspark";
+    if (cfg->vision_source == DS4_HF_VISION_CATALOG)
+        return "ds4-receiver+vision";
+    if (cfg->dspark_source == DS4_HF_DSPARK_CATALOG)
+        return "ds4-receiver+dspark";
+    return "ds4-receiver-only";
+}
+
+static void print_json_dry_run(FILE *fp, const ds4_hf_cli_config *cfg,
+                               const ds4_hf_diagnostics *diagnostics) {
+    diagnostic_totals totals;
+    bool totals_ok = diagnostics_totals(diagnostics, &totals);
+    bool primary = false, siblings = false;
+    variant_llama_heuristics(diagnostics->selected_variant,
+                             &primary, &siblings);
+    fputs("{\"schema_version\":1,\"mode\":\"hf-dry-run\",\"repository\":", fp);
+    hf_json_string(fp, diagnostics->resolved.repo);
+    fputs(",\"revision\":", fp);
+    hf_json_string(fp, diagnostics->resolved.commit);
+    fputs(",\"selector\":", fp);
+    hf_json_string(fp, diagnostics->plan.selector);
+    fputs(",\"metadata_source\":", fp);
+    hf_json_string(fp, diagnostics->metadata_from_cache ? "cache" : "network");
+    fputs(",\"selected_runtime\":", fp);
+    hf_json_string(fp, diagnostic_runtime_name(cfg));
+    fputs(",\"manifest_selection\":true,\"llama_cpp_heuristics\":{\"primary_filename_match\":", fp);
+    fputs(primary ? "true" : "false", fp);
+    fputs(",\"sibling_layout_match\":", fp);
+    fputs(siblings ? "true" : "false", fp);
+    fputs("},\"files\":[", fp);
+    for (size_t i = 0; i < diagnostics->plan.artifact_count; i++) {
+        const ds4_hf_acquisition_artifact *artifact =
+            &diagnostics->plan.artifacts[i];
+        if (i) fputc(',', fp);
+        fputs("{\"role\":", fp);
+        hf_json_string(fp, ds4_hf_artifact_role_name(artifact->role));
+        fputs(",\"path\":", fp);
+        hf_json_string(fp, artifact->repo_path);
+        fputs(",\"selected\":", fp);
+        fputs(artifact->requested ? "true" : "false", fp);
+        fputs(",\"cache\":", fp);
+        hf_json_string(fp, artifact->cache_hit ? "cached" : "missing");
+        fprintf(fp, ",\"bytes\":%" PRIu64 "}", artifact->bytes);
+    }
+    if (totals_ok) {
+        fprintf(fp,
+                "],\"totals\":{\"transfer_bytes\":%" PRIu64
+                ",\"selected_runtime_weight_bytes\":%" PRIu64
+                ",\"receiver_only_bytes\":%" PRIu64
+                ",\"ds4_receiver_vision_bytes\":%" PRIu64
+                ",\"ds4_receiver_vision_dspark_bytes\":%" PRIu64
+                ",\"llama_cpp_receiver_mmproj_bytes\":%" PRIu64 "}}\n",
+                totals.transfer, totals.selected_weights,
+                totals.receiver_only, totals.ds4_vision,
+                totals.ds4_vision_dspark, totals.llama_cpp_mmproj);
+    } else {
+        fputs("],\"totals\":null}\n", fp);
+    }
+}
+
+static void print_human_dry_run(FILE *fp, const ds4_hf_cli_config *cfg,
+                                const ds4_hf_diagnostics *diagnostics) {
+    diagnostic_totals totals;
+    bool totals_ok = diagnostics_totals(diagnostics, &totals);
+    bool primary = false, siblings = false;
+    variant_llama_heuristics(diagnostics->selected_variant,
+                             &primary, &siblings);
+    fprintf(fp,
+            "HF dry run\nrepository: %s\nrevision: %s\nselector: %s\nmetadata_source: %s\nselected_runtime: %s\nmanifest_selection: yes\nllama_primary_filename: %s\nllama_sibling_layout: %s\nfiles:\n",
+            diagnostics->resolved.repo, diagnostics->resolved.commit,
+            diagnostics->plan.selector,
+            diagnostics->metadata_from_cache ? "cache" : "network",
+            diagnostic_runtime_name(cfg), primary ? "match" : "mismatch",
+            siblings ? "match" : "mismatch");
+    for (size_t i = 0; i < diagnostics->plan.artifact_count; i++) {
+        const ds4_hf_acquisition_artifact *artifact =
+            &diagnostics->plan.artifacts[i];
+        fprintf(fp, "  %s: path=%s selected=%s cache=%s bytes=%" PRIu64 "\n",
+                ds4_hf_artifact_role_name(artifact->role),
+                artifact->repo_path, artifact->requested ? "yes" : "no",
+                artifact->cache_hit ? "cached" : "missing", artifact->bytes);
+    }
+    if (totals_ok) {
+        fprintf(fp,
+                "totals:\n  transfer_bytes: %" PRIu64
+                "\n  selected_runtime_weight_bytes: %" PRIu64
+                "\n  receiver_only_bytes: %" PRIu64
+                "\n  ds4_receiver_vision_bytes: %" PRIu64
+                "\n  ds4_receiver_vision_dspark_bytes: %" PRIu64
+                "\n  llama_cpp_receiver_mmproj_bytes: %" PRIu64 "\n",
+                totals.transfer, totals.selected_weights,
+                totals.receiver_only, totals.ds4_vision,
+                totals.ds4_vision_dspark, totals.llama_cpp_mmproj);
+    } else {
+        fputs("totals: overflow\n", fp);
+    }
+}
+
+void ds4_hf_diagnostics_print(FILE *fp,
+                              const ds4_hf_cli_config *cfg,
+                              const ds4_hf_diagnostics *diagnostics) {
+    if (!fp || !cfg || !diagnostics) return;
+    if (cfg->dry_run) {
+        if (cfg->diagnostics_json) print_json_dry_run(fp, cfg, diagnostics);
+        else print_human_dry_run(fp, cfg, diagnostics);
+        return;
+    }
+    if (cfg->diagnostics_json) {
+        fputs("{\"schema_version\":1,\"mode\":\"list-hf-variants\",\"repository\":", fp);
+        hf_json_string(fp, diagnostics->resolved.repo);
+        fputs(",\"revision\":", fp);
+        hf_json_string(fp, diagnostics->resolved.commit);
+        fputs(",\"metadata_source\":", fp);
+        hf_json_string(fp, diagnostics->metadata_from_cache ? "cache" : "network");
+        fputs(",\"variants\":[", fp);
+        for (size_t i = 0; i < diagnostics->manifest.variant_count; i++) {
+            if (i) fputc(',', fp);
+            print_json_variant(fp, &diagnostics->manifest.variants[i]);
+        }
+        fputs("]}\n", fp);
+    } else {
+        fprintf(fp,
+                "HF variants\nrepository: %s\nrevision: %s\nmetadata_source: %s\n",
+                diagnostics->resolved.repo, diagnostics->resolved.commit,
+                diagnostics->metadata_from_cache ? "cache" : "network");
+        for (size_t i = 0; i < diagnostics->manifest.variant_count; i++)
+            print_human_variant(fp, &diagnostics->manifest.variants[i]);
+    }
+}
+
 #define DS4_HF_SAFETENSORS_HEADER_MAX (1024u * 1024u)
 #define DS4_HF_SAFETENSORS_RANK_MAX 8u
 
@@ -3747,31 +4640,23 @@ bool ds4_hf_runtime_prepare(const ds4_hf_cli_config *cfg,
     if (!cfg || cfg->receiver_source != DS4_HF_RECEIVER_REPOSITORY) {
         return fail(err, errlen, "HF runtime handoff requires a repository receiver");
     }
-    if (cfg->offline) {
-        return fail(err, errlen,
-                    "HF offline manifest reuse is not available yet; provide network access or use --model with the verified cached receiver");
-    }
-
     ds4_hf_resolved_repo resolved;
-    ds4_hf_resolve_status status = ds4_hf_resolve_repository(
-        cfg, 30000L, &resolved, err, errlen);
-    if (status != DS4_HF_RESOLVE_OK) return false;
-
-    char *manifest_json = NULL;
-    size_t manifest_len = 0;
     ds4_hf_manifest manifest;
-    if (!manifest_download(cfg, &resolved, &manifest_json, &manifest_len,
-                           err, errlen)) return false;
-    bool parsed = ds4_hf_manifest_parse(manifest_json, manifest_len, &manifest,
-                                        err, errlen);
-    free(manifest_json);
-    if (!parsed) return false;
+    bool metadata_from_cache = false;
+    if (!repository_metadata_prepare(cfg, &resolved, &manifest,
+                                     &metadata_from_cache,
+                                     err, errlen)) return false;
+    (void)metadata_from_cache;
     runtime->vision_metadata = manifest.shared_vision;
     if (!ds4_hf_acquisition_plan_build(cfg, &resolved, &manifest, false,
-                                       &runtime->plan, err, errlen) ||
-        !ds4_hf_acquisition_execute(cfg, &runtime->plan, 0, err, errlen)) {
+                                       &runtime->plan, err, errlen)) {
         return false;
     }
+    if (cfg->offline) {
+        if (!ds4_hf_acquisition_probe_cache(&runtime->plan, true,
+                                            err, errlen)) return false;
+    } else if (!ds4_hf_acquisition_execute(cfg, &runtime->plan, 0,
+                                           err, errlen)) return false;
 
     runtime->repository = true;
     for (size_t i = 0; i < runtime->plan.artifact_count; i++) {

@@ -295,6 +295,57 @@ int main(void) {
               ok && cfg.vision_source == DS4_HF_VISION_NONE &&
               cfg.dspark_source == DS4_HF_DSPARK_NONE);
     }
+    {
+        char *argv[] = {"ds4", "--hf", "owner/repo",
+                        "--list-hf-variants", "--json"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, false, 5, argv, false, false,
+                               err, sizeof(err));
+        CHECK("variant listing accepts stable JSON diagnostics",
+              ok && cfg.list_variants && !cfg.dry_run &&
+              cfg.diagnostics_json);
+    }
+    {
+        char *argv[] = {"ds4-server", "--hf", "owner/repo",
+                        "--hf-dry-run", "--hf-json", "--dspark"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, true, 6, argv, false, false,
+                               err, sizeof(err));
+        CHECK("server dry run retains selected vision and DSpark roles",
+              ok && cfg.dry_run && cfg.diagnostics_json &&
+              cfg.vision_source == DS4_HF_VISION_CATALOG &&
+              cfg.dspark_source == DS4_HF_DSPARK_CATALOG);
+    }
+    {
+        char *argv[] = {"ds4", "--list-hf-variants"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, false, 2, argv, false, false,
+                               err, sizeof(err));
+        CHECK("diagnostics require an HF repository",
+              !ok && strstr(err, "require --hf-repo"));
+    }
+    {
+        char *argv[] = {"ds4", "--hf", "owner/repo",
+                        "--list-hf-variants", "--hf-dry-run"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, false, 5, argv, false, false,
+                               err, sizeof(err));
+        CHECK("listing and dry run are mutually exclusive",
+              !ok && strstr(err, "mutually exclusive"));
+    }
+    {
+        char *argv[] = {"ds4", "--hf", "owner/repo", "--json"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, false, 4, argv, false, false,
+                               err, sizeof(err));
+        CHECK("JSON diagnostics require a diagnostic operation",
+              !ok && strstr(err, "requires --list-hf-variants"));
+    }
 
     if (failures) {
         fprintf(stderr, "%d HF argument test(s) failed\n", failures);

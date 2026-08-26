@@ -46,8 +46,9 @@ static bool files_equal(const char *left, const char *right) {
 
 int main(int argc, char **argv) {
     if (argc != 4 || (strcmp(argv[3], "cli") && strcmp(argv[3], "server") &&
+                      strcmp(argv[3], "server-offline") &&
                       strcmp(argv[3], "no-vision") && strcmp(argv[3], "explicit"))) {
-        fprintf(stderr, "usage: %s ENDPOINT CACHE_DIR cli|server|no-vision|explicit\n", argv[0]);
+        fprintf(stderr, "usage: %s ENDPOINT CACHE_DIR cli|server|server-offline|no-vision|explicit\n", argv[0]);
         return 2;
     }
     ds4_hf_cli_config cfg;
@@ -58,8 +59,9 @@ int main(int argc, char **argv) {
     cfg.endpoint = argv[1];
     cfg.cache_dir = argv[2];
     cfg.receiver_source = DS4_HF_RECEIVER_REPOSITORY;
-    if (!strcmp(argv[3], "server")) {
+    if (!strcmp(argv[3], "server") || !strcmp(argv[3], "server-offline")) {
         cfg.vision_source = DS4_HF_VISION_CATALOG;
+        cfg.offline = !strcmp(argv[3], "server-offline");
     } else if (!strcmp(argv[3], "no-vision")) {
         cfg.vision_source = DS4_HF_VISION_DISABLED;
     } else if (!strcmp(argv[3], "explicit")) {

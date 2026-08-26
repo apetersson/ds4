@@ -206,6 +206,9 @@ static void test_llama_discovery_without_manifest(void) {
         "DeepSeek-eagle3-draft-Headroom128.gguf",
         "DeepSeek-dflash-draft-Headroom128.gguf",
         "DeepSeek-dspark-support-Headroom128.gguf",
+        "DeepSeek-MMPROJ-Headroom128.gguf",
+        "DeepSeek-DSPARK-Headroom128.gguf",
+        "DeepSeek-SUPPORT-Headroom128.gguf",
     };
     for (size_t i = 0;
          i < sizeof(excluded_primary_names) / sizeof(excluded_primary_names[0]);

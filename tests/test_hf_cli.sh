@@ -26,7 +26,7 @@ run_fail() {
 for bin in ./ds4 ./ds4-server; do
     name=${bin#./}
     "$bin" --help >"$log" 2>&1
-    for option in --hf-repo --hf-file --hf-token --hf-revision --hf-cache-dir --hf-offline; do
+    for option in --hf-repo --hf-file --hf-token --hf-revision --hf-cache-dir --hf-offline --list-hf-variants --hf-dry-run --hf-json; do
         if grep -q -- "$option" "$log"; then ok "$name help lists $option"
         else fail "$name help omits $option"; fi
     done
@@ -63,8 +63,9 @@ for bin in ./ds4 ./ds4-server; do
         "missing value for --hf" \
         "$bin" --hf --offline
     run_fail "$name accepts offline alias" \
-        "offline manifest reuse" \
-        "$bin" --hf owner/repo --hf-offline
+        "offline reference is not cached" \
+        env HF_ENDPOINT=http://127.0.0.1:1 \
+        "$bin" --hf owner/repo --hf-cache-dir "$tmp_dir/offline-cache" --hf-offline
 
     if HF_TOKEN=environment-secret HF_ENDPOINT=http://127.0.0.1:1 \
         "$bin" --hf owner/repo --hf-token cli-super-secret >"$log" 2>&1; then

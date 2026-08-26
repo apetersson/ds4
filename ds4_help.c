@@ -159,6 +159,12 @@ static void print_hf_selection(FILE *fp, const help_colors *c,
         "Override the Hugging Face cache directory for this run.");
     opt(fp, c, "--offline, --hf-offline",
         "Require a complete verified cache snapshot and perform no network access.");
+    opt(fp, c, "--list-hf-variants [--json]",
+        "Fetch/cache metadata only and list catalog roles, precision, runtime compatibility, capabilities, and llama.cpp heuristic parity.");
+    opt(fp, c, "--hf-dry-run [--json]",
+        "Resolve immutable metadata and report exact selected roles, verified cache state, transfer bytes, and runtime weight totals without model load.");
+    opt(fp, c, "--hf-json",
+        "Alias for --json with --list-hf-variants or --hf-dry-run.");
     opt(fp, c, "HF_ENDPOINT",
         "Environment override used for every HF metadata and artifact request.");
 

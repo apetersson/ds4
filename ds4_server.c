@@ -14272,6 +14272,19 @@ int main(int argc, char **argv) {
     sigaction(SIGTERM, &sa, NULL);
 
     server_config cfg = parse_options(argc, argv);
+    if (cfg.hf.list_variants || cfg.hf.dry_run) {
+        ds4_hf_diagnostics diagnostics;
+        char hf_err[1024] = {0};
+        if (!ds4_hf_diagnostics_prepare(&cfg.hf, &diagnostics,
+                                        hf_err, sizeof(hf_err))) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s",
+                       hf_err[0] ? hf_err :
+                                   "Hugging Face diagnostics failed");
+            return 2;
+        }
+        ds4_hf_diagnostics_print(stdout, &cfg.hf, &diagnostics);
+        return 0;
+    }
     const bool vision_requested =
         cfg.hf.vision_source == DS4_HF_VISION_CATALOG ||
         cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT;

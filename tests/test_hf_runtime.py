@@ -307,6 +307,12 @@ class RuntimeWiringTests(unittest.TestCase):
             f"/owner/repo/resolve/{SHA}/variants.json",
         ])
 
+        RuntimeHubHandler.requests = []
+        offline, offline_requests = self.run_probe("server-offline")
+        self.assertEqual(offline, first)
+        self.assertEqual(offline_requests, [],
+                         "offline runtime performed an HF request")
+
     def test_no_vision_and_explicit_override_download_receiver_only(self):
         for mode in ("no-vision", "explicit"):
             with self.subTest(mode=mode):

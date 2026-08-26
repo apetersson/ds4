@@ -2086,6 +2086,22 @@ static cli_config parse_options(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     cli_config cfg = parse_options(argc, argv);
+    if (cfg.hf.list_variants || cfg.hf.dry_run) {
+        ds4_hf_diagnostics diagnostics;
+        char hf_err[1024] = {0};
+        if (!ds4_hf_diagnostics_prepare(&cfg.hf, &diagnostics,
+                                        hf_err, sizeof(hf_err))) {
+            fprintf(stderr, "ds4: %s\n",
+                    hf_err[0] ? hf_err : "Hugging Face diagnostics failed");
+            ds4_dist_options_free(cfg.dist);
+            free(cfg.prompt_owned);
+            return 2;
+        }
+        ds4_hf_diagnostics_print(stdout, &cfg.hf, &diagnostics);
+        ds4_dist_options_free(cfg.dist);
+        free(cfg.prompt_owned);
+        return 0;
+    }
 #ifdef DS4_TEST_HOOKS
     cfg.engine.test_metadata_only_inspect = cfg.inspect;
 #endif

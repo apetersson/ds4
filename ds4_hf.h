@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #define DS4_HF_REPO_MAX 256
 #define DS4_HF_SELECTOR_MAX 128
@@ -63,6 +64,9 @@ typedef struct {
     const char *cache_dir;
     bool token_from_cli;
     bool offline;
+    bool list_variants;
+    bool dry_run;
+    bool diagnostics_json;
 
     const char *vision_python;
     const char *vision_encoder;
@@ -318,6 +322,14 @@ typedef struct {
     ds4_hf_acquisition_artifact artifacts[DS4_HF_ACQUISITION_MAX_ARTIFACTS];
 } ds4_hf_acquisition_plan;
 
+typedef struct {
+    ds4_hf_resolved_repo resolved;
+    ds4_hf_manifest manifest;
+    ds4_hf_acquisition_plan plan;
+    const ds4_hf_manifest_variant *selected_variant;
+    bool metadata_from_cache;
+} ds4_hf_diagnostics;
+
 /* Launch-scoped, verified handoff from repository selection to a frontend.
  * Requested artifacts stay open until the frontend has opened/mapped the
  * receiver (and any companion it actually supports).  open_paths name the
@@ -354,6 +366,27 @@ bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
                                 long timeout_ms,
                                 char *err,
                                 size_t errlen);
+
+/* Inspect immutable cache entries without creating directories, locks, or
+ * transport state. Offline callers set require_requested so every selected
+ * role must already be complete and verified. */
+bool ds4_hf_acquisition_probe_cache(ds4_hf_acquisition_plan *plan,
+                                    bool require_requested,
+                                    char *err,
+                                    size_t errlen);
+
+/* Resolve/fetch only repository metadata (or reuse its verified immutable
+ * snapshot offline), build the selected role plan, and inspect cache state.
+ * This never acquires artifacts or initializes a model runtime. */
+bool ds4_hf_diagnostics_prepare(const ds4_hf_cli_config *cfg,
+                                ds4_hf_diagnostics *diagnostics,
+                                char *err,
+                                size_t errlen);
+
+/* Stable schema-versioned JSON or deterministic human diagnostics. */
+void ds4_hf_diagnostics_print(FILE *fp,
+                              const ds4_hf_cli_config *cfg,
+                              const ds4_hf_diagnostics *diagnostics);
 
 /* Open one requested cache artifact without following symlinks and return a
  * descriptor only after its sealed plan identity, role sidecar, byte count,
