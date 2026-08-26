@@ -1,0 +1,7 @@
+Title: Orion System Status
+Dashboard contains three cards: 
+- Throughput: 42.7 toks/s
+- Latency: 38 ms
+- Memory: 114.9 GiB
+Request-flow nodes in order: Request flow (top) → Sensor → Encoder → Router → Decoder
+Status: Active

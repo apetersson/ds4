@@ -1,0 +1,43 @@
+timestamp_utc=2026-08-26T07:23:19Z
+branch=worker/DS-001.11-hf-vision
+head=d70d1c8f344cf292709c88b7336a6df0bf5c9d17
+worktree_clean=true
+lock_absent=/tmp/ds4.lock
+lock_absent=/private/tmp/ds4.lock
+lock_absent=/private/tmp/ds00111-server.lock
+lock_absent=/private/tmp/ds00111-flock-semantics.lock
+lane_process_conflict=false
+port_18081_free=true
+port_18082_free=true
+exact_model_or_support_handles=false
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                   506426.
+Pages active:                                1248185.
+Pages inactive:                              5689781.
+Pages speculative:                              7396.
+Pages throttled:                                   0.
+Pages wired down:                             398746.
+Pages purgeable:                                6741.
+"Translation faults":                    19708461086.
+Pages copy-on-write:                      2568305972.
+Pages zero filled:                       11742395723.
+Pages reactivated:                         561221330.
+Pages purged:                               34492511.
+File-backed pages:                           5612782.
+Anonymous pages:                             1332580.
+Pages stored in compressor:                  3092431.
+Pages occupied by compressor:                 483285.
+Decompressions:                            373822211.
+Compressions:                              377657329.
+Pageins:                                   938191129.
+Pageouts:                                     620087.
+Swapins:                                    23588411.
+Swapouts:                                   30062295.
+vm.swapusage: total = 18432.00M  used = 16886.25M  free = 1545.75M  (encrypted)
+acknowledged_omlx 84859 84805 awk tolower($0) ~ /omlx/ { print "acknowledged_omlx " $0 }
+acknowledged_omlx 91423 68974 uv run omlx serve
+acknowledged_omlx 91425 91423 omlx-server  
+acknowledged_pi 84861 84805 awk $0 ~ /\/pi([[:space:]]|$)/ || tolower($0) ~ /pi-coding-agent/ { print "acknowledged_pi " $0 }
+postflight=PASS
+The system has 137438953472 (8388608 pages with a page size of 16384).
+System-wide memory free percentage: 89%

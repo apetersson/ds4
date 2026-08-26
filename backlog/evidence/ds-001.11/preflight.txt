@@ -1,0 +1,52 @@
+timestamp_utc=2026-08-26T06:59:36Z
+branch=worker/DS-001.11-hf-vision
+head=d70d1c8f344cf292709c88b7336a6df0bf5c9d17
+base=1f6f19a1a9d8861246f4096c322908eb7341fb48
+worktree_clean=true
+lock_absent=/tmp/ds4.lock
+lock_absent=/private/tmp/ds4.lock
+model_process_conflict=false
+port_18082_free=true
+port_18081_expected_fake_hub
+COMMAND   PID    USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Python  26007 andreas    3u  IPv4 0x819fb38d79be17ae      0t0  TCP 127.0.0.1:18081 (LISTEN)
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf size=86720111776 mode=-r-------- inode=21
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/DeepEncoderV2-BF16.safetensors size=906533408 mode=-r-------- inode=30
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/DeepSeek-V4-0731-Projector-BF16.safetensors size=40919752 mode=-r-------- inode=37
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/upstream-config.json size=658 mode=-r-------- inode=44
+path=/private/tmp/dsv4-vision-venv/bin/python size=44 mode=lrwxr-xr-x inode=172317739
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/encode_flycockpit.py size=11423 mode=-rwx------ inode=8319637
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png size=60178 mode=-rwx------ inode=3983531
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v size=12602444 mode=-rwx------ inode=3983533
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v size=12602444 mode=-rwx------ inode=3983585
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v size=12602444 mode=-rwx------ inode=3983635
+exact_model_or_support_handles=false
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                  3918937.
+Pages active:                                 856456.
+Pages inactive:                              2829418.
+Pages speculative:                             24593.
+Pages throttled:                                   0.
+Pages wired down:                             399774.
+Pages purgeable:                               19326.
+"Translation faults":                    19676157653.
+Pages copy-on-write:                      2562536533.
+Pages zero filled:                       11731561286.
+Pages reactivated:                         556973613.
+Pages purged:                               34447762.
+File-backed pages:                           1937363.
+Anonymous pages:                             1773104.
+Pages stored in compressor:                  2728502.
+Pages occupied by compressor:                 304554.
+Decompressions:                            373280272.
+Compressions:                              377000602.
+Pageins:                                   934067806.
+Pageouts:                                     619372.
+Swapins:                                    23583352.
+Swapouts:                                   30062295.
+vm.swapusage: total = 18432.00M  used = 16966.25M  free = 1465.75M  (encrypted)
+acknowledged_omlx 34103 34008 awk tolower($0) ~ /omlx/ { print "acknowledged_omlx " $0 }
+acknowledged_omlx 91423 68974 uv run omlx serve
+acknowledged_omlx 91425 91423 omlx-server  
+acknowledged_pi 34105 34008 awk $0 ~ /\/pi([[:space:]]|$)/ || tolower($0) ~ /pi-coding-agent/ { print "acknowledged_pi " $0 }
+preflight=PASS
