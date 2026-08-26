@@ -1195,6 +1195,51 @@ static bool run_vision_encoder(const server_vision_config *vision,
     }
     close(output_fd);
 
+    const char *tower_arg = vision->tower;
+    const char *adapter_arg = vision->adapter;
+    char descriptor_dir[] = "/tmp/ds4-vision-fds-XXXXXX";
+    char tower_alias[sizeof(descriptor_dir) + 32] = {0};
+    char adapter_alias[sizeof(descriptor_dir) + 32] = {0};
+    bool descriptor_aliases = vision->tower_fd >= 3 || vision->adapter_fd >= 3;
+    if (descriptor_aliases) {
+        bool descriptor_dir_created = false;
+        bool aliases_ok = vision->tower_fd >= 3 && vision->adapter_fd >= 3;
+        if (!aliases_ok) errno = EINVAL;
+        if (aliases_ok) {
+            descriptor_dir_created = mkdtemp(descriptor_dir) != NULL;
+            aliases_ok = descriptor_dir_created;
+        }
+        if (aliases_ok) {
+            int tower_written = snprintf(
+                tower_alias, sizeof(tower_alias), "%s/tower.safetensors",
+                descriptor_dir);
+            int adapter_written = snprintf(
+                adapter_alias, sizeof(adapter_alias),
+                "%s/projector.safetensors", descriptor_dir);
+            aliases_ok = tower_written > 0 &&
+                         tower_written < (int)sizeof(tower_alias) &&
+                         adapter_written > 0 &&
+                         adapter_written < (int)sizeof(adapter_alias);
+            if (!aliases_ok) errno = ENAMETOOLONG;
+        }
+        if (aliases_ok) aliases_ok = symlink(vision->tower, tower_alias) == 0;
+        if (aliases_ok) aliases_ok = symlink(vision->adapter, adapter_alias) == 0;
+        if (!aliases_ok) {
+            int saved_errno = errno;
+            if (tower_alias[0]) unlink(tower_alias);
+            if (adapter_alias[0]) unlink(adapter_alias);
+            if (descriptor_dir_created) rmdir(descriptor_dir);
+            unlink(input_template);
+            unlink_encoder_output(output_template);
+            snprintf(err, errlen,
+                     "cannot create private safetensors descriptor aliases: %s",
+                     strerror(saved_errno));
+            return false;
+        }
+        tower_arg = tower_alias;
+        adapter_arg = adapter_alias;
+    }
+
     if (vision->mu) pthread_mutex_lock(vision->mu);
     pid_t pid = fork();
     if (pid == 0) {
@@ -1210,8 +1255,8 @@ static bool run_vision_encoder(const server_vision_config *vision,
         execl(vision->python, vision->python, vision->encoder,
               "--image-url-file", input_template,
               "--output", output_template,
-              "--tower", vision->tower,
-              "--adapter", vision->adapter,
+              "--tower", tower_arg,
+              "--adapter", adapter_arg,
               (char *)NULL);
         _exit(127);
     }
@@ -1228,6 +1273,11 @@ static bool run_vision_encoder(const server_vision_config *vision,
         ok = status >= 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0;
     }
     if (vision->mu) pthread_mutex_unlock(vision->mu);
+    if (descriptor_aliases) {
+        unlink(tower_alias);
+        unlink(adapter_alias);
+        rmdir(descriptor_dir);
+    }
     unlink(input_template);
     if (!ok) {
         if (pid < 0) {
@@ -17593,8 +17643,8 @@ static void test_catalog_vision_descriptors_survive_trusted_exec(void) {
         "  case \"$1\" in\n"
         "    --image-url-file) shift 2 ;;\n"
         "    --output) out=$2; shift 2 ;;\n"
-        "    --tower) tower=$2; shift 2 ;;\n"
-        "    --adapter) adapter=$2; shift 2 ;;\n"
+        "    --tower) case \"$2\" in *.safetensors) ;; *) exit 20 ;; esac; tower=$2; shift 2 ;;\n"
+        "    --adapter) case \"$2\" in *.safetensors) ;; *) exit 21 ;; esac; adapter=$2; shift 2 ;;\n"
         "    *) exit 19 ;;\n"
         "  esac\n"
         "done\n"
@@ -17625,6 +17675,8 @@ static void test_catalog_vision_descriptors_survive_trusted_exec(void) {
     snprintf(adapter_path, sizeof(adapter_path), "/dev/fd/%d", adapter_fd);
     snprintf(config_path, sizeof(config_path), "/dev/fd/%d", config_fd);
 #endif
+    TEST_ASSERT(strstr(tower_path, ".safetensors") == NULL);
+    TEST_ASSERT(strstr(adapter_path, ".safetensors") == NULL);
     server_vision_config vision = {
         .python = "/bin/sh",
         .encoder = script,
