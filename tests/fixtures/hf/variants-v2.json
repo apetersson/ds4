@@ -21,6 +21,7 @@
       "color_space": "RGB",
       "crop_boundaries": "floor-proportional-v1",
       "crop_order": "row-major",
+      "crop_count_rule": "zero-or-2-through-4",
       "grid_selection": "closest-aspect-ratio",
       "grid_tie_break": "more-tiles",
       "resize": "1024x1024-bicubic",

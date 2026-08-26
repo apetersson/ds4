@@ -117,6 +117,8 @@ static void test_production_fixture(const char *json, size_t json_len) {
           !strcmp(manifest.shared_vision.color_space, "RGB") &&
           !strcmp(manifest.shared_vision.crop_boundaries, "floor-proportional-v1") &&
           !strcmp(manifest.shared_vision.crop_order, "row-major") &&
+          !strcmp(manifest.shared_vision.crop_count_rule,
+                  "zero-or-2-through-4") &&
           !strcmp(manifest.shared_vision.grid_selection, "closest-aspect-ratio") &&
           !strcmp(manifest.shared_vision.grid_tie_break, "more-tiles") &&
           !strcmp(manifest.shared_vision.separator_placement, "last"));
@@ -127,6 +129,7 @@ static void test_production_fixture(const char *json, size_t json_len) {
           ds4_hf_manifest_visual_rows_valid(&manifest, 1281));
     CHECK("non-formula and out-of-range visual rows are rejected",
           !ds4_hf_manifest_visual_rows_valid(&manifest, 256) &&
+          !ds4_hf_manifest_visual_rows_valid(&manifest, 513) &&
           !ds4_hf_manifest_visual_rows_valid(&manifest, 1024) &&
           !ds4_hf_manifest_visual_rows_valid(&manifest, 1537));
 }
@@ -330,6 +333,10 @@ static void test_schema_rejections(const char *json) {
     expect_rejected("weaker integer-only crop-boundary contract is rejected", json,
                     "\"crop_boundaries\": \"floor-proportional-v1\"",
                     "\"crop_boundaries\": \"integer\"",
+                    "preprocessing contract is incompatible");
+    expect_rejected("one-crop preprocessing contract is rejected", json,
+                    "\"crop_count_rule\": \"zero-or-2-through-4\"",
+                    "\"crop_count_rule\": \"zero-through-4\"",
                     "preprocessing contract is incompatible");
     expect_rejected("wrong aspect-grid selection is rejected", json,
                     "\"grid_selection\": \"closest-aspect-ratio\"",

@@ -135,6 +135,7 @@ typedef struct {
     char color_space[DS4_HF_METADATA_MAX];
     char crop_boundaries[DS4_HF_METADATA_MAX];
     char crop_order[DS4_HF_METADATA_MAX];
+    char crop_count_rule[DS4_HF_METADATA_MAX];
     char grid_selection[DS4_HF_METADATA_MAX];
     char grid_tie_break[DS4_HF_METADATA_MAX];
     char resize[DS4_HF_METADATA_MAX];

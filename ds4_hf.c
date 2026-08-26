@@ -965,10 +965,14 @@ static bool manifest_parse_preprocessing(manifest_json_parser *jp,
             if (!manifest_mark_field(jp, &seen, 2048, key) || !manifest_json_charge(jp) ||
                 !manifest_json_string(jp, vision->separator_placement,
                                       sizeof(vision->separator_placement))) return false;
+        } else if (!strcmp(key, "crop_count_rule")) {
+            if (!manifest_mark_field(jp, &seen, 4096, key) || !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, vision->crop_count_rule,
+                                      sizeof(vision->crop_count_rule))) return false;
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
-    if (seen != 4095) return json_fail(jp, "preprocessing contract is incomplete");
+    if (seen != 8191) return json_fail(jp, "preprocessing contract is incomplete");
     return true;
 }
 
@@ -1027,6 +1031,7 @@ static bool manifest_validate_shared_vision(manifest_json_parser *jp,
         !vision->global_view_first || strcmp(vision->color_space, "RGB") ||
         strcmp(vision->crop_boundaries, "floor-proportional-v1") ||
         strcmp(vision->crop_order, "row-major") ||
+        strcmp(vision->crop_count_rule, "zero-or-2-through-4") ||
         strcmp(vision->grid_selection, "closest-aspect-ratio") ||
         strcmp(vision->grid_tie_break, "more-tiles") ||
         strcmp(vision->resize, "1024x1024-bicubic") ||
@@ -1376,7 +1381,10 @@ bool ds4_hf_manifest_visual_rows_valid(const ds4_hf_manifest *manifest,
     if (!manifest->shared_vision.tokens_per_view ||
         payload % manifest->shared_vision.tokens_per_view) return false;
     uint32_t views = payload / manifest->shared_vision.tokens_per_view;
-    return views >= manifest->shared_vision.minimum_views &&
+    if (strcmp(manifest->shared_vision.crop_count_rule,
+               "zero-or-2-through-4")) return false;
+    return (views == 1 || (views >= 3 && views <= 5)) &&
+           views >= manifest->shared_vision.minimum_views &&
            views <= manifest->shared_vision.maximum_views;
 }
 
