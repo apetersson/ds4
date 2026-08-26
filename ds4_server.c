@@ -1155,8 +1155,7 @@ static bool vision_config_complete(const server_vision_config *vision) {
 }
 
 static bool vision_fd_preserved(const server_vision_config *vision, int fd) {
-    return vision && (fd == vision->tower_fd || fd == vision->adapter_fd ||
-                      fd == vision->config_fd);
+    return vision && (fd == vision->tower_fd || fd == vision->adapter_fd);
 }
 
 static void vision_preserve_exec_fd(const server_vision_config *vision, int fd) {
@@ -1208,22 +1207,12 @@ static bool run_vision_encoder(const server_vision_config *vision,
                 close(fd);
             }
         }
-        if (vision->config) {
-            execl(vision->python, vision->python, vision->encoder,
-                  "--image-url-file", input_template,
-                  "--output", output_template,
-                  "--tower", vision->tower,
-                  "--adapter", vision->adapter,
-                  "--config", vision->config,
-                  (char *)NULL);
-        } else {
-            execl(vision->python, vision->python, vision->encoder,
-                  "--image-url-file", input_template,
-                  "--output", output_template,
-                  "--tower", vision->tower,
-                  "--adapter", vision->adapter,
-                  (char *)NULL);
-        }
+        execl(vision->python, vision->python, vision->encoder,
+              "--image-url-file", input_template,
+              "--output", output_template,
+              "--tower", vision->tower,
+              "--adapter", vision->adapter,
+              (char *)NULL);
         _exit(127);
     }
     const int fork_errno = pid < 0 ? errno : 0;
@@ -17599,18 +17588,18 @@ static int test_vision_temp_file(char path[64], const char *pattern,
 
 static void test_catalog_vision_descriptors_survive_trusted_exec(void) {
     static const char script_body[] =
-        "out= tower= adapter= config=\n"
+        "out= tower= adapter=\n"
         "while [ $# -gt 0 ]; do\n"
         "  case \"$1\" in\n"
+        "    --image-url-file) shift 2 ;;\n"
         "    --output) out=$2; shift 2 ;;\n"
         "    --tower) tower=$2; shift 2 ;;\n"
         "    --adapter) adapter=$2; shift 2 ;;\n"
-        "    --config) config=$2; shift 2 ;;\n"
-        "    *) shift ;;\n"
+        "    *) exit 19 ;;\n"
         "  esac\n"
         "done\n"
-        "test -r \"$tower\" -a -r \"$adapter\" -a -r \"$config\" || exit 17\n"
-        "{ cat \"$tower\"; cat \"$adapter\"; cat \"$config\"; } > \"$out\"\n";
+        "test -r \"$tower\" -a -r \"$adapter\" || exit 17\n"
+        "{ cat \"$tower\"; cat \"$adapter\"; } > \"$out\"\n";
     char script[64], tower_file[64], adapter_file[64], config_file[64];
     int script_fd = test_vision_temp_file(script, "ds4-vision-script",
                                           script_body, false);
@@ -17646,6 +17635,7 @@ static void test_catalog_vision_descriptors_survive_trusted_exec(void) {
         .adapter_fd = adapter_fd,
         .config_fd = config_fd,
     };
+    TEST_ASSERT(!vision_fd_preserved(&vision, config_fd));
     char *output = NULL;
     char err[256] = {0};
     TEST_ASSERT(run_vision_encoder(&vision, "data:image/png;base64,AA==",
@@ -17653,7 +17643,7 @@ static void test_catalog_vision_descriptors_survive_trusted_exec(void) {
     if (output) {
         int fd = open(output, O_RDONLY);
         char data[4] = {0};
-        TEST_ASSERT(fd >= 0 && read(fd, data, 3) == 3 && !strcmp(data, "TPC"));
+        TEST_ASSERT(fd >= 0 && read(fd, data, 2) == 2 && !strcmp(data, "TP"));
         if (fd >= 0) close(fd);
         unlink_encoder_output(output);
         free(output);
