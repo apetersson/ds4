@@ -19,6 +19,9 @@ SECRET = "cache-test-secret"
 
 
 def payload_for(path):
+    if path.endswith("H-sha256-multiblock.gguf"):
+        size = 131073
+        return (path.encode("utf-8") + b"#" * size)[:size]
     sizes = {
         "receiver.gguf": 19,
         "tower.safetensors": 17,

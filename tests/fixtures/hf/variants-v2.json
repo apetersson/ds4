@@ -87,6 +87,17 @@
         "runtime": {"llama_cpp": {"minimum_revision": "deepencoder-v2-dsv4-route-token-v1"}},
         "gguf_metadata": {"architecture": "clip", "projector_type": "deepencoder_v2_dsv4"}
       },
+      "bf16_tensor_identity": {
+        "canonicalization": "named-tensor-name-shape-bf16le-v1",
+        "source": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "llama_cpp_mmproj": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
       "dspark": {
         "path": "Headroom128-IQ2_XXS/dspark-DeepSeek-V4-Flash-0731-Headroom128-Q8_0.gguf",
         "bytes": 5700000000,
@@ -157,6 +168,17 @@
         "capabilities": {"required": ["llama-cpp-mmproj", "route-token-id"], "optional": []},
         "runtime": {"llama_cpp": {"minimum_revision": "deepencoder-v2-dsv4-route-token-v1"}},
         "gguf_metadata": {"architecture": "clip", "projector_type": "deepencoder_v2_dsv4"}
+      },
+      "bf16_tensor_identity": {
+        "canonicalization": "named-tensor-name-shape-bf16le-v1",
+        "source": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "llama_cpp_mmproj": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
       },
       "dspark": {
         "path": "Quality128-IQ2_XXS_XL/dspark-DeepSeek-V4-Flash-0731-Quality128-Q8_0.gguf",

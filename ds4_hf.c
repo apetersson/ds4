@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <math.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1065,6 +1066,83 @@ static bool manifest_validate_shared_vision(manifest_json_parser *jp,
     return true;
 }
 
+static bool manifest_parse_bf16_identity_hashes(
+    manifest_json_parser *jp, char tower[DS4_HF_SHA256_HEX_SIZE],
+    char projector[DS4_HF_SHA256_HEX_SIZE]) {
+    if (!manifest_json_open(jp, '{')) return false;
+    uint64_t seen = 0;
+    manifest_json_ws(jp);
+    if (jp->p < jp->end && *jp->p == '}') {
+        return json_fail(jp, "BF16 tensor identity side is empty");
+    }
+    bool more = true;
+    while (more) {
+        char key[DS4_HF_METADATA_MAX];
+        if (!manifest_json_key(jp, key, sizeof(key))) return false;
+        if (!strcmp(key, "tower_sha256")) {
+            if (!manifest_mark_field(jp, &seen, 1, key) ||
+                !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, tower, DS4_HF_SHA256_HEX_SIZE)) {
+                return false;
+            }
+        } else if (!strcmp(key, "projector_sha256")) {
+            if (!manifest_mark_field(jp, &seen, 2, key) ||
+                !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, projector,
+                                      DS4_HF_SHA256_HEX_SIZE)) {
+                return false;
+            }
+        } else if (!manifest_json_skip_value(jp)) {
+            return false;
+        }
+        if (!manifest_json_next(jp, '}', &more)) return false;
+    }
+    if (seen != 3) {
+        return json_fail(jp, "BF16 tensor identity side is incomplete");
+    }
+    return true;
+}
+
+static bool manifest_parse_bf16_identity(
+    manifest_json_parser *jp, ds4_hf_manifest_bf16_identity *identity) {
+    if (!manifest_json_open(jp, '{')) return false;
+    uint64_t seen = 0;
+    manifest_json_ws(jp);
+    if (jp->p < jp->end && *jp->p == '}') {
+        return json_fail(jp, "BF16 tensor identity record is empty");
+    }
+    bool more = true;
+    while (more) {
+        char key[DS4_HF_METADATA_MAX];
+        if (!manifest_json_key(jp, key, sizeof(key))) return false;
+        if (!strcmp(key, "canonicalization")) {
+            if (!manifest_mark_field(jp, &seen, 1, key) ||
+                !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, identity->canonicalization,
+                                      sizeof(identity->canonicalization))) {
+                return false;
+            }
+        } else if (!strcmp(key, "source")) {
+            if (!manifest_mark_field(jp, &seen, 2, key) ||
+                !manifest_parse_bf16_identity_hashes(
+                    jp, identity->source_tower_sha256,
+                    identity->source_projector_sha256)) return false;
+        } else if (!strcmp(key, "llama_cpp_mmproj")) {
+            if (!manifest_mark_field(jp, &seen, 4, key) ||
+                !manifest_parse_bf16_identity_hashes(
+                    jp, identity->mmproj_tower_sha256,
+                    identity->mmproj_projector_sha256)) return false;
+        } else if (!manifest_json_skip_value(jp)) {
+            return false;
+        }
+        if (!manifest_json_next(jp, '}', &more)) return false;
+    }
+    if (seen != 7) {
+        return json_fail(jp, "BF16 tensor identity record is incomplete");
+    }
+    return true;
+}
+
 static bool manifest_parse_variant(manifest_json_parser *jp,
                                    ds4_hf_manifest_variant *variant) {
     if (!manifest_json_open(jp, '{')) return false;
@@ -1090,14 +1168,22 @@ static bool manifest_parse_variant(manifest_json_parser *jp,
         } else if (!strcmp(key, "llama_cpp_mmproj")) {
             if (!manifest_mark_field(jp, &seen, 32, key) ||
                 !manifest_parse_artifact(jp, &variant->llama_cpp_mmproj)) return false;
-        } else if (!strcmp(key, "dspark")) {
+        } else if (!strcmp(key, "bf16_tensor_identity")) {
             if (!manifest_mark_field(jp, &seen, 64, key) ||
+                !manifest_parse_bf16_identity(
+                    jp, &variant->bf16_tensor_identity)) return false;
+        } else if (!strcmp(key, "dspark")) {
+            if (!manifest_mark_field(jp, &seen, 128, key) ||
                 !manifest_parse_artifact(jp, &variant->dspark)) return false;
             variant->has_dspark = true;
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
-    if ((seen & 63u) != 63u) return json_fail(jp, "variant is missing selector, directory, default, receiver, ds4_vision, or llama_cpp_mmproj");
+    if ((seen & 127u) != 127u) {
+        return json_fail(
+            jp, "variant is missing selector, directory, default, receiver, "
+                "ds4_vision, llama_cpp_mmproj, or bf16_tensor_identity");
+    }
     return true;
 }
 
@@ -1261,6 +1347,27 @@ static bool manifest_validate_variant(manifest_json_parser *jp,
         !manifest_suffix(variant->ds4_vision.projector.path, ".safetensors") ||
         !manifest_suffix(variant->ds4_vision.config.path, ".json")) {
         return json_fail(jp, "DS4 vision bundle paths must be data-only safetensors/safetensors/JSON roles");
+    }
+    const ds4_hf_manifest_bf16_identity *identity =
+        &variant->bf16_tensor_identity;
+    if (strcmp(variant->ds4_vision.tower.precision, "BF16") ||
+        strcmp(variant->ds4_vision.projector.precision, "BF16") ||
+        strcmp(variant->llama_cpp_mmproj.precision, "BF16") ||
+        strcmp(identity->canonicalization,
+               "named-tensor-name-shape-bf16le-v1") ||
+        !manifest_valid_sha256(identity->source_tower_sha256) ||
+        !manifest_valid_sha256(identity->source_projector_sha256) ||
+        !manifest_valid_sha256(identity->mmproj_tower_sha256) ||
+        !manifest_valid_sha256(identity->mmproj_projector_sha256)) {
+        return json_fail(
+            jp, "BF16 tensor identity contract is missing or malformed");
+    }
+    if (strcmp(identity->source_tower_sha256,
+               identity->mmproj_tower_sha256) ||
+        strcmp(identity->source_projector_sha256,
+               identity->mmproj_projector_sha256)) {
+        return json_fail(
+            jp, "raw DS4 and llama.cpp mmproj BF16 tensor identities differ");
     }
     const char *paths[] = {
         variant->receiver.path, variant->ds4_vision.tower.path,
@@ -1976,6 +2083,197 @@ const char *ds4_hf_artifact_role_name(ds4_hf_artifact_role role) {
     return "unknown";
 }
 
+typedef struct {
+    uint32_t state[8];
+    uint64_t bytes;
+    unsigned char block[64];
+    size_t used;
+} hf_sha256;
+
+static uint32_t sha256_rotr(uint32_t value, unsigned count) {
+    return (value >> count) | (value << (32u - count));
+}
+
+static void sha256_transform(hf_sha256 *hash, const unsigned char block[64]) {
+    static const uint32_t constants[64] = {
+        0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u,
+        0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+        0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
+        0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+        0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu,
+        0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+        0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u,
+        0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+        0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u,
+        0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+        0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u,
+        0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+        0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u,
+        0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+        0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
+        0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u,
+    };
+    uint32_t words[64];
+    for (unsigned i = 0; i < 16; i++) {
+        words[i] = ((uint32_t)block[i * 4] << 24) |
+                   ((uint32_t)block[i * 4 + 1] << 16) |
+                   ((uint32_t)block[i * 4 + 2] << 8) |
+                   (uint32_t)block[i * 4 + 3];
+    }
+    for (unsigned i = 16; i < 64; i++) {
+        uint32_t s0 = sha256_rotr(words[i - 15], 7) ^
+                      sha256_rotr(words[i - 15], 18) ^
+                      (words[i - 15] >> 3);
+        uint32_t s1 = sha256_rotr(words[i - 2], 17) ^
+                      sha256_rotr(words[i - 2], 19) ^
+                      (words[i - 2] >> 10);
+        words[i] = words[i - 16] + s0 + words[i - 7] + s1;
+    }
+    uint32_t a = hash->state[0], b = hash->state[1];
+    uint32_t c = hash->state[2], d = hash->state[3];
+    uint32_t e = hash->state[4], f = hash->state[5];
+    uint32_t g = hash->state[6], h = hash->state[7];
+    for (unsigned i = 0; i < 64; i++) {
+        uint32_t sum1 = sha256_rotr(e, 6) ^ sha256_rotr(e, 11) ^
+                        sha256_rotr(e, 25);
+        uint32_t choose = (e & f) ^ (~e & g);
+        uint32_t temp1 = h + sum1 + choose + constants[i] + words[i];
+        uint32_t sum0 = sha256_rotr(a, 2) ^ sha256_rotr(a, 13) ^
+                        sha256_rotr(a, 22);
+        uint32_t majority = (a & b) ^ (a & c) ^ (b & c);
+        uint32_t temp2 = sum0 + majority;
+        h = g; g = f; f = e; e = d + temp1;
+        d = c; c = b; b = a; a = temp1 + temp2;
+    }
+    hash->state[0] += a; hash->state[1] += b;
+    hash->state[2] += c; hash->state[3] += d;
+    hash->state[4] += e; hash->state[5] += f;
+    hash->state[6] += g; hash->state[7] += h;
+}
+
+static void sha256_init(hf_sha256 *hash) {
+    static const uint32_t initial[8] = {
+        0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+        0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u,
+    };
+    memset(hash, 0, sizeof(*hash));
+    memcpy(hash->state, initial, sizeof(initial));
+}
+
+static void sha256_update(hf_sha256 *hash, const void *data, size_t len) {
+    const unsigned char *bytes = data;
+    hash->bytes += len;
+    while (len) {
+        size_t space = sizeof(hash->block) - hash->used;
+        size_t take = len < space ? len : space;
+        memcpy(hash->block + hash->used, bytes, take);
+        hash->used += take;
+        bytes += take;
+        len -= take;
+        if (hash->used == sizeof(hash->block)) {
+            sha256_transform(hash, hash->block);
+            hash->used = 0;
+        }
+    }
+}
+
+static void sha256_final(hf_sha256 *hash, unsigned char digest[32]) {
+    uint64_t bits = hash->bytes * UINT64_C(8);
+    hash->block[hash->used++] = 0x80;
+    if (hash->used > 56) {
+        memset(hash->block + hash->used, 0, 64 - hash->used);
+        sha256_transform(hash, hash->block);
+        hash->used = 0;
+    }
+    memset(hash->block + hash->used, 0, 56 - hash->used);
+    for (unsigned i = 0; i < 8; i++) {
+        hash->block[63 - i] = (unsigned char)(bits >> (i * 8));
+    }
+    sha256_transform(hash, hash->block);
+    for (unsigned i = 0; i < 8; i++) {
+        digest[i * 4] = (unsigned char)(hash->state[i] >> 24);
+        digest[i * 4 + 1] = (unsigned char)(hash->state[i] >> 16);
+        digest[i * 4 + 2] = (unsigned char)(hash->state[i] >> 8);
+        digest[i * 4 + 3] = (unsigned char)hash->state[i];
+    }
+    secure_clear(hash, sizeof(*hash));
+}
+
+static void sha256_hex(const unsigned char digest[32],
+                       char output[DS4_HF_SHA256_HEX_SIZE]) {
+    static const char hex[] = "0123456789abcdef";
+    for (unsigned i = 0; i < 32; i++) {
+        output[i * 2] = hex[digest[i] >> 4];
+        output[i * 2 + 1] = hex[digest[i] & 15];
+    }
+    output[64] = '\0';
+}
+
+static bool sha256_bounded_field(hf_sha256 *hash, const char *value,
+                                 size_t capacity) {
+    const char *end = memchr(value, '\0', capacity);
+    if (!end) return false;
+    size_t len = (size_t)(end - value);
+    unsigned char encoded_len[8];
+    for (unsigned i = 0; i < 8; i++) {
+        encoded_len[7 - i] = (unsigned char)((uint64_t)len >> (i * 8));
+    }
+    sha256_update(hash, encoded_len, sizeof(encoded_len));
+    sha256_update(hash, value, len);
+    return true;
+}
+
+static void sha256_u64(hf_sha256 *hash, uint64_t value) {
+    unsigned char encoded[8];
+    for (unsigned i = 0; i < 8; i++) {
+        encoded[7 - i] = (unsigned char)(value >> (i * 8));
+    }
+    sha256_update(hash, encoded, sizeof(encoded));
+}
+
+static bool acquisition_plan_seal(const ds4_hf_acquisition_plan *plan,
+                                  char seal[DS4_HF_SHA256_HEX_SIZE]) {
+    if (!plan || plan->artifact_count == 0 ||
+        plan->artifact_count > DS4_HF_ACQUISITION_MAX_ARTIFACTS) return false;
+    hf_sha256 hash;
+    sha256_init(&hash);
+    static const char domain[] = "ds4-hf-acquisition-plan-v1";
+    sha256_update(&hash, domain, sizeof(domain));
+    if (!sha256_bounded_field(&hash, plan->endpoint, sizeof(plan->endpoint)) ||
+        !sha256_bounded_field(&hash, plan->repository,
+                              sizeof(plan->repository)) ||
+        !sha256_bounded_field(&hash, plan->revision,
+                              sizeof(plan->revision)) ||
+        !sha256_bounded_field(&hash, plan->selector,
+                              sizeof(plan->selector)) ||
+        !sha256_bounded_field(&hash, plan->cache_root,
+                              sizeof(plan->cache_root))) return false;
+    sha256_u64(&hash, (uint64_t)plan->artifact_count);
+    for (size_t i = 0; i < plan->artifact_count; i++) {
+        const ds4_hf_acquisition_artifact *artifact = &plan->artifacts[i];
+        if (artifact->role < DS4_HF_ROLE_RECEIVER ||
+            artifact->role > DS4_HF_ROLE_DSPARK || !artifact->bytes ||
+            !memchr(artifact->sha256, '\0', sizeof(artifact->sha256)) ||
+            !memchr(artifact->repo_path, '\0', sizeof(artifact->repo_path)) ||
+            !manifest_valid_sha256(artifact->sha256) ||
+            !safe_repo_path(artifact->repo_path)) return false;
+        sha256_u64(&hash, (uint64_t)artifact->role);
+        sha256_u64(&hash, artifact->requested ? 1 : 0);
+        sha256_u64(&hash, artifact->bytes);
+        if (!sha256_bounded_field(&hash, artifact->repo_path,
+                                  sizeof(artifact->repo_path)) ||
+            !sha256_bounded_field(&hash, artifact->sha256,
+                                  sizeof(artifact->sha256)) ||
+            !sha256_bounded_field(&hash, artifact->destination,
+                                  sizeof(artifact->destination))) return false;
+    }
+    unsigned char digest[32];
+    sha256_final(&hash, digest);
+    sha256_hex(digest, seal);
+    secure_clear(digest, sizeof(digest));
+    return true;
+}
+
 static bool cache_component_encode(const char *value, char *encoded,
                                    size_t encoded_len) {
     static const char hex[] = "0123456789ABCDEF";
@@ -2062,7 +2360,7 @@ static bool plan_add_artifact(ds4_hf_acquisition_plan *plan,
 static bool acquisition_context_fail(
     char *err, size_t errlen, const ds4_hf_acquisition_plan *plan,
     const ds4_hf_acquisition_artifact *artifact, const char *fmt, ...) {
-    char reason[512] = {0};
+    char reason[DS4_HF_CACHE_PATH_MAX * 8 + 1024] = {0};
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(reason, sizeof(reason), fmt, ap);
@@ -2165,6 +2463,10 @@ bool ds4_hf_acquisition_plan_build(
         return acquisition_context_fail(err, errlen, plan, NULL,
                                         "cache destination is too long");
     }
+    if (!acquisition_plan_seal(plan, plan->integrity_seal)) {
+        return acquisition_context_fail(err, errlen, plan, NULL,
+                                        "cannot seal manifest-selected plan");
+    }
     return true;
 }
 
@@ -2184,26 +2486,6 @@ static bool mkdir_tree(const char *path) {
     return true;
 }
 
-static bool artifact_aux_path(const ds4_hf_acquisition_artifact *artifact,
-                              const char *suffix, char *path, size_t path_len) {
-    int written = snprintf(path, path_len, "%s%s", artifact->destination,
-                           suffix);
-    return written > 0 && (size_t)written < path_len;
-}
-
-static bool artifact_parent_directory(
-    const ds4_hf_acquisition_artifact *artifact,
-    char parent[DS4_HF_CACHE_PATH_MAX]) {
-    if (!copy_string(parent, DS4_HF_CACHE_PATH_MAX, artifact->destination)) {
-        return false;
-    }
-    char *slash = strrchr(parent, '/');
-    if (!slash) return copy_string(parent, DS4_HF_CACHE_PATH_MAX, ".");
-    if (slash == parent) slash[1] = '\0';
-    else *slash = '\0';
-    return true;
-}
-
 static bool artifact_metadata(const ds4_hf_acquisition_plan *plan,
                               const ds4_hf_acquisition_artifact *artifact,
                               char *metadata, size_t metadata_len,
@@ -2220,37 +2502,245 @@ static bool artifact_metadata(const ds4_hf_acquisition_plan *plan,
     return true;
 }
 
-static bool regular_file_size(const char *path, uint64_t *size_out) {
+static int cache_root_open(const ds4_hf_acquisition_plan *plan, bool create) {
+    if (create && !mkdir_tree(plan->cache_root)) return -1;
+    int fd = open(plan->cache_root,
+                  O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return -1;
     struct stat st;
-    if (lstat(path, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) return false;
-    *size_out = (uint64_t)st.st_size;
-    return true;
+    if (fstat(fd, &st) || !S_ISDIR(st.st_mode)) {
+        int saved_errno = errno ? errno : ENOTDIR;
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+    return fd;
 }
 
-static bool artifact_cache_hit(const ds4_hf_acquisition_plan *plan,
-                               const ds4_hf_acquisition_artifact *artifact) {
-    uint64_t size = 0;
-    if (!regular_file_size(artifact->destination, &size) ||
-        size != artifact->bytes) return false;
-    char metadata_path[DS4_HF_CACHE_PATH_MAX];
-    char expected[1024];
-    size_t expected_len = 0;
-    if (!artifact_aux_path(artifact, ".ds4-meta", metadata_path,
-                           sizeof(metadata_path)) ||
-        !artifact_metadata(plan, artifact, expected, sizeof(expected),
-                           &expected_len)) return false;
-    int fd = open(metadata_path, O_RDONLY);
-    if (fd < 0) return false;
-    struct stat st;
-    char actual[1025];
-    ssize_t got = read(fd, actual, sizeof(actual));
+static bool safe_relative_component(const char *component) {
+    return component[0] && strcmp(component, ".") && strcmp(component, "..");
+}
+
+static int directory_chain_open(int root_fd, const char *path, bool create) {
+    char copy[DS4_HF_CACHE_PATH_MAX];
+    if (!copy_string(copy, sizeof(copy), path)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    int current = fcntl(root_fd, F_DUPFD_CLOEXEC, 0);
+    if (current < 0) return -1;
+    char *component = copy;
+    while (*component) {
+        char *slash = strchr(component, '/');
+        if (slash) *slash = '\0';
+        if (!safe_relative_component(component)) {
+            close(current);
+            errno = EINVAL;
+            return -1;
+        }
+        if (create && mkdirat(current, component, 0700) && errno != EEXIST) {
+            int saved_errno = errno;
+            close(current);
+            errno = saved_errno;
+            return -1;
+        }
+        int next = openat(current, component,
+                          O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (next < 0) {
+            int saved_errno = errno;
+            close(current);
+            errno = saved_errno;
+            return -1;
+        }
+        close(current);
+        current = next;
+        if (!slash) break;
+        component = slash + 1;
+    }
+    return current;
+}
+
+static int artifact_parent_open(
+    const ds4_hf_acquisition_plan *plan,
+    const ds4_hf_acquisition_artifact *artifact, bool create,
+    char leaf[DS4_HF_PATH_MAX]) {
+    size_t root_len = strlen(plan->cache_root);
+    if (strncmp(artifact->destination, plan->cache_root, root_len) ||
+        artifact->destination[root_len] != '/' ||
+        !artifact->destination[root_len + 1]) {
+        errno = EINVAL;
+        return -1;
+    }
+    const char *relative = artifact->destination + root_len + 1;
+    const char *slash = strrchr(relative, '/');
+    if (!slash || slash == relative || !safe_relative_component(slash + 1) ||
+        !copy_string(leaf, DS4_HF_PATH_MAX, slash + 1)) {
+        errno = EINVAL;
+        return -1;
+    }
+    char parent[DS4_HF_CACHE_PATH_MAX];
+    size_t parent_len = (size_t)(slash - relative);
+    if (parent_len >= sizeof(parent)) {
+        errno = ENAMETOOLONG;
+        return -1;
+    }
+    memcpy(parent, relative, parent_len);
+    parent[parent_len] = '\0';
+    int root_fd = cache_root_open(plan, create);
+    if (root_fd < 0) return -1;
+    int parent_fd = directory_chain_open(root_fd, parent, create);
     int saved_errno = errno;
-    bool ok = !fstat(fd, &st) && S_ISREG(st.st_mode) && got >= 0 &&
-              (size_t)got == expected_len &&
-              !memcmp(actual, expected, expected_len);
-    close(fd);
+    close(root_fd);
     errno = saved_errno;
-    return ok;
+    return parent_fd;
+}
+
+static bool leaf_with_suffix(const char *leaf, const char *suffix,
+                             char output[DS4_HF_PATH_MAX]) {
+    int written = snprintf(output, DS4_HF_PATH_MAX, "%s%s", leaf, suffix);
+    return written > 0 && written < DS4_HF_PATH_MAX;
+}
+
+static bool regular_entry_stat(int parent_fd, const char *leaf,
+                               struct stat *st) {
+    return !fstatat(parent_fd, leaf, st, AT_SYMLINK_NOFOLLOW) &&
+           S_ISREG(st->st_mode) && st->st_nlink == 1 && st->st_size >= 0;
+}
+
+static int regular_entry_open(int parent_fd, const char *leaf, int flags,
+                              mode_t mode) {
+    int fd = openat(parent_fd, leaf, flags | O_NOFOLLOW | O_CLOEXEC, mode);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st)) {
+        int saved_errno = errno;
+        close(fd);
+        errno = saved_errno;
+        return -1;
+    }
+    if (!S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_size < 0) {
+        close(fd);
+        errno = EINVAL;
+        return -1;
+    }
+    return fd;
+}
+
+static bool hash_regular_fd_stable(int parent_fd, const char *leaf, int fd,
+                                   uint64_t expected_size,
+                                   const char *expected_sha256,
+                                   char actual_sha256[DS4_HF_SHA256_HEX_SIZE]) {
+    struct stat before, after, path_stat;
+    if (fstat(fd, &before) || !S_ISREG(before.st_mode) ||
+        before.st_nlink != 1 || before.st_size < 0 ||
+        (uint64_t)before.st_size != expected_size) return false;
+    hf_sha256 hash;
+    sha256_init(&hash);
+    unsigned char buffer[64 * 1024];
+    uint64_t offset = 0;
+    while (offset < expected_size) {
+        size_t wanted = expected_size - offset < sizeof(buffer) ?
+                        (size_t)(expected_size - offset) : sizeof(buffer);
+        ssize_t got = pread(fd, buffer, wanted, (off_t)offset);
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            secure_clear(&hash, sizeof(hash));
+            return false;
+        }
+        if (!got) {
+            secure_clear(&hash, sizeof(hash));
+            return false;
+        }
+        sha256_update(&hash, buffer, (size_t)got);
+        offset += (uint64_t)got;
+    }
+    unsigned char digest[32];
+    sha256_final(&hash, digest);
+    sha256_hex(digest, actual_sha256);
+    secure_clear(digest, sizeof(digest));
+    if (fstat(fd, &after) ||
+        fstatat(parent_fd, leaf, &path_stat, AT_SYMLINK_NOFOLLOW) ||
+        !S_ISREG(path_stat.st_mode) || path_stat.st_nlink != 1 ||
+        before.st_dev != after.st_dev || before.st_ino != after.st_ino ||
+        before.st_size != after.st_size ||
+        after.st_dev != path_stat.st_dev || after.st_ino != path_stat.st_ino ||
+        after.st_size != path_stat.st_size) return false;
+    return !strcmp(actual_sha256, expected_sha256);
+}
+
+static bool metadata_fd_matches(const ds4_hf_acquisition_plan *plan,
+                                const ds4_hf_acquisition_artifact *artifact,
+                                int fd) {
+    char expected[1024], actual[1025];
+    size_t expected_len = 0;
+    if (!artifact_metadata(plan, artifact, expected, sizeof(expected),
+                           &expected_len)) return false;
+    struct stat before, after;
+    if (fstat(fd, &before) || !S_ISREG(before.st_mode) ||
+        before.st_nlink != 1 || before.st_size < 0 ||
+        (uint64_t)before.st_size != expected_len) return false;
+    ssize_t got;
+    do {
+        got = pread(fd, actual, sizeof(actual), 0);
+    } while (got < 0 && errno == EINTR);
+    return got >= 0 && (size_t)got == expected_len &&
+           !memcmp(actual, expected, expected_len) && !fstat(fd, &after) &&
+           before.st_dev == after.st_dev && before.st_ino == after.st_ino &&
+           before.st_size == after.st_size;
+}
+
+typedef enum {
+    ARTIFACT_CACHE_MISSING,
+    ARTIFACT_CACHE_VALID,
+    ARTIFACT_CACHE_INVALID,
+} artifact_cache_state;
+
+static artifact_cache_state artifact_cache_open(
+    const ds4_hf_acquisition_plan *plan,
+    const ds4_hf_acquisition_artifact *artifact, int *artifact_fd_out) {
+    *artifact_fd_out = -1;
+    char leaf[DS4_HF_PATH_MAX], metadata_leaf[DS4_HF_PATH_MAX];
+    int parent_fd = artifact_parent_open(plan, artifact, false, leaf);
+    if (parent_fd < 0) return errno == ENOENT ? ARTIFACT_CACHE_MISSING :
+                                               ARTIFACT_CACHE_INVALID;
+    if (!leaf_with_suffix(leaf, ".ds4-meta", metadata_leaf)) {
+        close(parent_fd);
+        return ARTIFACT_CACHE_INVALID;
+    }
+    struct stat artifact_stat, metadata_stat;
+    bool artifact_exists = !fstatat(parent_fd, leaf, &artifact_stat,
+                                    AT_SYMLINK_NOFOLLOW);
+    int artifact_errno = errno;
+    bool metadata_exists = !fstatat(parent_fd, metadata_leaf, &metadata_stat,
+                                    AT_SYMLINK_NOFOLLOW);
+    int metadata_errno = errno;
+    if (!artifact_exists && !metadata_exists && artifact_errno == ENOENT &&
+        metadata_errno == ENOENT) {
+        close(parent_fd);
+        return ARTIFACT_CACHE_MISSING;
+    }
+    if (!artifact_exists || !metadata_exists ||
+        !S_ISREG(artifact_stat.st_mode) || artifact_stat.st_nlink != 1 ||
+        !S_ISREG(metadata_stat.st_mode) || metadata_stat.st_nlink != 1) {
+        close(parent_fd);
+        return ARTIFACT_CACHE_INVALID;
+    }
+    int metadata_fd = regular_entry_open(parent_fd, metadata_leaf, O_RDONLY, 0);
+    int artifact_fd = regular_entry_open(parent_fd, leaf, O_RDONLY, 0);
+    char actual_sha256[DS4_HF_SHA256_HEX_SIZE] = {0};
+    bool ok = metadata_fd >= 0 && artifact_fd >= 0 &&
+              metadata_fd_matches(plan, artifact, metadata_fd) &&
+              hash_regular_fd_stable(parent_fd, leaf, artifact_fd,
+                                     artifact->bytes, artifact->sha256,
+                                     actual_sha256);
+    if (metadata_fd >= 0) close(metadata_fd);
+    close(parent_fd);
+    if (!ok) {
+        if (artifact_fd >= 0) close(artifact_fd);
+        return ARTIFACT_CACHE_INVALID;
+    }
+    *artifact_fd_out = artifact_fd;
+    return ARTIFACT_CACHE_VALID;
 }
 
 static bool write_all(int fd, const char *data, size_t len) {
@@ -2284,10 +2774,11 @@ static size_t artifact_write_cb(char *data, size_t size, size_t count,
 
 static CURLcode artifact_download_once(
     const ds4_hf_acquisition_plan *plan,
-    const ds4_hf_acquisition_artifact *artifact, const char *part_path,
+    const ds4_hf_acquisition_artifact *artifact, int parent_fd,
+    const char *part_leaf,
     const char *token, uint64_t offset, long timeout_ms, long *http_status) {
     int flags = O_WRONLY | O_CREAT | (offset ? O_APPEND : O_TRUNC);
-    int fd = open(part_path, flags, 0600);
+    int fd = regular_entry_open(parent_fd, part_leaf, flags, 0600);
     if (fd < 0) return CURLE_WRITE_ERROR;
     FILE *file = fdopen(fd, offset ? "ab" : "wb");
     if (!file) {
@@ -2361,49 +2852,116 @@ static CURLcode artifact_download_once(
     return status;
 }
 
+static bool shell_quote(const char *value, char *output, size_t output_len) {
+    size_t used = 0;
+    if (output_len < 3) return false;
+    output[used++] = '\'';
+    for (const char *p = value; *p; p++) {
+        static const char escaped_quote[] = "'\\''";
+        if (*p == '\'') {
+            if (sizeof(escaped_quote) - 1 >= output_len - used) return false;
+            memcpy(output + used, escaped_quote, sizeof(escaped_quote) - 1);
+            used += sizeof(escaped_quote) - 1;
+        } else {
+            if (used + 1 >= output_len) return false;
+            output[used++] = *p;
+        }
+    }
+    if (used + 2 > output_len) return false;
+    output[used++] = '\'';
+    output[used] = '\0';
+    return true;
+}
+
+static bool untrusted_entry_fail(
+    char *err, size_t errlen, const ds4_hf_acquisition_plan *plan,
+    const ds4_hf_acquisition_artifact *artifact, const char *path,
+    const char *reason) {
+    char quoted[DS4_HF_CACHE_PATH_MAX * 4 + 3];
+    char quarantine_path[DS4_HF_CACHE_PATH_MAX + 32];
+    char quoted_quarantine[(DS4_HF_CACHE_PATH_MAX + 32) * 4 + 3];
+    int written = snprintf(quarantine_path, sizeof(quarantine_path),
+                           "%s.untrusted", path);
+    if (written <= 0 || (size_t)written >= sizeof(quarantine_path) ||
+        !shell_quote(path, quoted, sizeof(quoted)) ||
+        !shell_quote(quarantine_path, quoted_quarantine,
+                     sizeof(quoted_quarantine))) {
+        return acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "%s; move the untrusted entry aside without deleting it and retry",
+            reason);
+    }
+    return acquisition_context_fail(
+        err, errlen, plan, artifact,
+        "%s; non-destructive recovery command: mv -- %s %s",
+        reason, quoted, quoted_quarantine);
+}
+
+static bool acquisition_plan_valid(const ds4_hf_acquisition_plan *plan) {
+    char actual[DS4_HF_SHA256_HEX_SIZE];
+    return acquisition_plan_seal(plan, actual) &&
+           memchr(plan->integrity_seal, '\0',
+                  sizeof(plan->integrity_seal)) != NULL &&
+           manifest_valid_sha256(plan->integrity_seal) &&
+           !strcmp(actual, plan->integrity_seal);
+}
+
 static bool acquire_one(const ds4_hf_cli_config *cfg,
                         ds4_hf_acquisition_plan *plan,
                         ds4_hf_acquisition_artifact *artifact,
                         const char *token, long timeout_ms,
                         char *err, size_t errlen) {
-    char parent[DS4_HF_CACHE_PATH_MAX];
-    char lock_path[DS4_HF_CACHE_PATH_MAX];
-    char part_path[DS4_HF_CACHE_PATH_MAX];
-    char metadata_path[DS4_HF_CACHE_PATH_MAX];
-    char metadata_tmp[DS4_HF_CACHE_PATH_MAX];
-    if (!artifact_parent_directory(artifact, parent) || !mkdir_tree(parent) ||
-        !artifact_aux_path(artifact, ".lock", lock_path, sizeof(lock_path)) ||
-        !artifact_aux_path(artifact, ".part", part_path, sizeof(part_path)) ||
-        !artifact_aux_path(artifact, ".ds4-meta", metadata_path,
-                           sizeof(metadata_path)) ||
-        !artifact_aux_path(artifact, ".ds4-meta.part", metadata_tmp,
-                           sizeof(metadata_tmp))) {
-        return acquisition_context_fail(err, errlen, plan, artifact,
-                                        "cannot prepare cache directories");
+    char leaf[DS4_HF_PATH_MAX], lock_leaf[DS4_HF_PATH_MAX];
+    char part_leaf[DS4_HF_PATH_MAX], metadata_leaf[DS4_HF_PATH_MAX];
+    char metadata_tmp_leaf[DS4_HF_PATH_MAX];
+    int parent_fd = artifact_parent_open(plan, artifact, true, leaf);
+    if (parent_fd < 0 ||
+        !leaf_with_suffix(leaf, ".lock", lock_leaf) ||
+        !leaf_with_suffix(leaf, ".part", part_leaf) ||
+        !leaf_with_suffix(leaf, ".ds4-meta", metadata_leaf) ||
+        !leaf_with_suffix(leaf, ".ds4-meta.part", metadata_tmp_leaf)) {
+        if (parent_fd >= 0) close(parent_fd);
+        return acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "cannot prepare descriptor-anchored cache directories without symlinks: %s",
+            strerror(errno));
     }
-    int lock_fd = open(lock_path, O_RDWR | O_CREAT, 0600);
-    if (lock_fd < 0 || flock(lock_fd, LOCK_EX)) {
-        if (lock_fd >= 0) close(lock_fd);
+    int lock_fd = -1;
+    for (unsigned attempt = 0; attempt < 64; attempt++) {
+        lock_fd = regular_entry_open(parent_fd, lock_leaf,
+                                     O_RDWR | O_CREAT, 0600);
+        if (lock_fd >= 0 || errno != ENOENT) break;
+        sched_yield();
+    }
+    if (lock_fd < 0) {
+        int saved_errno = errno;
+        close(parent_fd);
+        return acquisition_context_fail(err, errlen, plan, artifact,
+                                        "cannot open regular no-follow cache lock: %s",
+                                        strerror(saved_errno));
+    }
+    if (flock(lock_fd, LOCK_EX)) {
+        int saved_errno = errno;
+        close(lock_fd);
+        close(parent_fd);
         return acquisition_context_fail(err, errlen, plan, artifact,
                                         "cannot acquire cache lock: %s",
-                                        strerror(errno));
+                                        strerror(saved_errno));
     }
     bool ok = false;
-    if (artifact_cache_hit(plan, artifact)) {
+    int cached_fd = -1;
+    artifact_cache_state cache_state = artifact_cache_open(plan, artifact,
+                                                           &cached_fd);
+    if (cache_state == ARTIFACT_CACHE_VALID) {
+        close(cached_fd);
         artifact->cache_hit = true;
         ok = true;
         goto done;
     }
-    struct stat destination_stat;
-    if (!lstat(artifact->destination, &destination_stat)) {
-        acquisition_context_fail(
-            err, errlen, plan, artifact,
-            "cache entry exists without matching immutable identity; remove it explicitly and retry");
-        goto done;
-    } else if (errno != ENOENT) {
-        acquisition_context_fail(err, errlen, plan, artifact,
-                                 "cannot inspect cache destination: %s",
-                                 strerror(errno));
+    if (cache_state == ARTIFACT_CACHE_INVALID) {
+        untrusted_entry_fail(
+            err, errlen, plan, artifact, artifact->destination,
+            "cache entry fails manifest role, byte-count, SHA-256, sidecar, or stable-path verification; no same-directory fallback is permitted");
         goto done;
     }
     if (cfg->offline) {
@@ -2420,37 +2978,54 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
 
     uint64_t offset = 0;
     struct stat part_stat;
-    if (!lstat(part_path, &part_stat)) {
-        if (!S_ISREG(part_stat.st_mode) || part_stat.st_size < 0 ||
+    if (!fstatat(parent_fd, part_leaf, &part_stat, AT_SYMLINK_NOFOLLOW)) {
+        if (!S_ISREG(part_stat.st_mode) || part_stat.st_nlink != 1 ||
+            part_stat.st_size < 0 ||
             (uint64_t)part_stat.st_size > artifact->bytes) {
-            acquisition_context_fail(
-                err, errlen, plan, artifact,
-                "resume file is not a valid private partial; remove '%s' explicitly",
-                part_path);
+            char part_path[DS4_HF_CACHE_PATH_MAX + 8];
+            snprintf(part_path, sizeof(part_path), "%s.part",
+                     artifact->destination);
+            untrusted_entry_fail(
+                err, errlen, plan, artifact, part_path,
+                "resume entry is a symlink, special/hard-linked file, or has an impossible size");
             goto done;
         }
+        int part_fd = regular_entry_open(parent_fd, part_leaf, O_RDONLY, 0);
+        if (part_fd < 0 || fstat(part_fd, &part_stat)) {
+            if (part_fd >= 0) close(part_fd);
+            acquisition_context_fail(err, errlen, plan, artifact,
+                                     "resume entry changed during inspection");
+            goto done;
+        }
+        close(part_fd);
         offset = (uint64_t)part_stat.st_size;
     } else if (errno != ENOENT) {
         acquisition_context_fail(err, errlen, plan, artifact,
-                                 "cannot inspect resume file: %s", strerror(errno));
+                                 "cannot inspect resume entry: %s",
+                                 strerror(errno));
         goto done;
     }
 
     CURLcode curl_status = CURLE_OK;
     long http_status = 0;
     if (offset < artifact->bytes) {
-        curl_status = artifact_download_once(plan, artifact, part_path, token,
-                                             offset, timeout_ms, &http_status);
-        if (offset && (http_status == 200 || curl_status == CURLE_RANGE_ERROR)) {
+        curl_status = artifact_download_once(plan, artifact, parent_fd,
+                                             part_leaf, token, offset,
+                                             timeout_ms, &http_status);
+        if (offset && (http_status == 200 ||
+                       curl_status == CURLE_RANGE_ERROR)) {
             http_status = 0;
-            curl_status = artifact_download_once(plan, artifact, part_path,
-                                                 token, 0, timeout_ms,
-                                                 &http_status);
+            curl_status = artifact_download_once(plan, artifact, parent_fd,
+                                                 part_leaf, token, 0,
+                                                 timeout_ms, &http_status);
         }
     }
+    struct stat downloaded_stat;
     uint64_t downloaded = 0;
-    if (curl_status != CURLE_OK || !regular_file_size(part_path, &downloaded) ||
-        downloaded != artifact->bytes) {
+    if (regular_entry_stat(parent_fd, part_leaf, &downloaded_stat)) {
+        downloaded = (uint64_t)downloaded_stat.st_size;
+    }
+    if (curl_status != CURLE_OK || downloaded != artifact->bytes) {
         acquisition_context_fail(
             err, errlen, plan, artifact,
             "libcurl HTTP(S) redirect/range transfer failed (curl=%s, HTTP=%ld, "
@@ -2460,6 +3035,31 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
         goto done;
     }
 
+    int part_fd = regular_entry_open(parent_fd, part_leaf, O_RDONLY, 0);
+    char actual_sha256[DS4_HF_SHA256_HEX_SIZE] = {0};
+    if (part_fd < 0 ||
+        !hash_regular_fd_stable(parent_fd, part_leaf, part_fd,
+                                artifact->bytes, artifact->sha256,
+                                actual_sha256)) {
+        if (part_fd >= 0) close(part_fd);
+        char part_path[DS4_HF_CACHE_PATH_MAX + 8];
+        snprintf(part_path, sizeof(part_path), "%s.part",
+                 artifact->destination);
+        untrusted_entry_fail(
+            err, errlen, plan, artifact, part_path,
+            "downloaded bytes fail manifest SHA-256 or stable-path verification");
+        goto done;
+    }
+    if (fchmod(part_fd, 0400)) {
+        int saved_errno = errno;
+        close(part_fd);
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "cannot make verified partial read-only: %s",
+                                 strerror(saved_errno));
+        goto done;
+    }
+    close(part_fd);
+
     char metadata[1024];
     size_t metadata_len = 0;
     if (!artifact_metadata(plan, artifact, metadata, sizeof(metadata),
@@ -2468,40 +3068,106 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
                                  "immutable cache metadata is too long");
         goto done;
     }
-    int metadata_fd = open(metadata_tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-    if (metadata_fd < 0 || !write_all(metadata_fd, metadata, metadata_len) ||
-        fsync(metadata_fd) || close(metadata_fd)) {
-        int saved_errno = errno;
-        if (metadata_fd >= 0) close(metadata_fd);
-        unlink(metadata_tmp);
+    int metadata_fd = regular_entry_open(
+        parent_fd, metadata_tmp_leaf,
+        O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (metadata_fd < 0) {
+        acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "cannot create exclusive no-follow cache metadata: %s",
+            strerror(errno));
+        goto done;
+    }
+    bool metadata_written = write_all(metadata_fd, metadata, metadata_len) &&
+                            !fchmod(metadata_fd, 0400) &&
+                            !fsync(metadata_fd);
+    int metadata_errno = errno;
+    if (close(metadata_fd) && metadata_written) {
+        metadata_written = false;
+        metadata_errno = errno;
+    }
+    if (!metadata_written) {
+        unlinkat(parent_fd, metadata_tmp_leaf, 0);
         acquisition_context_fail(err, errlen, plan, artifact,
                                  "cannot write immutable cache metadata: %s",
-                                 strerror(saved_errno));
+                                 strerror(metadata_errno));
         goto done;
     }
-    if (rename(metadata_tmp, metadata_path)) {
+    if (linkat(parent_fd, metadata_tmp_leaf, parent_fd, metadata_leaf, 0)) {
         int saved_errno = errno;
-        unlink(metadata_tmp);
-        acquisition_context_fail(err, errlen, plan, artifact,
-                                 "cannot publish immutable cache metadata: %s",
-                                 strerror(saved_errno));
+        unlinkat(parent_fd, metadata_tmp_leaf, 0);
+        acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "cannot exclusively publish immutable cache metadata: %s",
+            strerror(saved_errno));
         goto done;
     }
-    if (rename(part_path, artifact->destination)) {
+    if (linkat(parent_fd, part_leaf, parent_fd, leaf, 0)) {
         int saved_errno = errno;
-        unlink(metadata_path);
-        acquisition_context_fail(err, errlen, plan, artifact,
-                                 "cannot atomically publish completed cache entry: %s",
-                                 strerror(saved_errno));
+        unlinkat(parent_fd, metadata_leaf, 0);
+        unlinkat(parent_fd, metadata_tmp_leaf, 0);
+        acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "cannot exclusively publish verified cache entry: %s",
+            strerror(saved_errno));
         goto done;
     }
+    unlinkat(parent_fd, part_leaf, 0);
+    unlinkat(parent_fd, metadata_tmp_leaf, 0);
+    if (fsync(parent_fd)) {
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "cannot durably publish verified cache entry: %s",
+                                 strerror(errno));
+        goto done;
+    }
+    cached_fd = -1;
+    if (artifact_cache_open(plan, artifact, &cached_fd) !=
+        ARTIFACT_CACHE_VALID) {
+        if (cached_fd >= 0) close(cached_fd);
+        untrusted_entry_fail(
+            err, errlen, plan, artifact, artifact->destination,
+            "published entry changed before final integrity handoff");
+        goto done;
+    }
+    close(cached_fd);
     artifact->cache_hit = false;
     ok = true;
 
 done:
     flock(lock_fd, LOCK_UN);
     close(lock_fd);
+    close(parent_fd);
     return ok;
+}
+
+bool ds4_hf_acquisition_open_verified(
+    const ds4_hf_acquisition_plan *plan,
+    size_t artifact_index,
+    int *fd_out,
+    char *err,
+    size_t errlen) {
+    if (fd_out) *fd_out = -1;
+    if (!plan || !fd_out || !acquisition_plan_valid(plan)) {
+        return fail(err, errlen,
+                    "HF verified open rejected an invalid or manifest-mutated sealed plan");
+    }
+    if (artifact_index >= plan->artifact_count ||
+        !plan->artifacts[artifact_index].requested) {
+        return fail(err, errlen,
+                    "HF verified open requires a requested artifact role from the sealed plan");
+    }
+    const ds4_hf_acquisition_artifact *artifact =
+        &plan->artifacts[artifact_index];
+    artifact_cache_state state = artifact_cache_open(plan, artifact, fd_out);
+    if (state == ARTIFACT_CACHE_VALID) return true;
+    if (state == ARTIFACT_CACHE_MISSING) {
+        return acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "verified cache artifact is missing; no same-directory fallback is permitted");
+    }
+    return untrusted_entry_fail(
+        err, errlen, plan, artifact, artifact->destination,
+        "cache entry fails manifest role, byte-count, SHA-256, sidecar, or stable-path verification; no same-directory fallback is permitted");
 }
 
 bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
@@ -2509,9 +3175,9 @@ bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
                                 long timeout_ms,
                                 char *err,
                                 size_t errlen) {
-    if (!cfg || !plan || !plan->artifact_count) {
-        return acquisition_context_fail(err, errlen, plan, NULL,
-                                        "invalid acquisition request");
+    if (!cfg || !plan || !acquisition_plan_valid(plan)) {
+        return fail(err, errlen,
+                    "HF acquisition rejected an invalid or manifest-mutated sealed plan");
     }
     ds4_hf_acquisition_artifact *first = NULL;
     for (size_t i = 0; i < plan->artifact_count; i++) {

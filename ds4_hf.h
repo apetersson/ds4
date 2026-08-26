@@ -112,6 +112,18 @@ typedef struct {
     ds4_hf_manifest_artifact config;
 } ds4_hf_manifest_vision_bundle;
 
+/* Independently computed digests of canonical name/shape/BF16 tensor streams.
+ * These are intentionally distinct from artifact file hashes: equal values
+ * attest lossless tensor identity across the raw DS4 and GGUF representations
+ * without trusting filenames, directory locality, or shared LFS objects. */
+typedef struct {
+    char canonicalization[DS4_HF_METADATA_MAX];
+    char source_tower_sha256[DS4_HF_SHA256_HEX_SIZE];
+    char source_projector_sha256[DS4_HF_SHA256_HEX_SIZE];
+    char mmproj_tower_sha256[DS4_HF_SHA256_HEX_SIZE];
+    char mmproj_projector_sha256[DS4_HF_SHA256_HEX_SIZE];
+} ds4_hf_manifest_bf16_identity;
+
 typedef struct {
     char selector[DS4_HF_SELECTOR_MAX];
     char directory[DS4_HF_PATH_MAX];
@@ -119,6 +131,7 @@ typedef struct {
     ds4_hf_manifest_artifact receiver;
     ds4_hf_manifest_vision_bundle ds4_vision;
     ds4_hf_manifest_artifact llama_cpp_mmproj;
+    ds4_hf_manifest_bf16_identity bf16_tensor_identity;
     bool has_dspark;
     ds4_hf_manifest_artifact dspark;
 } ds4_hf_manifest_variant;
@@ -300,6 +313,7 @@ typedef struct {
     char revision[DS4_HF_COMMIT_SHA_LEN + 1];
     char selector[DS4_HF_SELECTOR_MAX];
     char cache_root[DS4_HF_CACHE_PATH_MAX];
+    char integrity_seal[DS4_HF_SHA256_HEX_SIZE];
     size_t artifact_count;
     ds4_hf_acquisition_artifact artifacts[DS4_HF_ACQUISITION_MAX_ARTIFACTS];
 } ds4_hf_acquisition_plan;
@@ -318,13 +332,26 @@ bool ds4_hf_acquisition_plan_build(
 
 /* Acquire requested plan entries through libcurl. Transfers follow HTTP(S)
  * redirects used by HF LFS/Xet, resume private .part files under a process
- * lock, and publish only exact-size files with an immutable identity sidecar.
- * timeout_ms <= 0 leaves the full-transfer timeout unlimited. */
+ * lock, and publish only exact-size, manifest-SHA-256-verified files with an
+ * immutable role sidecar. Cache hits are fully rehashed. timeout_ms <= 0
+ * leaves the full-transfer timeout unlimited. */
 bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
                                 ds4_hf_acquisition_plan *plan,
                                 long timeout_ms,
                                 char *err,
                                 size_t errlen);
+
+/* Open one requested cache artifact without following symlinks and return a
+ * descriptor only after its sealed plan identity, role sidecar, byte count,
+ * SHA-256, and stable directory entry all match. The caller owns *fd_out and
+ * must keep it open until loading/mapping is complete so path replacement
+ * cannot cross the verification-to-use boundary. */
+bool ds4_hf_acquisition_open_verified(
+    const ds4_hf_acquisition_plan *plan,
+    size_t artifact_index,
+    int *fd_out,
+    char *err,
+    size_t errlen);
 
 const char *ds4_hf_artifact_role_name(ds4_hf_artifact_role role);
 

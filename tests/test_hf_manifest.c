@@ -116,6 +116,18 @@ static void test_production_fixture(const char *json, size_t json_len) {
           quality && !quality->is_default && quality->has_dspark &&
           !strcmp(quality->receiver.profile, "Quality128") &&
           !strcmp(quality->dspark.precision, "Q8_0"));
+    CHECK("raw and mmproj BF16 tensor identities are independently retained",
+          headroom &&
+          !strcmp(headroom->bf16_tensor_identity.canonicalization,
+                  "named-tensor-name-shape-bf16le-v1") &&
+          !strcmp(headroom->bf16_tensor_identity.source_tower_sha256,
+                  "9999999999999999999999999999999999999999999999999999999999999999") &&
+          !strcmp(headroom->bf16_tensor_identity.mmproj_tower_sha256,
+                  headroom->bf16_tensor_identity.source_tower_sha256) &&
+          !strcmp(headroom->bf16_tensor_identity.mmproj_projector_sha256,
+                  headroom->bf16_tensor_identity.source_projector_sha256) &&
+          strcmp(headroom->bf16_tensor_identity.source_tower_sha256,
+                 headroom->ds4_vision.tower.sha256));
 
     CHECK("shared DeepEncoderV2 metadata is exact",
           manifest.shared_vision.image_token_id == 129279 &&
@@ -333,6 +345,16 @@ static void test_schema_rejections(const char *json) {
     expect_rejected("missing llama.cpp companion bundles are rejected", json,
                     "\"llama_cpp_mmproj\": {", "\"future_mmproj\": {",
                     "variant is missing");
+    expect_rejected("missing independent BF16 identity record is rejected", json,
+                    "\"bf16_tensor_identity\": {",
+                    "\"future_bf16_tensor_identity\": {", "variant is missing");
+    expect_rejected("raw-to-mmproj tower tensor mismatch is rejected", json,
+                    "\"tower_sha256\": \"9999999999999999999999999999999999999999999999999999999999999999\"",
+                    "\"tower_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"",
+                    "BF16 tensor identities differ");
+    expect_rejected("unsafe tensor canonicalization cannot redefine identity", json,
+                    "named-tensor-name-shape-bf16le-v1",
+                    "filename-only-v1", "identity contract is missing or malformed");
     expect_rejected("mismatched runtime declarations are rejected", json,
                     "\"llama_cpp\": {\"minimum_revision\": \"deepseek4-main-v1\"}",
                     "\"future_runtime\": {\"minimum_revision\": \"deepseek4-main-v1\"}",

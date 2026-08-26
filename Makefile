@@ -63,7 +63,7 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+.PHONY: all help clean test test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
@@ -489,6 +489,9 @@ tests/test_hf_cache_probe: tests/test_hf_cache_probe.c ds4_hf.c ds4_hf.h
 test-hf-cache: tests/test_hf_cache_probe
 	python3 tests/test_hf_cache.py
 
+test-hf-integrity: tests/test_hf_cache_probe
+	python3 tests/test_hf_integrity.py
+
 tests/test_hf_manifest: tests/test_hf_manifest.c ds4_hf.c ds4_hf.h tests/fixtures/hf/variants-v2.json
 	$(CC) $(CFLAGS) -I. -o $@ tests/test_hf_manifest.c ds4_hf.c -lcurl
 
@@ -520,6 +523,7 @@ test: ds4_test ds4_agent_test ds4-eval q4k-dot-test mxfp4-dot-test \
 	./tests/test_hf_cli.sh
 	python3 tests/test_hf_transport.py
 	python3 tests/test_hf_cache.py
+	python3 tests/test_hf_integrity.py
 	./tests/test_gpu_args_cli.sh
 	./tests/test_sampling
 
