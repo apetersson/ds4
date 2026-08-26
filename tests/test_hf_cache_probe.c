@@ -114,6 +114,12 @@ int main(int argc, char **argv) {
             "Headroom128/H-sha256-multiblock.gguf", UINT64_C(131073),
             "357154df0673730b1e63e65bfc71f15c43d85bd1761a14e572eef18dbdb6e89e");
     }
+    if (has_mode(argv[4], "uppercase-hash")) {
+        snprintf(
+            manifest.variants[0].receiver.sha256,
+            sizeof(manifest.variants[0].receiver.sha256), "%s",
+            "B606599A2A7EF50BC2E1F9A9573B116D1D3DFF5F0992D907DAAD405F0AE98E84");
+    }
 
     ds4_hf_acquisition_plan plan;
     char err[2048] = {0};

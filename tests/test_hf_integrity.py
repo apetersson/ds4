@@ -69,7 +69,8 @@ class IntegrityTests(unittest.TestCase):
         combined = result.stdout + result.stderr
         self.assertEqual(result.returncode, 2, combined)
         self.assertIn("no same-directory fallback is permitted", combined)
-        self.assertIn("non-destructive recovery command: mv --", combined)
+        self.assertIn("non-destructive recovery command:", combined)
+        self.assertIn("mv --", combined)
         self.assertNotIn("rm --", combined)
         destination = self.plan(result, "receiver")["destination"]
         self.assertEqual(destination.read_bytes(), original_bytes)
@@ -102,11 +103,21 @@ class IntegrityTests(unittest.TestCase):
             self.assertEqual(receiver["destination"].read_bytes(),
                              payload_for(receiver["repo_path"]))
 
+    def test_uppercase_manifest_hash_verifies_valid_artifact(self):
+        with tempfile.TemporaryDirectory() as cache:
+            result = self.run_probe(cache, modes="text,uppercase-hash")
+            self.assert_ok(result)
+            receiver = self.plan(result, "receiver")
+            self.assertEqual(receiver["destination"].read_bytes(),
+                             payload_for(receiver["repo_path"]))
+
     def test_truncated_cache_fails_closed_and_is_preserved(self):
         with tempfile.TemporaryDirectory() as cache:
             valid = self.run_probe(cache)
             self.assert_ok(valid)
             destination = self.plan(valid, "receiver")["destination"]
+            metadata = Path(str(destination) + ".ds4-meta")
+            original_metadata = metadata.read_bytes()
             truncated = payload_for("Headroom128/H-receiver.gguf")[:-1]
             replacement = destination.with_name(destination.name + ".replacement")
             replacement.write_bytes(truncated)
@@ -115,6 +126,37 @@ class IntegrityTests(unittest.TestCase):
             failed = self.run_probe(cache, modes="text,offline")
             self.assert_integrity_failure(failed, truncated)
             self.assertEqual(FakeArtifactHub.requests, before)
+            marker = "non-destructive recovery command: "
+            command = (failed.stdout + failed.stderr).split(marker, 1)[1].splitlines()[0]
+            prior_quarantine = destination.with_name(
+                destination.name + ".untrusted.PRIOR")
+            prior_quarantine.mkdir()
+            (prior_quarantine / "evidence").write_bytes(b"prior evidence")
+            recovered = subprocess.run(
+                ["/bin/sh", "-c", command], cwd=ROOT, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+            self.assertEqual(recovered.returncode, 0,
+                             recovered.stdout + recovered.stderr)
+            self.assertFalse(destination.exists())
+            self.assertFalse(metadata.exists())
+            quarantines = [
+                path for path in destination.parent.glob(
+                    destination.name + ".untrusted.*")
+                if path != prior_quarantine
+            ]
+            self.assertEqual(len(quarantines), 1)
+            self.assertEqual((quarantines[0] / destination.name).read_bytes(),
+                             truncated)
+            self.assertEqual(
+                (quarantines[0] / metadata.name).read_bytes(), original_metadata)
+            self.assertEqual((prior_quarantine / "evidence").read_bytes(),
+                             b"prior evidence")
+            reacquired = self.run_probe(cache)
+            self.assert_ok(reacquired)
+            self.assertEqual(destination.read_bytes(),
+                             payload_for("Headroom128/H-receiver.gguf"))
+            self.assertEqual((quarantines[0] / destination.name).read_bytes(),
+                             truncated)
 
     def test_same_size_corruption_never_uses_same_directory_decoy(self):
         with tempfile.TemporaryDirectory() as cache:
@@ -236,7 +278,8 @@ class IntegrityTests(unittest.TestCase):
             self.assertEqual(process.returncode, 0, output)
             self.assertIn(f"held_first_byte={ord('H')}", output)
             self.assertIn("replacement=rejected", output)
-            self.assertIn("non-destructive recovery command: mv --", output)
+            self.assertIn("non-destructive recovery command:", output)
+            self.assertIn("mv --", output)
             self.assertEqual(destination.read_bytes(), b"R" * 19)
 
     def test_resolver_has_no_repository_code_execution_primitive(self):

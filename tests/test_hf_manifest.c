@@ -434,6 +434,47 @@ static void test_non_executable_boundary(const char *json) {
     }
 }
 
+static void test_sha256_text_canonicalization(const char *json) {
+    static const char upper_artifact[] =
+        "ABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCDEFABCD";
+    static const char lower_artifact[] =
+        "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+    size_t size = 0;
+    char *mutated = replace_once(
+        json,
+        "1111111111111111111111111111111111111111111111111111111111111111",
+        upper_artifact, &size);
+    ds4_hf_manifest manifest;
+    char err[512] = {0};
+    bool ok = mutated && ds4_hf_manifest_parse(mutated, size, &manifest,
+                                                err, sizeof(err));
+    const ds4_hf_manifest_variant *headroom = ok ?
+        ds4_hf_manifest_find_variant(&manifest, "Headroom128-IQ2_XXS") : NULL;
+    CHECK("uppercase artifact SHA-256 is accepted and canonicalized",
+          headroom && !strcmp(headroom->receiver.sha256, lower_artifact));
+    if (mutated && !ok) fprintf(stderr, "  diagnostic: %s\n", err);
+    free(mutated);
+
+    mutated = replace_once(
+        json,
+        "\"projector_sha256\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+        "\"projector_sha256\": \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"",
+        &size);
+    memset(err, 0, sizeof(err));
+    ok = mutated && ds4_hf_manifest_parse(mutated, size, &manifest,
+                                          err, sizeof(err));
+    headroom = ok ? ds4_hf_manifest_find_variant(
+                        &manifest, "Headroom128-IQ2_XXS") : NULL;
+    CHECK("mixed-case raw/mmproj BF16 identities compare canonically",
+          headroom &&
+          !strcmp(headroom->bf16_tensor_identity.source_projector_sha256,
+                  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") &&
+          !strcmp(headroom->bf16_tensor_identity.source_projector_sha256,
+                  headroom->bf16_tensor_identity.mmproj_projector_sha256));
+    if (mutated && !ok) fprintf(stderr, "  diagnostic: %s\n", err);
+    free(mutated);
+}
+
 static void test_resource_limits(void) {
     ds4_hf_manifest manifest;
     char err[512] = {0};
@@ -487,6 +528,7 @@ int main(void) {
     test_llama_metadata_without_manifest();
     test_schema_rejections(json);
     test_non_executable_boundary(json);
+    test_sha256_text_canonicalization(json);
     test_resource_limits();
     test_floor_proportional_crops();
 

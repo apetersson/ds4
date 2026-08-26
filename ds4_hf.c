@@ -355,6 +355,12 @@ static int manifest_hex_digit(char c) {
     return -1;
 }
 
+static void sha256_text_lower(char hash[DS4_HF_SHA256_HEX_SIZE]) {
+    for (size_t i = 0; i < DS4_HF_SHA256_HEX_SIZE && hash[i]; i++) {
+        hash[i] = (char)tolower((unsigned char)hash[i]);
+    }
+}
+
 static bool manifest_json_u16(manifest_json_parser *jp, uint32_t *out) {
     if ((size_t)(jp->end - jp->p) < 4) return json_fail(jp, "truncated Unicode escape");
     uint32_t value = 0;
@@ -818,6 +824,7 @@ static bool manifest_parse_artifact(manifest_json_parser *jp,
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
     if ((seen & 127u) != 127u) return json_fail(jp, "artifact record is missing a required field");
+    sha256_text_lower(artifact->sha256);
     return true;
 }
 
@@ -1100,6 +1107,8 @@ static bool manifest_parse_bf16_identity_hashes(
     if (seen != 3) {
         return json_fail(jp, "BF16 tensor identity side is incomplete");
     }
+    sha256_text_lower(tower);
+    sha256_text_lower(projector);
     return true;
 }
 
@@ -2344,6 +2353,7 @@ static bool plan_add_artifact(ds4_hf_acquisition_plan *plan,
                      source->path) ||
         !copy_string(artifact->sha256, sizeof(artifact->sha256),
                      source->sha256)) return false;
+    sha256_text_lower(artifact->sha256);
 
     char snapshot_suffix[DS4_HF_CACHE_PATH_MAX];
     char snapshot[DS4_HF_CACHE_PATH_MAX];
@@ -2876,25 +2886,45 @@ static bool shell_quote(const char *value, char *output, size_t output_len) {
 static bool untrusted_entry_fail(
     char *err, size_t errlen, const ds4_hf_acquisition_plan *plan,
     const ds4_hf_acquisition_artifact *artifact, const char *path,
-    const char *reason) {
+    bool complete_cache_entry, const char *reason) {
     char quoted[DS4_HF_CACHE_PATH_MAX * 4 + 3];
-    char quarantine_path[DS4_HF_CACHE_PATH_MAX + 32];
-    char quoted_quarantine[(DS4_HF_CACHE_PATH_MAX + 32) * 4 + 3];
-    int written = snprintf(quarantine_path, sizeof(quarantine_path),
-                           "%s.untrusted", path);
-    if (written <= 0 || (size_t)written >= sizeof(quarantine_path) ||
+    char metadata_path[DS4_HF_CACHE_PATH_MAX + 16];
+    char quoted_metadata[(DS4_HF_CACHE_PATH_MAX + 16) * 4 + 3];
+    char quarantine_template[DS4_HF_CACHE_PATH_MAX + 32];
+    char quoted_template[(DS4_HF_CACHE_PATH_MAX + 32) * 4 + 3];
+    int metadata_written = snprintf(metadata_path, sizeof(metadata_path),
+                                    "%s.ds4-meta", path);
+    int template_written = snprintf(quarantine_template,
+                                    sizeof(quarantine_template),
+                                    "%s.untrusted.XXXXXX", path);
+    if (metadata_written <= 0 ||
+        (size_t)metadata_written >= sizeof(metadata_path) ||
+        template_written <= 0 ||
+        (size_t)template_written >= sizeof(quarantine_template) ||
         !shell_quote(path, quoted, sizeof(quoted)) ||
-        !shell_quote(quarantine_path, quoted_quarantine,
-                     sizeof(quoted_quarantine))) {
+        !shell_quote(metadata_path, quoted_metadata,
+                     sizeof(quoted_metadata)) ||
+        !shell_quote(quarantine_template, quoted_template,
+                     sizeof(quoted_template))) {
         return acquisition_context_fail(
             err, errlen, plan, artifact,
             "%s; move the untrusted entry aside without deleting it and retry",
             reason);
     }
+    if (!complete_cache_entry) {
+        return acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "%s; non-destructive recovery command: "
+            "q=$(mktemp -d %s) && mv -- %s \"$q/\"",
+            reason, quoted_template, quoted);
+    }
     return acquisition_context_fail(
         err, errlen, plan, artifact,
-        "%s; non-destructive recovery command: mv -- %s %s",
-        reason, quoted, quoted_quarantine);
+        "%s; non-destructive recovery command: "
+        "q=$(mktemp -d %s) && for p in %s %s; do "
+        "if [ -e \"$p\" ] || [ -L \"$p\" ]; then "
+        "mv -- \"$p\" \"$q/\" || exit; fi; done",
+        reason, quoted_template, quoted, quoted_metadata);
 }
 
 static bool acquisition_plan_valid(const ds4_hf_acquisition_plan *plan) {
@@ -2960,7 +2990,7 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
     }
     if (cache_state == ARTIFACT_CACHE_INVALID) {
         untrusted_entry_fail(
-            err, errlen, plan, artifact, artifact->destination,
+            err, errlen, plan, artifact, artifact->destination, true,
             "cache entry fails manifest role, byte-count, SHA-256, sidecar, or stable-path verification; no same-directory fallback is permitted");
         goto done;
     }
@@ -2986,7 +3016,7 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
             snprintf(part_path, sizeof(part_path), "%s.part",
                      artifact->destination);
             untrusted_entry_fail(
-                err, errlen, plan, artifact, part_path,
+                err, errlen, plan, artifact, part_path, false,
                 "resume entry is a symlink, special/hard-linked file, or has an impossible size");
             goto done;
         }
@@ -3046,7 +3076,7 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
         snprintf(part_path, sizeof(part_path), "%s.part",
                  artifact->destination);
         untrusted_entry_fail(
-            err, errlen, plan, artifact, part_path,
+            err, errlen, plan, artifact, part_path, false,
             "downloaded bytes fail manifest SHA-256 or stable-path verification");
         goto done;
     }
@@ -3125,7 +3155,7 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
         ARTIFACT_CACHE_VALID) {
         if (cached_fd >= 0) close(cached_fd);
         untrusted_entry_fail(
-            err, errlen, plan, artifact, artifact->destination,
+            err, errlen, plan, artifact, artifact->destination, true,
             "published entry changed before final integrity handoff");
         goto done;
     }
@@ -3166,7 +3196,7 @@ bool ds4_hf_acquisition_open_verified(
             "verified cache artifact is missing; no same-directory fallback is permitted");
     }
     return untrusted_entry_fail(
-        err, errlen, plan, artifact, artifact->destination,
+        err, errlen, plan, artifact, artifact->destination, true,
         "cache entry fails manifest role, byte-count, SHA-256, sidecar, or stable-path verification; no same-directory fallback is permitted");
 }
 
