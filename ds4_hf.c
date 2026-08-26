@@ -1025,7 +1025,7 @@ static bool manifest_validate_shared_vision(manifest_json_parser *jp,
     }
     if (vision->tile_limit != 4 || vision->tile_threshold_pixels != 1536 ||
         !vision->global_view_first || strcmp(vision->color_space, "RGB") ||
-        strcmp(vision->crop_boundaries, "integer") ||
+        strcmp(vision->crop_boundaries, "floor-proportional-v1") ||
         strcmp(vision->crop_order, "row-major") ||
         strcmp(vision->grid_selection, "closest-aspect-ratio") ||
         strcmp(vision->grid_tie_break, "more-tiles") ||
@@ -1104,6 +1104,21 @@ static const char *manifest_basename(const char *path) {
     return slash ? slash + 1 : path;
 }
 
+bool ds4_hf_llama_primary_selectable(const char *selector,
+                                     const char *receiver_path) {
+    if (!selector || !selector[0] || !receiver_path) return false;
+    const char *filename = manifest_basename(receiver_path);
+    size_t selector_len = strlen(selector);
+    for (const char *candidate = filename; *candidate; candidate++) {
+        size_t i = 0;
+        while (i < selector_len && candidate[i] &&
+               tolower((unsigned char)candidate[i]) ==
+                   tolower((unsigned char)selector[i])) i++;
+        if (i == selector_len && (candidate[i] == '.' || candidate[i] == '-')) return true;
+    }
+    return false;
+}
+
 static bool manifest_path_parent_equal(const char *left, const char *right) {
     const char *left_slash = strrchr(left, '/');
     const char *right_slash = strrchr(right, '/');
@@ -1169,7 +1184,7 @@ bool ds4_hf_llama_gguf_metadata_valid(
         metadata->mmproj_tile_threshold_pixels != 1536 ||
         !metadata->mmproj_global_view_first || !metadata->mmproj_separator_last ||
         strcmp(metadata->mmproj_color_space, "RGB") ||
-        strcmp(metadata->mmproj_crop_boundaries, "integer") ||
+        strcmp(metadata->mmproj_crop_boundaries, "floor-proportional-v1") ||
         strcmp(metadata->mmproj_crop_order, "row-major") ||
         strcmp(metadata->mmproj_grid_selection, "closest-aspect-ratio") ||
         strcmp(metadata->mmproj_grid_tie_break, "more-tiles") ||
@@ -1189,7 +1204,8 @@ bool ds4_hf_llama_gguf_metadata_valid(
 
 static bool manifest_validate_variant(manifest_json_parser *jp,
                                       const ds4_hf_manifest_variant *variant) {
-    if (!manifest_safe_atom(variant->selector) || !manifest_safe_path(variant->directory)) {
+    if (!manifest_safe_atom(variant->selector) || strchr(variant->selector, '+') ||
+        !manifest_safe_path(variant->directory)) {
         return json_fail(jp, "variant selector or directory is unsafe");
     }
     if (!manifest_validate_artifact(jp, &variant->receiver, ARTIFACT_RECEIVER) ||
@@ -1215,6 +1231,12 @@ static bool manifest_validate_variant(manifest_json_parser *jp,
     }
     if (variant->has_dspark && !manifest_same_directory(variant->directory, variant->dspark.path)) {
         return json_fail(jp, "variant '%s' DSpark artifact is outside its sibling directory", variant->selector);
+    }
+    if (!ds4_hf_llama_primary_selectable(variant->selector,
+                                         variant->receiver.path)) {
+        return json_fail(jp,
+                         "variant '%s' selector cannot select its primary GGUF under llama.cpp tag rules",
+                         variant->selector);
     }
     char sibling_error[256];
     if (!ds4_hf_llama_siblings_valid(variant->receiver.path,
@@ -1300,12 +1322,12 @@ bool ds4_hf_manifest_parse(const char *json,
     size_t defaults = 0;
     for (size_t i = 0; i < manifest->variant_count; i++) {
         ds4_hf_manifest_variant *variant = &manifest->variants[i];
-        if (!manifest_validate_variant(&jp, variant)) return false;
         for (size_t j = 0; j < i; j++) {
             if (ds4_hf_selector_equal(variant->selector, manifest->variants[j].selector)) {
                 return json_fail(&jp, "duplicate selector '%s'", variant->selector);
             }
         }
+        if (!manifest_validate_variant(&jp, variant)) return false;
         if (variant->is_default) {
             defaults++;
             if (!ds4_hf_selector_equal(variant->selector, manifest->default_selector)) {
@@ -1338,4 +1360,15 @@ bool ds4_hf_manifest_visual_rows_valid(const ds4_hf_manifest *manifest,
     uint32_t views = payload / manifest->shared_vision.tokens_per_view;
     return views >= manifest->shared_vision.minimum_views &&
            views <= manifest->shared_vision.maximum_views;
+}
+
+bool ds4_hf_manifest_crop_bounds(uint32_t extent,
+                                 uint32_t parts,
+                                 uint32_t index,
+                                 uint32_t *start,
+                                 uint32_t *end) {
+    if (!extent || !parts || index >= parts || !start || !end) return false;
+    *start = (uint32_t)(((uint64_t)index * extent) / parts);
+    *end = (uint32_t)(((uint64_t)(index + 1u) * extent) / parts);
+    return true;
 }

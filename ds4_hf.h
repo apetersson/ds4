@@ -228,6 +228,14 @@ const ds4_hf_manifest_variant *ds4_hf_manifest_find_variant(
 bool ds4_hf_manifest_visual_rows_valid(
     const ds4_hf_manifest *manifest, uint32_t rows);
 
+/* Reference crop boundary: [index*extent/parts, (index+1)*extent/parts),
+ * evaluated with integer floor division and widened intermediates. */
+bool ds4_hf_manifest_crop_bounds(uint32_t extent,
+                                 uint32_t parts,
+                                 uint32_t index,
+                                 uint32_t *start,
+                                 uint32_t *end);
+
 /* Validate llama.cpp's data-independent companion naming contract. This does
  * not inspect or trust variants.json: callers provide discovered sibling paths. */
 bool ds4_hf_llama_siblings_valid(const char *receiver_path,
@@ -235,6 +243,11 @@ bool ds4_hf_llama_siblings_valid(const char *receiver_path,
                                  const char *dspark_path,
                                  char *err,
                                  size_t errlen);
+
+/* Match llama.cpp's case-insensitive tagged-primary rule for safe literal
+ * selectors: the primary basename must contain selector followed by '.'/'-'. */
+bool ds4_hf_llama_primary_selectable(const char *selector,
+                                     const char *receiver_path);
 
 /* Validate metadata summaries extracted from discovered GGUFs. This performs
  * no file loading and has no dependency on variants.json. */

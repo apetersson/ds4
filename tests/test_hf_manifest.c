@@ -115,7 +115,7 @@ static void test_production_fixture(const char *json, size_t json_len) {
           !strcmp(manifest.shared_vision.token_formula, "views*256+1") &&
           manifest.shared_vision.global_view_first &&
           !strcmp(manifest.shared_vision.color_space, "RGB") &&
-          !strcmp(manifest.shared_vision.crop_boundaries, "integer") &&
+          !strcmp(manifest.shared_vision.crop_boundaries, "floor-proportional-v1") &&
           !strcmp(manifest.shared_vision.crop_order, "row-major") &&
           !strcmp(manifest.shared_vision.grid_selection, "closest-aspect-ratio") &&
           !strcmp(manifest.shared_vision.grid_tie_break, "more-tiles") &&
@@ -139,6 +139,10 @@ static void test_llama_discovery_without_manifest(void) {
               "Headroom128-IQ2_XXS/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf",
               "Headroom128-IQ2_XXS/dspark-DeepSeek-V4-Flash-0731-Headroom128-Q8_0.gguf",
               err, sizeof(err)));
+    CHECK("Headroom128 selector independently selects its primary filename",
+          ds4_hf_llama_primary_selectable(
+              "headroom128-iq2_xxs",
+              "Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf"));
     memset(err, 0, sizeof(err));
     CHECK("Quality128 satisfies llama.cpp sibling discovery without manifest data",
           ds4_hf_llama_siblings_valid(
@@ -146,12 +150,19 @@ static void test_llama_discovery_without_manifest(void) {
               "Quality128-IQ2_XXS_XL/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf",
               "Quality128-IQ2_XXS_XL/dspark-DeepSeek-V4-Flash-0731-Quality128-Q8_0.gguf",
               err, sizeof(err)));
-    CHECK("nested repository directories remain valid sibling locations",
+    CHECK("Quality128 selector independently selects its primary filename",
+          ds4_hf_llama_primary_selectable(
+              "QUALITY128-IQ2_XXS_XL",
+              "Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf"));
+    CHECK("nested repository directories remain valid sibling locality",
           ds4_hf_llama_siblings_valid(
               "catalog/Headroom128/main.gguf",
               "catalog/Headroom128/mmproj-vision.gguf",
               "catalog/Headroom128/dspark-support.gguf",
               err, sizeof(err)));
+    CHECK("directory-only selector does not falsely prove primary selection",
+          !ds4_hf_llama_primary_selectable(
+              "Headroom128", "catalog/Headroom128/main.gguf"));
     CHECK("llama.cpp discovery rejects cross-directory mmproj decoy",
           !ds4_hf_llama_siblings_valid(
               "Headroom128-IQ2_XXS/main.gguf",
@@ -189,7 +200,7 @@ static void init_llama_metadata_fixture(ds4_hf_llama_gguf_metadata *metadata) {
     metadata->mmproj_global_view_first = true;
     metadata->mmproj_separator_last = true;
     strcpy(metadata->mmproj_color_space, "RGB");
-    strcpy(metadata->mmproj_crop_boundaries, "integer");
+    strcpy(metadata->mmproj_crop_boundaries, "floor-proportional-v1");
     strcpy(metadata->mmproj_crop_order, "row-major");
     strcpy(metadata->mmproj_grid_selection, "closest-aspect-ratio");
     strcpy(metadata->mmproj_grid_tie_break, "more-tiles");
@@ -290,9 +301,9 @@ static void test_schema_rejections(const char *json) {
     expect_rejected("RGB preprocessing contract mismatch is rejected", json,
                     "\"color_space\": \"RGB\"", "\"color_space\": \"BGR\"",
                     "preprocessing contract is incompatible");
-    expect_rejected("fractional crop-boundary contract is rejected", json,
+    expect_rejected("weaker integer-only crop-boundary contract is rejected", json,
+                    "\"crop_boundaries\": \"floor-proportional-v1\"",
                     "\"crop_boundaries\": \"integer\"",
-                    "\"crop_boundaries\": \"fractional\"",
                     "preprocessing contract is incompatible");
     expect_rejected("wrong aspect-grid selection is rejected", json,
                     "\"grid_selection\": \"closest-aspect-ratio\"",
@@ -306,6 +317,10 @@ static void test_schema_rejections(const char *json) {
                     "\"separator_placement\": \"last\"",
                     "\"separator_placement\": \"first\"",
                     "preprocessing contract is incompatible");
+    expect_rejected("directory-only selector cannot select primary GGUF", json,
+                    "Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf",
+                    "Headroom128-IQ2_XXS/main.gguf",
+                    "selector cannot select its primary GGUF");
 
     const char *bad_repositories[] = {
         "../repo", "owner/..", ".owner/repo", "owner/.repo",
@@ -364,6 +379,22 @@ static void test_resource_limits(void) {
           strstr(err, "nesting limit"));
 }
 
+static void test_floor_proportional_crops(void) {
+    uint32_t start = 0, end = 0;
+    CHECK("floor-proportional first crop handles non-divisible extent",
+          ds4_hf_manifest_crop_bounds(1001, 3, 0, &start, &end) &&
+          start == 0 && end == 333);
+    CHECK("floor-proportional middle crop carries the remainder deterministically",
+          ds4_hf_manifest_crop_bounds(1001, 3, 1, &start, &end) &&
+          start == 333 && end == 667);
+    CHECK("floor-proportional final crop ends at the full extent",
+          ds4_hf_manifest_crop_bounds(1001, 3, 2, &start, &end) &&
+          start == 667 && end == 1001);
+    CHECK("floor-proportional crop helper rejects invalid grids",
+          !ds4_hf_manifest_crop_bounds(1001, 0, 0, &start, &end) &&
+          !ds4_hf_manifest_crop_bounds(1001, 3, 3, &start, &end));
+}
+
 int main(void) {
     size_t json_len = 0;
     char *json = read_file("tests/fixtures/hf/variants-v2.json", &json_len);
@@ -376,6 +407,7 @@ int main(void) {
     test_schema_rejections(json);
     test_non_executable_boundary(json);
     test_resource_limits();
+    test_floor_proportional_crops();
 
     free(json);
     if (failures) {
