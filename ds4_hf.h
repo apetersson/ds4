@@ -8,6 +8,18 @@
 #define DS4_HF_REPO_MAX 256
 #define DS4_HF_SELECTOR_MAX 128
 
+/* variants.json v2 is deliberately bounded and data-only. These limits are
+ * part of the parser contract, not tunables supplied by a repository. */
+#define DS4_HF_MANIFEST_VERSION 2
+#define DS4_HF_MANIFEST_MAX_BYTES (256u * 1024u)
+#define DS4_HF_MANIFEST_MAX_DEPTH 16
+#define DS4_HF_MANIFEST_MAX_TOKENS 8192
+#define DS4_HF_MANIFEST_MAX_VARIANTS 16
+#define DS4_HF_MANIFEST_MAX_CAPABILITIES 16
+#define DS4_HF_PATH_MAX 512
+#define DS4_HF_SHA256_HEX_SIZE 65
+#define DS4_HF_METADATA_MAX 128
+
 typedef enum {
     DS4_HF_CLI_NO_MATCH,
     DS4_HF_CLI_MATCHED,
@@ -63,6 +75,78 @@ typedef struct {
     uint32_t seen;
 } ds4_hf_cli_config;
 
+typedef enum {
+    DS4_HF_CAP_DEEPSEEK4 = 1u << 0,
+    DS4_HF_CAP_TEXT_GENERATION = 1u << 1,
+    DS4_HF_CAP_DS4_VISION = 1u << 2,
+    DS4_HF_CAP_LLAMA_CPP_MMPROJ = 1u << 3,
+    DS4_HF_CAP_DSPARK = 1u << 4,
+    DS4_HF_CAP_ROUTE_TOKEN_ID = 1u << 5,
+    DS4_HF_CAP_SSD_STREAMING = 1u << 6,
+} ds4_hf_manifest_capability;
+
+typedef struct {
+    char path[DS4_HF_PATH_MAX];
+    uint64_t bytes;
+    char sha256[DS4_HF_SHA256_HEX_SIZE];
+    char precision[DS4_HF_METADATA_MAX];
+    char profile[DS4_HF_METADATA_MAX];
+    uint32_t required_capabilities;
+    uint32_t optional_capabilities;
+    bool supports_ds4;
+    bool supports_llama_cpp;
+    char ds4_minimum_revision[DS4_HF_METADATA_MAX];
+    char llama_cpp_minimum_revision[DS4_HF_METADATA_MAX];
+    char gguf_architecture[DS4_HF_METADATA_MAX];
+    char gguf_projector_type[DS4_HF_METADATA_MAX];
+} ds4_hf_manifest_artifact;
+
+typedef struct {
+    ds4_hf_manifest_artifact tower;
+    ds4_hf_manifest_artifact projector;
+    ds4_hf_manifest_artifact config;
+} ds4_hf_manifest_vision_bundle;
+
+typedef struct {
+    char selector[DS4_HF_SELECTOR_MAX];
+    char directory[DS4_HF_PATH_MAX];
+    bool is_default;
+    ds4_hf_manifest_artifact receiver;
+    ds4_hf_manifest_vision_bundle ds4_vision;
+    ds4_hf_manifest_artifact llama_cpp_mmproj;
+    bool has_dspark;
+    ds4_hf_manifest_artifact dspark;
+} ds4_hf_manifest_variant;
+
+typedef struct {
+    char image_token[DS4_HF_METADATA_MAX];
+    uint32_t image_token_id;
+    uint32_t image_size;
+    uint32_t encoder_dim;
+    uint32_t receiver_dim;
+    uint32_t tokens_per_view;
+    uint32_t separator_tokens;
+    uint32_t minimum_views;
+    uint32_t maximum_views;
+    char token_formula[DS4_HF_METADATA_MAX];
+    uint32_t tile_limit;
+    uint32_t tile_threshold_pixels;
+    bool global_view_first;
+    char crop_order[DS4_HF_METADATA_MAX];
+    char resize[DS4_HF_METADATA_MAX];
+    double mean[3];
+    double std[3];
+} ds4_hf_manifest_vision_metadata;
+
+typedef struct {
+    uint32_t schema_version;
+    char repository[DS4_HF_REPO_MAX];
+    char default_selector[DS4_HF_SELECTOR_MAX];
+    ds4_hf_manifest_vision_metadata shared_vision;
+    size_t variant_count;
+    ds4_hf_manifest_variant variants[DS4_HF_MANIFEST_MAX_VARIANTS];
+} ds4_hf_manifest;
+
 void ds4_hf_cli_init(ds4_hf_cli_config *cfg);
 
 /* Parse one shared option. Vision options are recognized only for ds4-server.
@@ -85,5 +169,28 @@ bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
                          size_t errlen);
 
 bool ds4_hf_selector_equal(const char *left, const char *right);
+
+/* Parse and validate an in-memory variants.json document. The parser performs
+ * no I/O, allocation, environment access, process launch, or runtime loading. */
+bool ds4_hf_manifest_parse(const char *json,
+                           size_t json_len,
+                           ds4_hf_manifest *manifest,
+                           char *err,
+                           size_t errlen);
+
+const ds4_hf_manifest_variant *ds4_hf_manifest_find_variant(
+    const ds4_hf_manifest *manifest, const char *selector);
+
+/* Accept exactly rows = views * 256 + 1 within the manifest's view range. */
+bool ds4_hf_manifest_visual_rows_valid(
+    const ds4_hf_manifest *manifest, uint32_t rows);
+
+/* Validate llama.cpp's data-independent companion naming contract. This does
+ * not inspect or trust variants.json: callers provide discovered sibling paths. */
+bool ds4_hf_llama_siblings_valid(const char *receiver_path,
+                                 const char *mmproj_path,
+                                 const char *dspark_path,
+                                 char *err,
+                                 size_t errlen);
 
 #endif
