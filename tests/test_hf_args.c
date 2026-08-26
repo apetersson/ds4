@@ -68,6 +68,19 @@ int main(void) {
           !ds4_hf_selector_equal("Headroom128", "Quality128"));
 
     {
+        char *argv[] = {"ds4-server", "--hf", "owner/repo",
+                        "--vision-python", "/usr/bin/python3",
+                        "--vision-encoder", "/opt/local/encoder.py"};
+        ds4_hf_cli_config cfg;
+        char err[256] = {0};
+        bool ok = parse_common(&cfg, true, 7, argv, false, false,
+                               err, sizeof(err));
+        CHECK("trusted local runtime uses exact catalog vision roles",
+              ok && cfg.vision_source == DS4_HF_VISION_CATALOG &&
+              !strcmp(cfg.vision_python, "/usr/bin/python3") &&
+              !strcmp(cfg.vision_encoder, "/opt/local/encoder.py"));
+    }
+    {
         char *argv[] = {"ds4", "-hf", "owner/repo:Q4_K_M",
                         "-hff", "nested/model-Q8_0.gguf"};
         ds4_hf_cli_config cfg;
@@ -232,7 +245,7 @@ int main(void) {
         bool ok = parse_common(&cfg, true, 5, argv, false, false,
                                err, sizeof(err));
         CHECK("partial explicit vision bundle is rejected",
-              !ok && strstr(err, "requires --vision-python") != NULL);
+              !ok && strstr(err, "requires --vision-tower and --vision-adapter") != NULL);
     }
     {
         char *argv[] = {"ds4-server", "--hf", "owner/repo", "--no-vision",

@@ -341,7 +341,7 @@ static void test_schema_rejections(const char *json) {
                     "default conflicts");
     expect_rejected("incomplete DS4 companion bundles are rejected", json,
                     "\"config\": {", "\"future_config\": {",
-                    "incomplete DS4 vision bundle");
+                    "missing exact role ds4_vision.config");
     expect_rejected("missing llama.cpp companion bundles are rejected", json,
                     "\"llama_cpp_mmproj\": {", "\"future_mmproj\": {",
                     "variant is missing");

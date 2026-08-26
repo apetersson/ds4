@@ -166,10 +166,10 @@ static void print_hf_selection(FILE *fp, const help_colors *c,
         opt(fp, c, "--no-vision",
             "Disable catalog vision discovery and downloads; serve the HF receiver as text-only.");
         opt(fp, c, "--vision-python FILE --vision-encoder FILE",
-            "Trusted local vision runtime. Supply these with --vision-tower and --vision-adapter as one complete override.");
+            "Trusted local vision runtime. With -hf these execute the verified catalog bundle; catalog data can never select either program.");
         opt(fp, c, "--vision-tower FILE --vision-adapter FILE",
             "Trusted local vision weights. A complete four-option set overrides catalog vision; partial mixing is rejected.");
-        para(fp, c, "With -hf, ds4-server plans the complete declared DS4 vision bundle by default. --no-vision disables it; a complete explicit local bundle overrides it.");
+        para(fp, c, "With -hf, ds4-server downloads and verifies the exact tower/projector/config roles by default; the trusted local runtime pair activates them. --no-vision downloads no vision roles and serves text-only; a complete explicit local bundle overrides catalog roles.");
     }
 }
 

@@ -167,7 +167,9 @@ class RuntimeWiringTests(unittest.TestCase):
             data = payloads[artifact["path"]]
             artifact["bytes"] = len(data)
             artifact["sha256"] = sha256(data)
-        RuntimeHubHandler.payloads = payloads
+        cls.good_payloads = payloads
+        cls.good_manifest = manifest
+        RuntimeHubHandler.payloads = dict(payloads)
         RuntimeHubHandler.manifest = json.dumps(manifest).encode("utf-8")
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), RuntimeHubHandler)
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -182,10 +184,16 @@ class RuntimeWiringTests(unittest.TestCase):
 
     def setUp(self):
         RuntimeHubHandler.requests = []
+        RuntimeHubHandler.payloads = dict(self.good_payloads)
+        RuntimeHubHandler.manifest = json.dumps(self.good_manifest).encode("utf-8")
         self.cache = tempfile.TemporaryDirectory()
 
     def tearDown(self):
         self.cache.cleanup()
+
+    def reset_cache(self):
+        self.cache.cleanup()
+        self.cache = tempfile.TemporaryDirectory()
 
     def run_probe(self, mode):
         env = os.environ.copy()
@@ -216,6 +224,16 @@ class RuntimeWiringTests(unittest.TestCase):
         values = dict(line.split("=", 1) for line in lines if "=" in line)
         return values, requests_at_ready
 
+    def run_probe_failure(self, mode):
+        env = os.environ.copy()
+        for name in ("HF_TOKEN", "HF_TOKEN_PATH", "HF_HOME", "XDG_CACHE_HOME"):
+            env.pop(name, None)
+        return subprocess.run(
+            [str(PROBE), self.endpoint, self.cache.name, mode],
+            cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, timeout=10, check=False,
+        )
+
     def test_cli_receiver_handoff_is_byte_identical_and_ignores_vision(self):
         values, requests = self.run_probe("cli")
         self.assertEqual(values["repository"], "owner/repo")
@@ -232,6 +250,9 @@ class RuntimeWiringTests(unittest.TestCase):
         first, requests = self.run_probe("server")
         self.assertEqual(first["receiver_equal"], "true")
         self.assertEqual(first["vision_verified"], "true")
+        self.assertEqual(first["vision_compatible"], "true")
+        self.assertEqual(first["vision_mismatch_rejected"], "true")
+        self.assertEqual(first["image_token_id"], "129279")
         self.assertEqual(
             first["verified_roles"],
             "receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config",
@@ -247,6 +268,60 @@ class RuntimeWiringTests(unittest.TestCase):
             "/api/models/owner/repo",
             f"/owner/repo/resolve/{SHA}/variants.json",
         ])
+
+    def test_no_vision_and_explicit_override_download_receiver_only(self):
+        for mode in ("no-vision", "explicit"):
+            with self.subTest(mode=mode):
+                RuntimeHubHandler.requests = []
+                values, requests = self.run_probe(mode)
+                self.assertEqual(values["vision_verified"], "false")
+                self.assertEqual(values["verified_roles"], "receiver")
+                self.assertFalse(any("DeepEncoder" in path or
+                                     "Projector" in path or
+                                     "upstream-config" in path
+                                     for path in requests))
+
+    def test_incomplete_catalog_bundle_names_exact_missing_role(self):
+        for role in ("tower", "projector", "config"):
+            with self.subTest(role=role):
+                RuntimeHubHandler.requests = []
+                manifest = json.loads(json.dumps(self.good_manifest))
+                del manifest["variants"][0]["ds4_vision"][role]
+                RuntimeHubHandler.manifest = json.dumps(manifest).encode("utf-8")
+                result = self.run_probe_failure("server")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(f"missing exact role ds4_vision.{role}", result.stderr)
+                self.assertFalse(
+                    any(path.endswith(".gguf") for path in RuntimeHubHandler.requests),
+                    "receiver was acquired before manifest role validation",
+                )
+
+    def test_missing_and_mismatched_catalog_artifacts_name_exact_role(self):
+        variant = self.good_manifest["variants"][0]
+        for role, corrupt in (
+            ("tower", b"corrupt!-tower"),
+            ("projector", b"corrupt!-projector"),
+        ):
+            artifact = variant["ds4_vision"][role]
+            with self.subTest(role=role, failure="missing"):
+                self.reset_cache()
+                RuntimeHubHandler.requests = []
+                RuntimeHubHandler.payloads = dict(self.good_payloads)
+                RuntimeHubHandler.payloads.pop(artifact["path"])
+                missing = self.run_probe_failure("server")
+                self.assertNotEqual(missing.returncode, 0)
+                self.assertIn(f"role='ds4_vision.{role}'", missing.stderr)
+
+            with self.subTest(role=role, failure="hash"):
+                self.reset_cache()
+                RuntimeHubHandler.requests = []
+                RuntimeHubHandler.payloads = dict(self.good_payloads)
+                self.assertEqual(len(corrupt), artifact["bytes"])
+                RuntimeHubHandler.payloads[artifact["path"]] = corrupt
+                mismatch = self.run_probe_failure("server")
+                self.assertNotEqual(mismatch.returncode, 0)
+                self.assertIn(f"role='ds4_vision.{role}'", mismatch.stderr)
+                self.assertIn("SHA-256", mismatch.stderr)
 
     def test_hf_and_local_model_paths_produce_identical_deterministic_output(self):
         env = os.environ.copy()
@@ -295,7 +370,7 @@ class RuntimeWiringTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0, output)
         self.assertIn("repository='owner/repo'", output)
         self.assertIn(f"revision='{SHA}'", output)
-        self.assertIn("verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=inactive", output)
+        self.assertIn("verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=verified-pending-receiver", output)
         self.assertIn("dspark=not-requested", output)
         self.assertIn("required tensor is missing: token_embd.weight", output)
 

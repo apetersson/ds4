@@ -329,6 +329,7 @@ typedef struct {
     char open_paths[DS4_HF_ACQUISITION_MAX_ARTIFACTS][64];
     bool repository;
     bool vision_bundle_verified;
+    ds4_hf_manifest_vision_metadata vision_metadata;
 } ds4_hf_runtime;
 
 /* Select one manifest variant and derive revision-pinned cache destinations.
@@ -384,6 +385,13 @@ void ds4_hf_runtime_close_verified(ds4_hf_runtime *runtime);
 
 bool ds4_hf_runtime_role_verified(const ds4_hf_runtime *runtime,
                                   ds4_hf_artifact_role role);
+
+/* Validate the manifest-selected, hash-verified DS4 vision bundle against the
+ * receiver's actual image-token lookup before image requests are enabled. */
+bool ds4_hf_runtime_vision_compatible(const ds4_hf_runtime *runtime,
+                                      uint32_t receiver_image_token_id,
+                                      char *err,
+                                      size_t errlen);
 
 const char *ds4_hf_artifact_role_name(ds4_hf_artifact_role role);
 

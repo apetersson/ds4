@@ -27714,7 +27714,8 @@ static bool metal_graph_upload_prompt_embeddings_hc_cpu(
         const ds4_weights  *weights,
         const token_vec    *prompt,
         uint32_t            pos0,
-        uint32_t            n_tokens) {
+        uint32_t            n_tokens,
+        const ds4_embedding_span *embedding_span) {
     if (pos0 > (uint32_t)prompt->len || n_tokens > (uint32_t)prompt->len - pos0) return false;
     const uint64_t hc_dim = (uint64_t)DS4_N_HC * DS4_N_EMBD;
     const uint64_t total = (uint64_t)n_tokens * hc_dim;
@@ -27722,12 +27723,22 @@ static bool metal_graph_upload_prompt_embeddings_hc_cpu(
     float *plain = xmalloc((size_t)DS4_N_EMBD * sizeof(plain[0]));
 
     for (uint32_t t = 0; t < n_tokens; t++) {
-        embed_token_f16(model, weights, prompt->v[pos0 + t], plain);
+        const uint32_t pos = pos0 + t;
+        const float *source = NULL;
+        if (embedding_span &&
+            pos >= embedding_span->start &&
+            pos - embedding_span->start < embedding_span->count) {
+            source = embedding_span->rows +
+                (uint64_t)(pos - embedding_span->start) * DS4_N_EMBD;
+        } else {
+            embed_token_f16(model, weights, prompt->v[pos], plain);
+            source = plain;
+        }
         float *dst = hc + (uint64_t)t * hc_dim;
         for (uint32_t h = 0; h < DS4_N_HC; h++) {
             memcpy(dst + (uint64_t)h * DS4_N_EMBD,
-                   plain,
-                   (size_t)DS4_N_EMBD * sizeof(plain[0]));
+                   source,
+                   (size_t)DS4_N_EMBD * sizeof(source[0]));
         }
     }
 
@@ -27777,7 +27788,28 @@ static bool metal_graph_upload_prompt_embeddings_hc(
                                                        weights,
                                                        prompt,
                                                        pos0,
-                                                       n_tokens);
+                                                       n_tokens,
+                                                       NULL);
+}
+
+/* Vision and other prefix adapters provide one ordinary 4096-wide row per
+ * token. DeepSeek's HC streams all start from the same embedding, so replicate
+ * an override across HC exactly like the text embedding path does. */
+static bool metal_graph_upload_prompt_embeddings_hc_span(
+        ds4_gpu_tensor          *out_hc,
+        const ds4_model         *model,
+        const ds4_weights       *weights,
+        const token_vec         *prompt,
+        uint32_t                 pos0,
+        uint32_t                 n_tokens,
+        const ds4_embedding_span *embedding_span) {
+    return metal_graph_upload_prompt_embeddings_hc_cpu(out_hc,
+                                                       model,
+                                                       weights,
+                                                       prompt,
+                                                       pos0,
+                                                       n_tokens,
+                                                       embedding_span);
 }
 
 static bool metal_graph_hc_rms_scale_project(
@@ -34428,7 +34460,7 @@ static bool metal_graph_prefill_pipeline_stage_major(
     return ok;
 }
 
-static bool metal_graph_prefill_layer_major(
+static bool metal_graph_prefill_layer_major_with_embedding_span(
         ds4_gpu_graph *g,
         const ds4_model       *model,
         const ds4_weights     *weights,
@@ -34439,7 +34471,8 @@ static bool metal_graph_prefill_layer_major(
         bool                   show_progress,
         ds4_imatrix_collector *imatrix,
         ds4_session_progress_fn display_progress,
-        void                  *display_progress_ud) {
+        void                  *display_progress_ud,
+        const ds4_embedding_span *embedding_span) {
     if (n_tokens == 0 || n_tokens > g->prefill_cap) return false;
     if (start > (uint32_t)prompt->len) return false;
     if (n_tokens > (uint32_t)prompt->len - start) return false;
@@ -34492,6 +34525,7 @@ static bool metal_graph_prefill_layer_major(
     if (!split_commands &&
         !profile &&
         imatrix == NULL &&
+        embedding_span == NULL &&
         metal_graph_cuda_prefill_pipeline_requested(g) &&
         pipeline_mb != 0 &&
         pipeline_mb < n_tokens) {
@@ -34508,13 +34542,23 @@ static bool metal_graph_prefill_layer_major(
     }
 
     if (!split_commands) {
-        ok = metal_graph_upload_prompt_embeddings_hc(metal_graph_batch_cur_hc(g),
-                                                     metal_graph_prefill_tokens(g),
-                                                     model,
-                                                     weights,
-                                                     prompt,
-                                                     start,
-                                                     n_tokens);
+        ok = embedding_span ?
+            metal_graph_upload_prompt_embeddings_hc_span(
+                metal_graph_batch_cur_hc(g),
+                model,
+                weights,
+                prompt,
+                start,
+                n_tokens,
+                embedding_span) :
+            metal_graph_upload_prompt_embeddings_hc(
+                metal_graph_batch_cur_hc(g),
+                metal_graph_prefill_tokens(g),
+                model,
+                weights,
+                prompt,
+                start,
+                n_tokens);
         if (ok) ok = ds4_gpu_begin_commands() != 0;
         for (uint32_t il = 0; ok && il < DS4_N_LAYER; il++) {
             ok = metal_graph_encode_layer_batch(g,
@@ -34668,13 +34712,23 @@ static bool metal_graph_prefill_layer_major(
 #endif
 
     double t_layer0 = (profile || throttle) ? now_sec() : 0.0;
-    ok = metal_graph_upload_prompt_embeddings_hc(metal_graph_batch_cur_hc(g),
-                                                 metal_graph_prefill_tokens(g),
-                                                 model,
-                                                 weights,
-                                                 prompt,
-                                                 start,
-                                                 n_tokens);
+    ok = embedding_span ?
+        metal_graph_upload_prompt_embeddings_hc_span(
+            metal_graph_batch_cur_hc(g),
+            model,
+            weights,
+            prompt,
+            start,
+            n_tokens,
+            embedding_span) :
+        metal_graph_upload_prompt_embeddings_hc(
+            metal_graph_batch_cur_hc(g),
+            metal_graph_prefill_tokens(g),
+            model,
+            weights,
+            prompt,
+            start,
+            n_tokens);
     const double t_embed_encoded = (profile || throttle) ? now_sec() : 0.0;
     const double t_embed_done = (profile || throttle) ? now_sec() : 0.0;
     if (profile) {
@@ -35131,6 +35185,33 @@ static bool metal_graph_prefill_layer_major(
     return ok;
 }
 
+static bool metal_graph_prefill_layer_major(
+        ds4_gpu_graph *g,
+        const ds4_model       *model,
+        const ds4_weights     *weights,
+        const token_vec       *prompt,
+        uint32_t               start,
+        uint32_t               n_tokens,
+        float                 *logits,
+        bool                   show_progress,
+        ds4_imatrix_collector *imatrix,
+        ds4_session_progress_fn display_progress,
+        void                  *display_progress_ud) {
+    return metal_graph_prefill_layer_major_with_embedding_span(
+        g,
+        model,
+        weights,
+        prompt,
+        start,
+        n_tokens,
+        logits,
+        show_progress,
+        imatrix,
+        display_progress,
+        display_progress_ud,
+        NULL);
+}
+
 static bool metal_graph_prefill_raw_swa(
         ds4_gpu_graph *g,
         const ds4_model       *model,
@@ -35209,14 +35290,15 @@ static bool metal_graph_prefill_chunked_range(
         ds4_imatrix_collector *imatrix,
         ds4_session_cancel_fn  cancel,
         void                  *cancel_ud,
-        bool                  *cancelled) {
+        bool                  *cancelled,
+        const ds4_embedding_span *embedding_span) {
     if (n_tokens == 0 || g->prefill_cap == 0) return false;
     if (start > (uint32_t)prompt->len) return false;
     if (n_tokens > (uint32_t)prompt->len - start) return false;
     if (g->ssd_streaming && start == 0) {
         ds4_gpu_stream_expert_cache_reset_route_hotness();
     }
-    if (!imatrix &&
+    if (!imatrix && !embedding_span &&
         metal_graph_use_streaming_decode_prefill_range(g, weights,
                                                        start, n_tokens)) {
         return metal_graph_prefill_decode_streaming_range(g,
@@ -35270,17 +35352,19 @@ static bool metal_graph_prefill_chunked_range(
         const uint32_t chunk = remaining < local_cap ? remaining : local_cap;
         const uint32_t chunk_end = pos0 + chunk;
         float *chunk_logits = (progress || chunk_end == end) ? logits : NULL;
-        bool ok = metal_graph_prefill_layer_major(g,
-                                                  model,
-                                                  weights,
-                                                  prompt,
-                                                  pos0,
-                                                  chunk,
-                                                  chunk_logits,
-                                                  show_progress,
-                                                  imatrix,
-                                                  display_progress,
-                                                  display_progress_ud);
+        bool ok = metal_graph_prefill_layer_major_with_embedding_span(
+            g,
+            model,
+            weights,
+            prompt,
+            pos0,
+            chunk,
+            chunk_logits,
+            show_progress,
+            imatrix,
+            display_progress,
+            display_progress_ud,
+            embedding_span);
         if (!ok) {
             if (ds4_gpu_synchronize() == 0) {
                 fprintf(stderr, "ds4: Metal synchronize after chunked prefill failure also failed\n");
@@ -35345,7 +35429,8 @@ static bool metal_graph_prefill_chunked(
                                              NULL,
                                              cancel,
                                              cancel_ud,
-                                             cancelled);
+                                             cancelled,
+                                             NULL);
 }
 
 typedef struct ds4_verify_suffix_timing {
@@ -36831,6 +36916,7 @@ struct ds4_vocab {
     int arg_value_start_id;
     int arg_value_end_id;
     int dsml_id;
+    int image_id;
     str_i32_table token_to_id;
     str_i32_table merge_rank;
 };
@@ -37747,6 +37833,7 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
         vocab->arg_value_start_id = vocab_lookup_optional(vocab, "<arg_value>");
         vocab->arg_value_end_id = vocab_lookup_optional(vocab, "</arg_value>");
         vocab->dsml_id = -1;
+        vocab->image_id = vocab_lookup_optional(vocab, "<｜image｜>");
         return;
     }
 
@@ -37768,6 +37855,7 @@ static void vocab_load(ds4_vocab *vocab, const ds4_model *model) {
     vocab->arg_value_start_id = -1;
     vocab->arg_value_end_id = -1;
     vocab->dsml_id = vocab_lookup(vocab, "｜DSML｜");
+    vocab->image_id = vocab_lookup_optional(vocab, "<｜image｜>");
 }
 
 static void vocab_free(ds4_vocab *vocab) {
@@ -37877,6 +37965,7 @@ static bool special_token_at(const ds4_vocab *vocab, const char *p, int *token, 
         {"<arg_value>",            vocab->arg_value_start_id},
         {"</arg_value>",           vocab->arg_value_end_id},
         {"｜DSML｜",                vocab->dsml_id},
+        {"<｜image｜>",              vocab->image_id},
     };
 
     for (size_t i = 0; i < sizeof(specials) / sizeof(specials[0]); i++) {
@@ -46908,6 +46997,7 @@ static bool glm_graph_prefill_token_major(
         const ds4_model        *model,
         const ds4_weights      *weights,
         const int              *tokens,
+        const float            *input_hc,
         uint32_t                pos0,
         uint32_t                n_tokens,
         float                  *logits_out,
@@ -46949,6 +47039,7 @@ static bool glm_graph_prefill_range(
                                                    model,
                                                    weights,
                                                    tokens + done,
+                                                   NULL,
                                                    pos,
                                                    chunk,
                                                    dst_logits,
@@ -47071,6 +47162,7 @@ static bool glm_graph_prefill_range(
                                                model,
                                                weights,
                                                tokens + done,
+                                               NULL,
                                                pos,
                                                chunk,
                                                dst_logits,
@@ -47164,6 +47256,7 @@ static bool glm_graph_prefill_token_major(
         const ds4_model        *model,
         const ds4_weights      *weights,
         const int              *tokens,
+        const float            *input_hc,
         uint32_t                pos0,
         uint32_t                n_tokens,
         float                  *logits_out,
@@ -47180,7 +47273,8 @@ static bool glm_graph_prefill_token_major(
                                      model,
                                      weights,
                                      tokens[i],
-                                     NULL,
+                                     input_hc ? input_hc +
+                                         (uint64_t)i * DS4_N_EMBD : NULL,
                                      pos0 + i,
                                      NULL,
                                      dst_logits,
@@ -49534,6 +49628,12 @@ struct ds4_session {
     ds4_engine *engine;
     ds4_dist_session *distributed;
     uint64_t tp_session_id;
+    /* Transient caller-owned rows used only by
+     * ds4_session_sync_embedding_span().  Token ids stay in the ordinary
+     * prompt so DeepSeek V4's hash router sees its trained routing ids. */
+    const float *prefill_embedding_rows;
+    uint32_t prefill_embedding_start;
+    uint32_t prefill_embedding_count;
 #ifndef DS4_NO_GPU
     ds4_gpu_graph graph;
     ds4_glm_gpu_graph glm_graph;
@@ -51247,6 +51347,10 @@ bool ds4_engine_has_dspark(ds4_engine *e) {
            e->dspark_weights.metadata_errors == 0;
 }
 
+int ds4_engine_image_token_id(ds4_engine *e) {
+    return e ? e->vocab.image_id : -1;
+}
+
 int ds4_engine_mtp_draft_tokens(ds4_engine *e) {
     if (e && DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
         return e->glm_mtp && DS4_N_NEXTN_PREDICT != 0 ? 2 : 0;
@@ -52654,7 +52758,8 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
                                                            NULL, NULL,
                                                            NULL, NULL,
                                                            &collector,
-                                                           NULL, NULL, NULL);
+                                                           NULL, NULL, NULL,
+                                                           NULL);
                 } else {
                     ok = metal_graph_prefill_layer_major(&g, model, weights,
                                                          &prompt, 0,
@@ -60055,6 +60160,30 @@ static void ds4_session_note_prefill_progress(void *ud, const char *event, int c
  */
 static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen);
 
+static uint32_t ds4_session_prefill_embedding_chunk_limit(
+        const ds4_session *s,
+        uint32_t           pos,
+        uint32_t           count) {
+    if (!s || !s->prefill_embedding_rows || count == 0) return count;
+    const uint32_t start = s->prefill_embedding_start;
+    const uint32_t end = start + s->prefill_embedding_count;
+    if (pos < start && count > start - pos) return start - pos;
+    if (pos >= start && pos < end && count > end - pos) return end - pos;
+    return count;
+}
+
+static const float *ds4_session_prefill_embedding_rows(
+        const ds4_session *s,
+        uint32_t           pos,
+        uint32_t           count) {
+    if (!s || !s->prefill_embedding_rows || count == 0) return NULL;
+    const uint32_t start = s->prefill_embedding_start;
+    const uint32_t end = start + s->prefill_embedding_count;
+    if (pos < start || pos >= end || count > end - pos) return NULL;
+    return s->prefill_embedding_rows +
+        (uint64_t)(pos - start) * DS4_N_EMBD;
+}
+
 /* Under tensor parallelism the leader mirrors every public sync/eval to the
  * worker before doing the work itself, so both engines execute the same
  * graph sequence and the per-layer gates pair up.  The worker acks a sync
@@ -60116,6 +60245,111 @@ int ds4_session_sync(ds4_session *s, const ds4_tokens *prompt, char *err, size_t
         }
     }
     return rc;
+}
+
+int ds4_session_sync_embedding_span(ds4_session *s,
+                                    const ds4_tokens *prompt,
+                                    const ds4_embedding_span *span,
+                                    char *err,
+                                    size_t errlen) {
+    if (!s || !prompt || prompt->len <= 0 ||
+        !span || !span->rows || span->count == 0) {
+        if (err && errlen) snprintf(err, errlen, "missing session, prompt, or embedding span");
+        return 1;
+    }
+    if (span->width != DS4_N_EMBD ||
+        span->start >= (uint32_t)prompt->len ||
+        span->count > (uint32_t)prompt->len - span->start) {
+        if (err && errlen) {
+            snprintf(err, errlen,
+                     "embedding span must fit the prompt and have width %u",
+                     (unsigned)DS4_N_EMBD);
+        }
+        return 1;
+    }
+    if (s->distributed || s->engine->tp.active || ds4_session_is_cpu(s)) {
+        if (err && errlen) {
+            snprintf(err, errlen,
+                     "embedding-span sync currently requires a local GPU session");
+        }
+        return 1;
+    }
+
+    /* Identical placeholder ids can represent different images, so a token-
+     * only checkpoint comparison is insufficient.  Always rebuild from token
+     * zero; subsequent decode uses the ordinary session path. */
+    ds4_session_invalidate(s);
+    if (ds4_session_is_glm(s)) {
+        s->prefill_embedding_rows = span->rows;
+        s->prefill_embedding_start = span->start;
+        s->prefill_embedding_count = span->count;
+        const int rc = ds4_session_sync(s, prompt, err, errlen);
+        s->prefill_embedding_rows = NULL;
+        s->prefill_embedding_start = 0;
+        s->prefill_embedding_count = 0;
+        return rc;
+    }
+
+#ifdef DS4_NO_GPU
+    if (err && errlen) snprintf(err, errlen, "GPU support is not compiled in");
+    return 1;
+#else
+    if (prompt->len >= s->ctx_size) {
+        if (err && errlen) {
+            snprintf(err, errlen,
+                     "prompt length %d exceeds context %d",
+                     prompt->len,
+                     s->ctx_size);
+        }
+        return 1;
+    }
+    if (!metal_graph_reset_prefill_state(&s->graph)) {
+        if (err && errlen) {
+            snprintf(err, errlen, "%s prefill state reset failed",
+                     ds4_backend_name(s->engine->backend));
+        }
+        return 1;
+    }
+    bool cancelled = false;
+    const bool ok = metal_graph_prefill_chunked_range(
+        &s->graph,
+        &s->engine->model,
+        &s->engine->weights,
+        prompt,
+        0,
+        (uint32_t)prompt->len,
+        s->logits,
+        false,
+        NULL,
+        NULL,
+        s->display_progress,
+        s->display_progress_ud,
+        NULL,
+        ds4_session_cancelled_cb,
+        s,
+        &cancelled,
+        span);
+    if (cancelled) {
+        if (err && errlen) snprintf(err, errlen, "interrupted");
+        s->checkpoint_valid = false;
+        return DS4_SESSION_SYNC_INTERRUPTED;
+    }
+    if (!ok) {
+        if (err && errlen) {
+            snprintf(err, errlen, "%s embedding-span prefill failed",
+                     ds4_backend_name(s->engine->backend));
+        }
+        s->checkpoint_valid = false;
+        return 1;
+    }
+    ds4_tokens_copy(&s->checkpoint, prompt);
+    s->checkpoint_valid = true;
+    s->mtp_draft_valid = false;
+    ds4_session_dspark_capture_note_checkpoint(s);
+    s->graph.mtp_n_raw = 0;
+    session_greedy_splitkv_reset(s);
+    return 0;
+#endif
 }
 
 static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, char *err, size_t errlen) {
@@ -60277,7 +60511,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                                              &s->engine->model,
                                              &s->engine->weights,
                                              prompt->v[i],
-                                             NULL,
+                                             ds4_session_prefill_embedding_rows(
+                                                 s, pos, 1),
                                              pos,
                                              NULL,
                                              s->logits,
@@ -60618,6 +60853,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                     if (token_prefill_max != 0 && chunk > token_prefill_max) {
                         chunk = token_prefill_max;
                     }
+                    chunk = ds4_session_prefill_embedding_chunk_limit(
+                        s, (uint32_t)i, chunk);
                     float *chunk_logits =
                         (i + (int)chunk >= prompt->len) ? s->logits : NULL;
                     if (sync_trace) {
@@ -60631,6 +60868,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                                                                &e->model,
                                                                &e->weights,
                                                                prompt->v + i,
+                                                               ds4_session_prefill_embedding_rows(
+                                                                   s, (uint32_t)i, chunk),
                                                                (uint32_t)i,
                                                                chunk,
                                                                chunk_logits,
@@ -60645,6 +60884,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                         chunk = s->glm_graph.indexed_prefill_cap;
                     }
                     chunk = glm_graph_limit_indexed_prefill_chunk((uint32_t)i, chunk);
+                    chunk = ds4_session_prefill_embedding_chunk_limit(
+                        s, (uint32_t)i, chunk);
                     float *chunk_logits =
                         (i + (int)chunk >= prompt->len) ? s->logits : NULL;
                     if (sync_trace) {
@@ -60658,7 +60899,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                                                                   &e->model,
                                                                   &e->weights,
                                                                   prompt->v + i,
-                                                                  NULL,
+                                                                  ds4_session_prefill_embedding_rows(
+                                                                      s, (uint32_t)i, chunk),
                                                                   (uint32_t)i,
                                                                   chunk,
                                                                   NULL,
@@ -60681,7 +60923,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                                                         &e->model,
                                                         &e->weights,
                                                         prompt->v[i],
-                                                        NULL,
+                                                        ds4_session_prefill_embedding_rows(
+                                                            s, (uint32_t)i, 1),
                                                         (uint32_t)i,
                                                         NULL,
                                                         chunk_logits,
@@ -60715,6 +60958,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
             const uint32_t full_remaining = s->glm_graph.ctx_cap - (uint32_t)i;
             if (chunk > full_remaining) chunk = full_remaining;
             if (chunk > chunk_max) chunk = chunk_max;
+            chunk = ds4_session_prefill_embedding_chunk_limit(
+                s, (uint32_t)i, chunk);
             float *chunk_logits =
                 (i + (int)chunk >= prompt->len) ? s->logits : NULL;
             const bool use_token_major_prefill =
@@ -60735,6 +60980,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                                                            &e->model,
                                                            &e->weights,
                                                            prompt->v + i,
+                                                           ds4_session_prefill_embedding_rows(
+                                                               s, (uint32_t)i, chunk),
                                                            (uint32_t)i,
                                                            chunk,
                                                            chunk_logits,
@@ -60748,7 +60995,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                                                       &e->model,
                                                       &e->weights,
                                                       prompt->v + i,
-                                                      NULL,
+                                                      ds4_session_prefill_embedding_rows(
+                                                          s, (uint32_t)i, chunk),
                                                       (uint32_t)i,
                                                       chunk,
                                                       NULL,
@@ -60828,7 +61076,8 @@ static int ds4_session_sync_internal(ds4_session *s, const ds4_tokens *prompt, c
                                                         NULL,
                                                         ds4_session_cancelled_cb,
                                                         s,
-                                                        &cancelled);
+                                                        &cancelled,
+                                                        NULL);
             if (cancelled) {
                 snprintf(err, errlen, "interrupted");
                 s->checkpoint_valid = true;

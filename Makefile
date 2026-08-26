@@ -63,7 +63,7 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+.PHONY: all help clean test test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-hf-vision test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
@@ -491,6 +491,9 @@ tests/test_hf_runtime_probe: tests/test_hf_runtime_probe.c ds4_hf.c ds4_hf.h
 
 test-hf-runtime: ds4 ds4-server tests/test_hf_runtime_probe
 	python3 tests/test_hf_runtime.py
+
+test-hf-vision: test-hf-runtime ds4_test
+	./ds4_test --server
 
 test-hf-cache: tests/test_hf_cache_probe
 	python3 tests/test_hf_cache.py

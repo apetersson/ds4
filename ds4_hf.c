@@ -245,20 +245,33 @@ bool ds4_hf_cli_validate(ds4_hf_cli_config *cfg,
     cfg->receiver_source = have_repo ? DS4_HF_RECEIVER_REPOSITORY :
                                        DS4_HF_RECEIVER_LOCAL;
 
-    unsigned vision_count = (cfg->vision_python != NULL) +
-                            (cfg->vision_encoder != NULL) +
-                            (cfg->vision_tower != NULL) +
-                            (cfg->vision_adapter != NULL);
+    unsigned vision_program_count = (cfg->vision_python != NULL) +
+                                    (cfg->vision_encoder != NULL);
+    unsigned vision_weight_count = (cfg->vision_tower != NULL) +
+                                   (cfg->vision_adapter != NULL);
+    unsigned vision_count = vision_program_count + vision_weight_count;
     if (cfg->no_vision && vision_count) {
         return fail(err, errlen,
                     "--no-vision cannot be combined with explicit --vision-* options");
     }
-    if (vision_count && vision_count != 4) {
+    if (vision_program_count == 1) {
+        return fail(err, errlen,
+                    "trusted local vision runtime requires --vision-python and --vision-encoder together");
+    }
+    if (vision_weight_count == 1) {
+        return fail(err, errlen,
+                    "explicit vision override requires --vision-tower and --vision-adapter together");
+    }
+    if (vision_weight_count && vision_program_count != 2) {
         return fail(err, errlen,
                     "explicit vision override requires --vision-python, --vision-encoder, --vision-tower, and --vision-adapter together");
     }
+    if (vision_program_count && !vision_weight_count && !(have_repo && server)) {
+        return fail(err, errlen,
+                    "--vision-python and --vision-encoder require -hf catalog weights or a complete explicit local vision bundle");
+    }
     if (cfg->no_vision) cfg->vision_source = DS4_HF_VISION_DISABLED;
-    else if (vision_count == 4) cfg->vision_source = DS4_HF_VISION_EXPLICIT;
+    else if (vision_weight_count == 2) cfg->vision_source = DS4_HF_VISION_EXPLICIT;
     else if (have_repo && server) cfg->vision_source = DS4_HF_VISION_CATALOG;
     else cfg->vision_source = DS4_HF_VISION_NONE;
 
@@ -934,7 +947,9 @@ static bool manifest_parse_vision_bundle(manifest_json_parser *jp,
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
-    if (seen != 7) return json_fail(jp, "incomplete DS4 vision bundle; tower, projector, and config are required");
+    if (!(seen & 1)) return json_fail(jp, "incomplete DS4 vision bundle: missing exact role ds4_vision.tower");
+    if (!(seen & 2)) return json_fail(jp, "incomplete DS4 vision bundle: missing exact role ds4_vision.projector");
+    if (!(seen & 4)) return json_fail(jp, "incomplete DS4 vision bundle: missing exact role ds4_vision.config");
     return true;
 }
 
@@ -3376,6 +3391,42 @@ bool ds4_hf_runtime_role_verified(const ds4_hf_runtime *runtime,
            (runtime->verified_roles & (1u << (unsigned)role)) != 0;
 }
 
+bool ds4_hf_runtime_vision_compatible(const ds4_hf_runtime *runtime,
+                                      uint32_t receiver_image_token_id,
+                                      char *err,
+                                      size_t errlen) {
+    static const ds4_hf_artifact_role required[] = {
+        DS4_HF_ROLE_VISION_TOWER,
+        DS4_HF_ROLE_VISION_PROJECTOR,
+        DS4_HF_ROLE_VISION_CONFIG,
+    };
+    if (!runtime || !runtime->repository) {
+        return fail(err, errlen,
+                    "catalog vision compatibility requires a repository runtime");
+    }
+    for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); i++) {
+        if (!ds4_hf_runtime_role_verified(runtime, required[i])) {
+            return fail(err, errlen, "catalog vision role '%s' is not hash-verified",
+                        ds4_hf_artifact_role_name(required[i]));
+        }
+    }
+    if (!runtime->vision_bundle_verified) {
+        return fail(err, errlen, "catalog DS4 vision bundle is incomplete");
+    }
+    if (runtime->vision_metadata.image_token_id != 129279) {
+        return fail(err, errlen,
+                    "catalog vision image token id %u is incompatible; expected 129279",
+                    runtime->vision_metadata.image_token_id);
+    }
+    if (receiver_image_token_id != runtime->vision_metadata.image_token_id) {
+        return fail(err, errlen,
+                    "receiver image token id %u is incompatible with catalog vision image token id %u",
+                    receiver_image_token_id,
+                    runtime->vision_metadata.image_token_id);
+    }
+    return true;
+}
+
 const char *ds4_hf_runtime_open_path(const ds4_hf_runtime *runtime,
                                      ds4_hf_artifact_role role) {
     if (!ds4_hf_runtime_role_verified(runtime, role)) return NULL;
@@ -3417,6 +3468,7 @@ bool ds4_hf_runtime_prepare(const ds4_hf_cli_config *cfg,
                                         err, errlen);
     free(manifest_json);
     if (!parsed) return false;
+    runtime->vision_metadata = manifest.shared_vision;
     if (!ds4_hf_acquisition_plan_build(cfg, &resolved, &manifest, false,
                                        &runtime->plan, err, errlen) ||
         !ds4_hf_acquisition_execute(cfg, &runtime->plan, 0, err, errlen)) {

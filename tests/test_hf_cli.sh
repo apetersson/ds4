@@ -89,12 +89,17 @@ run_fail "server --no-vision disables catalog planning" \
     env HF_ENDPOINT=http://127.0.0.1:1 \
     ./ds4-server --hf owner/repo:Headroom128 --no-vision
 run_fail "server accepts complete explicit vision override" \
-    "explicit vision configuration is valid" \
-    ./ds4-server --hf owner/repo \
+    "HF network failure" \
+    env HF_ENDPOINT=http://127.0.0.1:1 ./ds4-server --hf owner/repo \
         --vision-python /usr/bin/python3 \
         --vision-encoder /opt/local/encoder.py \
         --vision-tower /models/tower.safetensors \
         --vision-adapter /models/adapter.safetensors
+run_fail "server accepts trusted local programs for automatic catalog vision" \
+    "HF network failure" \
+    env HF_ENDPOINT=http://127.0.0.1:1 ./ds4-server --hf owner/repo \
+        --vision-python /usr/bin/python3 \
+        --vision-encoder /opt/local/encoder.py
 run_fail "server rejects partial explicit vision override" \
     "explicit vision override requires" \
     ./ds4-server --hf owner/repo --vision-tower /models/tower.safetensors
