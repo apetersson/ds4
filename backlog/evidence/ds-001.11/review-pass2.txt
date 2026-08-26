@@ -1,0 +1,44 @@
+Fresh parent-scoped read-only review pass 2
+
+Branch: worker/DS-001.11-hf-vision
+Base: 1f6f19a1a9d8861246f4096c322908eb7341fb48
+Reviewed HEAD: 490d4e81e511abde5104871ae8e153561ab6f943
+
+AC 1: Pass — complete manifest tower/projector/config bundle is resolved,
+verified, and wired.
+
+AC 2: Pass — catalog remains data-only; Python and encoder are trusted local
+CLI configuration.
+
+AC 3: Pass — no-vision and explicit-local override behavior is deterministic
+and selectively downloads only required roles.
+
+AC 4: Pass — missing, malformed, inaccessible, or semantically incompatible
+roles fail with exact role diagnostics before receiver allocation.
+
+AC 5: Pass — held descriptors preserve hash identity; exact profiles, tensor
+semantics, projector dimensions, and token 129279 are checked before image
+acceptance.
+
+AC 6: Pass — 257/769/1025/1281 layouts are accepted; unsupported layouts fail
+closed.
+
+AC 7: Pass — direct OpenAI and vanilla Pi both prove encoder-real equals
+trusted-real while zero and shuffle materially diverge. The visible 238-to-338
+latency OCR miss is honestly preserved; it does not invalidate the causal
+criterion because six other rubric facts are recovered consistently and both
+independent control paths degrade materially.
+
+Pass-1 findings DS-001.11.03 through .07 are substantively fixed. The sibling
+DS-001.07 shared-file conflict remains correctly classified as an integration
+follow-up, not an isolated DS-001.11 defect.
+
+Verification included full lineage/code/test inspection, committed
+deterministic-gate evidence review, successful checksum verification for every
+packaged replay artifact, and JSON validation. No model or lock-producing gate
+was run. A concurrent DS-006.05 model-test lock was observed read-only and
+reported; final check found all global locks absent.
+
+Worktree was clean; no edits or mutations were made by the reviewer.
+
+ALL GOOD
