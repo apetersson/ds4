@@ -3,8 +3,10 @@
 
 set -euo pipefail
 
-if [ "$#" -ne 1 ] || { [ "$1" != "headroom" ] && [ "$1" != "quality" ]; }; then
-  echo "usage: $0 headroom|quality" >&2
+if [ "$#" -lt 1 ] || [ "$#" -gt 2 ] || \
+    { [ "$1" != "headroom" ] && [ "$1" != "quality" ]; } || \
+    { [ "$#" -eq 2 ] && [ "$2" != "--print-server-command" ]; }; then
+  echo "usage: $0 headroom|quality [--print-server-command]" >&2
   exit 64
 fi
 
@@ -22,13 +24,36 @@ server_log="$evidence_dir/ds-002.03-${profile}-server.log"
 case "$profile" in
   headroom)
     receiver="$catalog/Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf"
-    quality_flag=()
     ;;
   quality)
     receiver="$catalog/Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf"
-    quality_flag=(--quality)
     ;;
 esac
+
+server_argv=(
+  "$repo/ds4-server"
+  --model "$receiver"
+  --metal
+)
+if [ "$profile" = "quality" ]; then
+  server_argv+=(--quality)
+fi
+server_argv+=(
+  --ctx 2048
+  --tokens 128
+  --vision-python /private/tmp/dsv4-vision-venv/bin/python
+  --vision-encoder "$catalog/tools/encode_flycockpit.py"
+  --vision-tower "$catalog/Vision-BF16/DeepEncoderV2-BF16.safetensors"
+  --vision-adapter "$catalog/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors"
+  --host 127.0.0.1
+  --port 18082
+)
+
+if [ "$#" -eq 2 ]; then
+  printf '%q ' "${server_argv[@]}"
+  printf '\n'
+  exit 0
+fi
 
 cd "$repo"
 python3 tests/vision_revalidation_preflight.py \
@@ -44,18 +69,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-"$repo/ds4-server" \
-  --model "$receiver" \
-  --metal "${quality_flag[@]}" \
-  --ctx 2048 \
-  --tokens 128 \
-  --vision-python /private/tmp/dsv4-vision-venv/bin/python \
-  --vision-encoder "$catalog/tools/encode_flycockpit.py" \
-  --vision-tower "$catalog/Vision-BF16/DeepEncoderV2-BF16.safetensors" \
-  --vision-adapter "$catalog/Vision-BF16/DeepSeek-V4-0731-Projector-BF16.safetensors" \
-  --host 127.0.0.1 \
-  --port 18082 \
-  >"$server_log_tmp" 2>&1 &
+"${server_argv[@]}" >"$server_log_tmp" 2>&1 &
 server_pid=$!
 
 ready=0
