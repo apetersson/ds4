@@ -1,10 +1,10 @@
 ---
 id: DS-005
-title: 'Epic: Integrate clean feature branches and qualify HF release'
+title: 'Epic: Integrate DS4 and llama.cpp vision paths and qualify HF release'
 status: In Progress
 assignee: []
 created_date: '2026-08-25 23:46'
-updated_date: '2026-08-26 00:13'
+updated_date: '2026-08-26 00:23'
 labels:
   - epic
   - 'branch:integration-dev'
@@ -13,6 +13,7 @@ labels:
 dependencies: []
 references:
   - integration/dev
+  - 'https://github.com/ggml-org/llama.cpp/blob/master/common/download.cpp'
 priority: high
 type: feature
 ordinal: 5000
@@ -21,16 +22,17 @@ ordinal: 5000
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-The local multimodal catalog, GGUF A/B evaluation, direct DS4-server/Pi path, native artifact, DSpark variants, documentation, and both MLX variants are already built and validated. Integration now focuses on merging clean feature branches, adding the genuinely new HF resolver, staging the catalog, rerunning the high-risk 100k/128 GB gates, and publishing evidence-backed documentation.
+The local DS4/MLX catalog baseline exists. Remaining integration now includes the DS4 HF resolver, clean DS4 feature branches, and the separate llama.cpp/libmtmd DeepEncoderV2 patch required for a conventional two-GGUF VLM experience from the same HF selector directories.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Existing catalog, GGUF, MLX, direct-Pi, and branch-governance work is recorded as a completed baseline.
-- [ ] #2 Clean vision, native-GGUF, DSpark, and HF resolver branches merge reproducibly into integration/dev while main remains upstream-clean.
-- [ ] #3 A private HF staging repo proves selector/companion discovery and the direct ds4-server plus vanilla Pi workflow.
-- [ ] #4 Final merged builds pass focused regression, image causality, DSpark parity, and 100k-context/128 GB memory gates.
-- [ ] #5 Release docs preserve exact identity, artifact sizes/hashes, compatibility limits, and measured—not inferred—claims.
+- [ ] #1 Existing catalog, GGUF, MLX, direct-Pi, and branch-governance work remains recorded as completed baseline.
+- [ ] #2 Clean DS4 vision/native/DSpark/HF branches merge reproducibly while main remains upstream-clean.
+- [ ] #3 The external llama.cpp/libmtmd work passes stagewise and end-to-end DeepEncoderV2 parity before the catalog claims llama.cpp vision support.
+- [ ] #4 Private HF staging proves both selectors through DS4 receiver+raw-vision discovery and llama.cpp receiver+mmproj sibling discovery, with matching optional DSpark.
+- [ ] #5 Final 100k/128 GB, causality, semantic, parity, integrity, and local-vs-HF gates pass on exact release artifacts.
+- [ ] #6 Release docs distinguish patched versus upstream runtime compatibility and measured versus inferred claims.
 <!-- AC:END -->
 
 ## Implementation Plan
