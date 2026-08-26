@@ -3,12 +3,18 @@
 #include <ctype.h>
 #include <curl/curl.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 enum {
     SEEN_REPO = 1u << 0,
@@ -1956,4 +1962,590 @@ const char *ds4_hf_resolve_status_name(ds4_hf_resolve_status status) {
         case DS4_HF_RESOLVE_INVALID_ARGUMENT: return "invalid_argument";
     }
     return "unknown";
+}
+
+const char *ds4_hf_artifact_role_name(ds4_hf_artifact_role role) {
+    switch (role) {
+        case DS4_HF_ROLE_RECEIVER: return "receiver";
+        case DS4_HF_ROLE_VISION_TOWER: return "ds4_vision.tower";
+        case DS4_HF_ROLE_VISION_PROJECTOR: return "ds4_vision.projector";
+        case DS4_HF_ROLE_VISION_CONFIG: return "ds4_vision.config";
+        case DS4_HF_ROLE_LLAMA_CPP_MMPROJ: return "llama_cpp_mmproj";
+        case DS4_HF_ROLE_DSPARK: return "dspark";
+    }
+    return "unknown";
+}
+
+static bool cache_component_encode(const char *value, char *encoded,
+                                   size_t encoded_len) {
+    static const char hex[] = "0123456789ABCDEF";
+    size_t used = 0;
+    for (const unsigned char *p = (const unsigned char *)value; *p; p++) {
+        if (*p == '/') {
+            if (used + 3 >= encoded_len) return false;
+            encoded[used++] = '%';
+            encoded[used++] = hex[*p >> 4];
+            encoded[used++] = hex[*p & 15];
+        } else {
+            if (used + 1 >= encoded_len) return false;
+            encoded[used++] = (char)*p;
+        }
+    }
+    if (!used || used >= encoded_len) return false;
+    encoded[used] = '\0';
+    return true;
+}
+
+static bool cache_path(const char *base, const char *suffix,
+                       char *out, size_t out_len) {
+    if (!base || !base[0] || !suffix || !suffix[0]) return false;
+    int written = snprintf(out, out_len, "%s%s%s", base,
+                           base[strlen(base) - 1] == '/' ? "" : "/", suffix);
+    return written > 0 && (size_t)written < out_len;
+}
+
+static bool cache_root_resolve(const ds4_hf_cli_config *cfg,
+                               char root[DS4_HF_CACHE_PATH_MAX]) {
+    const char *base = NULL;
+    const char *suffix = NULL;
+    if (cfg->cache_dir && cfg->cache_dir[0]) {
+        base = cfg->cache_dir;
+        suffix = NULL;
+    } else if ((base = getenv("HF_HOME")) && base[0]) {
+        suffix = "ds4";
+    } else if ((base = getenv("XDG_CACHE_HOME")) && base[0]) {
+        suffix = "huggingface/ds4";
+    } else if ((base = getenv("HOME")) && base[0]) {
+        suffix = ".cache/huggingface/ds4";
+    } else {
+        return false;
+    }
+    for (const unsigned char *p = (const unsigned char *)base; *p; p++) {
+        if (iscntrl(*p)) return false;
+    }
+    bool ok = suffix ? cache_path(base, suffix, root, DS4_HF_CACHE_PATH_MAX) :
+                       copy_string(root, DS4_HF_CACHE_PATH_MAX, base);
+    if (!ok) return false;
+    size_t len = strlen(root);
+    while (len > 1 && root[len - 1] == '/') root[--len] = '\0';
+    return len != 0;
+}
+
+static bool plan_add_artifact(ds4_hf_acquisition_plan *plan,
+                              ds4_hf_artifact_role role,
+                              const ds4_hf_manifest_artifact *source,
+                              bool requested, const char *repo_component) {
+    if (plan->artifact_count >= DS4_HF_ACQUISITION_MAX_ARTIFACTS) return false;
+    ds4_hf_acquisition_artifact *artifact =
+        &plan->artifacts[plan->artifact_count++];
+    memset(artifact, 0, sizeof(*artifact));
+    artifact->role = role;
+    artifact->requested = requested;
+    artifact->bytes = source->bytes;
+    if (!copy_string(artifact->repo_path, sizeof(artifact->repo_path),
+                     source->path) ||
+        !copy_string(artifact->sha256, sizeof(artifact->sha256),
+                     source->sha256)) return false;
+
+    char snapshot_suffix[DS4_HF_CACHE_PATH_MAX];
+    char snapshot[DS4_HF_CACHE_PATH_MAX];
+    int written = snprintf(snapshot_suffix, sizeof(snapshot_suffix),
+                           "repos/%s/snapshots/%s", repo_component,
+                           plan->revision);
+    return written > 0 && (size_t)written < sizeof(snapshot_suffix) &&
+           cache_path(plan->cache_root, snapshot_suffix, snapshot,
+                      sizeof(snapshot)) &&
+           cache_path(snapshot, artifact->repo_path, artifact->destination,
+                      sizeof(artifact->destination));
+}
+
+static bool acquisition_context_fail(
+    char *err, size_t errlen, const ds4_hf_acquisition_plan *plan,
+    const ds4_hf_acquisition_artifact *artifact, const char *fmt, ...) {
+    char reason[512] = {0};
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(reason, sizeof(reason), fmt, ap);
+    va_end(ap);
+    return fail(err, errlen,
+                "HF acquisition failed: repository='%s' revision='%s' "
+                "selector='%s' role='%s' expected_size=%" PRIu64
+                " destination='%s': %s",
+                plan && plan->repository[0] ? plan->repository : "<unknown>",
+                plan && plan->revision[0] ? plan->revision : "<unknown>",
+                plan && plan->selector[0] ? plan->selector : "<unknown>",
+                artifact ? ds4_hf_artifact_role_name(artifact->role) : "<unknown>",
+                artifact ? artifact->bytes : UINT64_C(0),
+                artifact && artifact->destination[0] ? artifact->destination :
+                                                       "<unresolved>",
+                reason);
+}
+
+bool ds4_hf_acquisition_plan_build(
+    const ds4_hf_cli_config *cfg,
+    const ds4_hf_resolved_repo *resolved,
+    const ds4_hf_manifest *manifest,
+    bool materialize_llama_cpp_mmproj,
+    ds4_hf_acquisition_plan *plan,
+    char *err,
+    size_t errlen) {
+    if (plan) memset(plan, 0, sizeof(*plan));
+    if (!cfg || !resolved || !manifest || !plan ||
+        !safe_repo_id(resolved->repo) || !valid_commit(resolved->commit) ||
+        strcmp(manifest->repository, resolved->repo) ||
+        !copy_string(plan->endpoint, sizeof(plan->endpoint), resolved->endpoint) ||
+        !copy_string(plan->repository, sizeof(plan->repository), resolved->repo) ||
+        !copy_string(plan->revision, sizeof(plan->revision), resolved->commit)) {
+        return acquisition_context_fail(err, errlen, plan, NULL,
+                                        "invalid or mismatched plan inputs");
+    }
+
+    const ds4_hf_manifest_variant *variant = NULL;
+    const char *selector = cfg->selector_set ? cfg->selector :
+                                               manifest->default_selector;
+    if (cfg->file) {
+        for (size_t i = 0; i < manifest->variant_count; i++) {
+            if (!strcmp(manifest->variants[i].receiver.path, cfg->file)) {
+                variant = &manifest->variants[i];
+                break;
+            }
+        }
+        if (variant && cfg->selector_set &&
+            !ds4_hf_selector_equal(variant->selector, selector)) variant = NULL;
+    } else {
+        variant = ds4_hf_manifest_find_variant(manifest, selector);
+    }
+    if (!variant || !copy_string(plan->selector, sizeof(plan->selector),
+                                 variant->selector)) {
+        copy_string(plan->selector, sizeof(plan->selector),
+                    selector ? selector : "<unknown>");
+        return acquisition_context_fail(err, errlen, plan, NULL,
+                                        cfg->file ?
+                                        "exact file is not the selected catalog receiver" :
+                                        "selector is not present in the catalog");
+    }
+    if (!cache_root_resolve(cfg, plan->cache_root)) {
+        return acquisition_context_fail(
+            err, errlen, plan, NULL,
+            "cache root is unavailable; set --hf-cache-dir, HF_HOME, "
+            "XDG_CACHE_HOME, or HOME");
+    }
+
+    char repo_component[DS4_HF_REPO_MAX + 4];
+    if (!cache_component_encode(plan->repository, repo_component,
+                                sizeof(repo_component)) ||
+        !plan_add_artifact(plan, DS4_HF_ROLE_RECEIVER, &variant->receiver,
+                           true, repo_component) ||
+        !plan_add_artifact(plan, DS4_HF_ROLE_VISION_TOWER,
+                           &variant->ds4_vision.tower,
+                           cfg->vision_source == DS4_HF_VISION_CATALOG,
+                           repo_component) ||
+        !plan_add_artifact(plan, DS4_HF_ROLE_VISION_PROJECTOR,
+                           &variant->ds4_vision.projector,
+                           cfg->vision_source == DS4_HF_VISION_CATALOG,
+                           repo_component) ||
+        !plan_add_artifact(plan, DS4_HF_ROLE_VISION_CONFIG,
+                           &variant->ds4_vision.config,
+                           cfg->vision_source == DS4_HF_VISION_CATALOG,
+                           repo_component) ||
+        !plan_add_artifact(plan, DS4_HF_ROLE_LLAMA_CPP_MMPROJ,
+                           &variant->llama_cpp_mmproj,
+                           materialize_llama_cpp_mmproj, repo_component)) {
+        return acquisition_context_fail(err, errlen, plan, NULL,
+                                        "cache destination is too long");
+    }
+    if (cfg->dspark_source == DS4_HF_DSPARK_CATALOG && !variant->has_dspark) {
+        return acquisition_context_fail(err, errlen, plan, NULL,
+                                        "selected variant has no DSpark role");
+    }
+    if (variant->has_dspark &&
+        !plan_add_artifact(plan, DS4_HF_ROLE_DSPARK, &variant->dspark,
+                           cfg->dspark_source == DS4_HF_DSPARK_CATALOG,
+                           repo_component)) {
+        return acquisition_context_fail(err, errlen, plan, NULL,
+                                        "cache destination is too long");
+    }
+    return true;
+}
+
+static bool mkdir_tree(const char *path) {
+    char copy[DS4_HF_CACHE_PATH_MAX];
+    if (!copy_string(copy, sizeof(copy), path)) return false;
+    for (char *p = copy + (copy[0] == '/');; p++) {
+        if (*p != '/' && *p != '\0') continue;
+        char saved = *p;
+        *p = '\0';
+        if (copy[0] && mkdir(copy, 0755) && errno != EEXIST) return false;
+        struct stat st;
+        if (copy[0] && (stat(copy, &st) || !S_ISDIR(st.st_mode))) return false;
+        *p = saved;
+        if (!saved) break;
+    }
+    return true;
+}
+
+static bool artifact_aux_path(const ds4_hf_acquisition_artifact *artifact,
+                              const char *suffix, char *path, size_t path_len) {
+    int written = snprintf(path, path_len, "%s%s", artifact->destination,
+                           suffix);
+    return written > 0 && (size_t)written < path_len;
+}
+
+static bool artifact_parent_directory(
+    const ds4_hf_acquisition_artifact *artifact,
+    char parent[DS4_HF_CACHE_PATH_MAX]) {
+    if (!copy_string(parent, DS4_HF_CACHE_PATH_MAX, artifact->destination)) {
+        return false;
+    }
+    char *slash = strrchr(parent, '/');
+    if (!slash) return copy_string(parent, DS4_HF_CACHE_PATH_MAX, ".");
+    if (slash == parent) slash[1] = '\0';
+    else *slash = '\0';
+    return true;
+}
+
+static bool artifact_metadata(const ds4_hf_acquisition_plan *plan,
+                              const ds4_hf_acquisition_artifact *artifact,
+                              char *metadata, size_t metadata_len,
+                              size_t *written_out) {
+    int written = snprintf(
+        metadata, metadata_len,
+        "version=1\nrepository=%s\nrevision=%s\nselector=%s\nrole=%s\n"
+        "expected_size=%" PRIu64 "\nsha256=%s\npath=%s\n",
+        plan->repository, plan->revision, plan->selector,
+        ds4_hf_artifact_role_name(artifact->role), artifact->bytes,
+        artifact->sha256, artifact->repo_path);
+    if (written < 0 || (size_t)written >= metadata_len) return false;
+    *written_out = (size_t)written;
+    return true;
+}
+
+static bool regular_file_size(const char *path, uint64_t *size_out) {
+    struct stat st;
+    if (lstat(path, &st) || !S_ISREG(st.st_mode) || st.st_size < 0) return false;
+    *size_out = (uint64_t)st.st_size;
+    return true;
+}
+
+static bool artifact_cache_hit(const ds4_hf_acquisition_plan *plan,
+                               const ds4_hf_acquisition_artifact *artifact) {
+    uint64_t size = 0;
+    if (!regular_file_size(artifact->destination, &size) ||
+        size != artifact->bytes) return false;
+    char metadata_path[DS4_HF_CACHE_PATH_MAX];
+    char expected[1024];
+    size_t expected_len = 0;
+    if (!artifact_aux_path(artifact, ".ds4-meta", metadata_path,
+                           sizeof(metadata_path)) ||
+        !artifact_metadata(plan, artifact, expected, sizeof(expected),
+                           &expected_len)) return false;
+    int fd = open(metadata_path, O_RDONLY);
+    if (fd < 0) return false;
+    struct stat st;
+    char actual[1025];
+    ssize_t got = read(fd, actual, sizeof(actual));
+    int saved_errno = errno;
+    bool ok = !fstat(fd, &st) && S_ISREG(st.st_mode) && got >= 0 &&
+              (size_t)got == expected_len &&
+              !memcmp(actual, expected, expected_len);
+    close(fd);
+    errno = saved_errno;
+    return ok;
+}
+
+static bool write_all(int fd, const char *data, size_t len) {
+    while (len) {
+        ssize_t wrote = write(fd, data, len);
+        if (wrote < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        data += (size_t)wrote;
+        len -= (size_t)wrote;
+    }
+    return true;
+}
+
+typedef struct {
+    FILE *file;
+    uint64_t remaining;
+} hf_artifact_writer;
+
+static size_t artifact_write_cb(char *data, size_t size, size_t count,
+                                void *userdata) {
+    hf_artifact_writer *writer = userdata;
+    if (size && count > SIZE_MAX / size) return 0;
+    size_t bytes = size * count;
+    if ((uint64_t)bytes > writer->remaining) return 0;
+    size_t wrote = fwrite(data, 1, bytes, writer->file);
+    writer->remaining -= wrote;
+    return wrote;
+}
+
+static CURLcode artifact_download_once(
+    const ds4_hf_acquisition_plan *plan,
+    const ds4_hf_acquisition_artifact *artifact, const char *part_path,
+    const char *token, uint64_t offset, long timeout_ms, long *http_status) {
+    int flags = O_WRONLY | O_CREAT | (offset ? O_APPEND : O_TRUNC);
+    int fd = open(part_path, flags, 0600);
+    if (fd < 0) return CURLE_WRITE_ERROR;
+    FILE *file = fdopen(fd, offset ? "ab" : "wb");
+    if (!file) {
+        close(fd);
+        return CURLE_WRITE_ERROR;
+    }
+
+    ds4_hf_resolved_repo resolved = {0};
+    copy_string(resolved.endpoint, sizeof(resolved.endpoint), plan->endpoint);
+    copy_string(resolved.repo, sizeof(resolved.repo), plan->repository);
+    copy_string(resolved.commit, sizeof(resolved.commit), plan->revision);
+    char url[DS4_HF_URL_MAX];
+    char ignored[1];
+    if (!ds4_hf_resolved_file_url(&resolved, artifact->repo_path, url,
+                                  sizeof(url), ignored, sizeof(ignored))) {
+        fclose(file);
+        return CURLE_URL_MALFORMAT;
+    }
+
+    CURL *curl = curl_easy_init();
+    if (!curl) {
+        fclose(file);
+        return CURLE_FAILED_INIT;
+    }
+    struct curl_slist *headers = NULL;
+    char *authorization = NULL;
+    if (token && token[0]) {
+        size_t token_len = strlen(token);
+        authorization = malloc(token_len + sizeof("Authorization: Bearer "));
+        if (!authorization) {
+            curl_easy_cleanup(curl);
+            fclose(file);
+            return CURLE_OUT_OF_MEMORY;
+        }
+        snprintf(authorization, token_len + sizeof("Authorization: Bearer "),
+                 "Authorization: Bearer %s", token);
+        headers = curl_slist_append(headers, authorization);
+        secure_clear(authorization, token_len + sizeof("Authorization: Bearer "));
+        free(authorization);
+        if (!headers) {
+            curl_easy_cleanup(curl);
+            fclose(file);
+            return CURLE_OUT_OF_MEMORY;
+        }
+    }
+    hf_artifact_writer writer = {file, artifact->bytes - offset};
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, artifact_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &writer);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "ds4-hf-resolver/1");
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT_MS, 30000L);
+    if (timeout_ms > 0) curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, timeout_ms);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 8L);
+    curl_easy_setopt(curl, CURLOPT_UNRESTRICTED_AUTH, 0L);
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS,
+                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS,
+                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+    if (offset) curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE,
+                                 (curl_off_t)offset);
+    CURLcode status = curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_status);
+    if (fflush(file) || fsync(fd)) status = CURLE_WRITE_ERROR;
+    if (fclose(file) && status == CURLE_OK) status = CURLE_WRITE_ERROR;
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+    return status;
+}
+
+static bool acquire_one(const ds4_hf_cli_config *cfg,
+                        ds4_hf_acquisition_plan *plan,
+                        ds4_hf_acquisition_artifact *artifact,
+                        const char *token, long timeout_ms,
+                        char *err, size_t errlen) {
+    char parent[DS4_HF_CACHE_PATH_MAX];
+    char lock_path[DS4_HF_CACHE_PATH_MAX];
+    char part_path[DS4_HF_CACHE_PATH_MAX];
+    char metadata_path[DS4_HF_CACHE_PATH_MAX];
+    char metadata_tmp[DS4_HF_CACHE_PATH_MAX];
+    if (!artifact_parent_directory(artifact, parent) || !mkdir_tree(parent) ||
+        !artifact_aux_path(artifact, ".lock", lock_path, sizeof(lock_path)) ||
+        !artifact_aux_path(artifact, ".part", part_path, sizeof(part_path)) ||
+        !artifact_aux_path(artifact, ".ds4-meta", metadata_path,
+                           sizeof(metadata_path)) ||
+        !artifact_aux_path(artifact, ".ds4-meta.part", metadata_tmp,
+                           sizeof(metadata_tmp))) {
+        return acquisition_context_fail(err, errlen, plan, artifact,
+                                        "cannot prepare cache directories");
+    }
+    int lock_fd = open(lock_path, O_RDWR | O_CREAT, 0600);
+    if (lock_fd < 0 || flock(lock_fd, LOCK_EX)) {
+        if (lock_fd >= 0) close(lock_fd);
+        return acquisition_context_fail(err, errlen, plan, artifact,
+                                        "cannot acquire cache lock: %s",
+                                        strerror(errno));
+    }
+    bool ok = false;
+    if (artifact_cache_hit(plan, artifact)) {
+        artifact->cache_hit = true;
+        ok = true;
+        goto done;
+    }
+    struct stat destination_stat;
+    if (!lstat(artifact->destination, &destination_stat)) {
+        acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "cache entry exists without matching immutable identity; remove it explicitly and retry");
+        goto done;
+    } else if (errno != ENOENT) {
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "cannot inspect cache destination: %s",
+                                 strerror(errno));
+        goto done;
+    }
+    if (cfg->offline) {
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "offline mode forbids the required network transfer");
+        goto done;
+    }
+    if (artifact->bytes > (uint64_t)INT64_MAX) {
+        acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "expected size exceeds the signed 64-bit range supported by libcurl");
+        goto done;
+    }
+
+    uint64_t offset = 0;
+    struct stat part_stat;
+    if (!lstat(part_path, &part_stat)) {
+        if (!S_ISREG(part_stat.st_mode) || part_stat.st_size < 0 ||
+            (uint64_t)part_stat.st_size > artifact->bytes) {
+            acquisition_context_fail(
+                err, errlen, plan, artifact,
+                "resume file is not a valid private partial; remove '%s' explicitly",
+                part_path);
+            goto done;
+        }
+        offset = (uint64_t)part_stat.st_size;
+    } else if (errno != ENOENT) {
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "cannot inspect resume file: %s", strerror(errno));
+        goto done;
+    }
+
+    CURLcode curl_status = CURLE_OK;
+    long http_status = 0;
+    if (offset < artifact->bytes) {
+        curl_status = artifact_download_once(plan, artifact, part_path, token,
+                                             offset, timeout_ms, &http_status);
+        if (offset && (http_status == 200 || curl_status == CURLE_RANGE_ERROR)) {
+            http_status = 0;
+            curl_status = artifact_download_once(plan, artifact, part_path,
+                                                 token, 0, timeout_ms,
+                                                 &http_status);
+        }
+    }
+    uint64_t downloaded = 0;
+    if (curl_status != CURLE_OK || !regular_file_size(part_path, &downloaded) ||
+        downloaded != artifact->bytes) {
+        acquisition_context_fail(
+            err, errlen, plan, artifact,
+            "libcurl HTTP(S) redirect/range transfer failed (curl=%s, HTTP=%ld, "
+            "partial_size=%" PRIu64 "); HF LFS/Xet requires libcurl with "
+            "HTTP(S), redirects, and byte-range support",
+            curl_easy_strerror(curl_status), http_status, downloaded);
+        goto done;
+    }
+
+    char metadata[1024];
+    size_t metadata_len = 0;
+    if (!artifact_metadata(plan, artifact, metadata, sizeof(metadata),
+                           &metadata_len)) {
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "immutable cache metadata is too long");
+        goto done;
+    }
+    int metadata_fd = open(metadata_tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (metadata_fd < 0 || !write_all(metadata_fd, metadata, metadata_len) ||
+        fsync(metadata_fd) || close(metadata_fd)) {
+        int saved_errno = errno;
+        if (metadata_fd >= 0) close(metadata_fd);
+        unlink(metadata_tmp);
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "cannot write immutable cache metadata: %s",
+                                 strerror(saved_errno));
+        goto done;
+    }
+    if (rename(metadata_tmp, metadata_path)) {
+        int saved_errno = errno;
+        unlink(metadata_tmp);
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "cannot publish immutable cache metadata: %s",
+                                 strerror(saved_errno));
+        goto done;
+    }
+    if (rename(part_path, artifact->destination)) {
+        int saved_errno = errno;
+        unlink(metadata_path);
+        acquisition_context_fail(err, errlen, plan, artifact,
+                                 "cannot atomically publish completed cache entry: %s",
+                                 strerror(saved_errno));
+        goto done;
+    }
+    artifact->cache_hit = false;
+    ok = true;
+
+done:
+    flock(lock_fd, LOCK_UN);
+    close(lock_fd);
+    return ok;
+}
+
+bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
+                                ds4_hf_acquisition_plan *plan,
+                                long timeout_ms,
+                                char *err,
+                                size_t errlen) {
+    if (!cfg || !plan || !plan->artifact_count) {
+        return acquisition_context_fail(err, errlen, plan, NULL,
+                                        "invalid acquisition request");
+    }
+    ds4_hf_acquisition_artifact *first = NULL;
+    for (size_t i = 0; i < plan->artifact_count; i++) {
+        if (plan->artifacts[i].requested) {
+            first = &plan->artifacts[i];
+            break;
+        }
+    }
+    if (!first) return true;
+
+    char token[HF_TOKEN_MAX];
+    bool have_token = discover_token(cfg, token);
+    if (cfg->token && cfg->token[0] && !have_token) {
+        return acquisition_context_fail(err, errlen, plan, first,
+                                        "HF credential exceeds the supported in-memory limit");
+    }
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+        secure_clear(token, sizeof(token));
+        return acquisition_context_fail(
+            err, errlen, plan, first,
+            "libcurl initialization failed; HF LFS/Xet requires libcurl with "
+            "HTTP(S), redirects, and byte-range support");
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < plan->artifact_count; i++) {
+        if (!plan->artifacts[i].requested) continue;
+        if (!acquire_one(cfg, plan, &plan->artifacts[i],
+                         have_token ? token : NULL, timeout_ms,
+                         err, errlen)) {
+            ok = false;
+            break;
+        }
+    }
+    secure_clear(token, sizeof(token));
+    return ok;
 }

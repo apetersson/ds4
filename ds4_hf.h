@@ -22,6 +22,8 @@
 #define DS4_HF_PATH_MAX 512
 #define DS4_HF_SHA256_HEX_SIZE 65
 #define DS4_HF_METADATA_MAX 128
+#define DS4_HF_ACQUISITION_MAX_ARTIFACTS 6
+#define DS4_HF_CACHE_PATH_MAX 4096
 
 typedef enum {
     DS4_HF_CLI_NO_MATCH,
@@ -269,6 +271,62 @@ bool ds4_hf_manifest_parse(const char *json,
 
 const ds4_hf_manifest_variant *ds4_hf_manifest_find_variant(
     const ds4_hf_manifest *manifest, const char *selector);
+
+typedef enum {
+    DS4_HF_ROLE_RECEIVER,
+    DS4_HF_ROLE_VISION_TOWER,
+    DS4_HF_ROLE_VISION_PROJECTOR,
+    DS4_HF_ROLE_VISION_CONFIG,
+    DS4_HF_ROLE_LLAMA_CPP_MMPROJ,
+    DS4_HF_ROLE_DSPARK,
+} ds4_hf_artifact_role;
+
+typedef struct {
+    ds4_hf_artifact_role role;
+    bool requested;
+    bool cache_hit;
+    char repo_path[DS4_HF_PATH_MAX];
+    uint64_t bytes;
+    char sha256[DS4_HF_SHA256_HEX_SIZE];
+    char destination[DS4_HF_CACHE_PATH_MAX];
+} ds4_hf_acquisition_artifact;
+
+/* A complete selected-variant view for acquisition and later diagnostics.
+ * Unrequested roles remain present with requested=false so listing/dry-run can
+ * expose llama.cpp's sibling mmproj without causing DS4 to download it. */
+typedef struct {
+    char endpoint[DS4_HF_ENDPOINT_MAX];
+    char repository[DS4_HF_REPO_MAX];
+    char revision[DS4_HF_COMMIT_SHA_LEN + 1];
+    char selector[DS4_HF_SELECTOR_MAX];
+    char cache_root[DS4_HF_CACHE_PATH_MAX];
+    size_t artifact_count;
+    ds4_hf_acquisition_artifact artifacts[DS4_HF_ACQUISITION_MAX_ARTIFACTS];
+} ds4_hf_acquisition_plan;
+
+/* Select one manifest variant and derive revision-pinned cache destinations.
+ * Catalog vision and DSpark follow cfg's validated runtime sources. The mmproj
+ * is metadata-only unless materialize_llama_cpp_mmproj is explicitly true. */
+bool ds4_hf_acquisition_plan_build(
+    const ds4_hf_cli_config *cfg,
+    const ds4_hf_resolved_repo *resolved,
+    const ds4_hf_manifest *manifest,
+    bool materialize_llama_cpp_mmproj,
+    ds4_hf_acquisition_plan *plan,
+    char *err,
+    size_t errlen);
+
+/* Acquire requested plan entries through libcurl. Transfers follow HTTP(S)
+ * redirects used by HF LFS/Xet, resume private .part files under a process
+ * lock, and publish only exact-size files with an immutable identity sidecar.
+ * timeout_ms <= 0 leaves the full-transfer timeout unlimited. */
+bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
+                                ds4_hf_acquisition_plan *plan,
+                                long timeout_ms,
+                                char *err,
+                                size_t errlen);
+
+const char *ds4_hf_artifact_role_name(ds4_hf_artifact_role role);
 
 /* Accept exactly rows = views * 256 + 1 within the manifest's view range. */
 bool ds4_hf_manifest_visual_rows_valid(
