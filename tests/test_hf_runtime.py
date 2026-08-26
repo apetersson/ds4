@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import struct
 import subprocess
 import tempfile
 import threading
@@ -23,6 +24,93 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 
 def sha256(data):
     return hashlib.sha256(data).hexdigest()
+
+
+def build_tokenizer_gguf():
+    """Build a metadata-only DeepSeek4 GGUF accepted by --dump-tokens."""
+    uint32 = 4
+    float32 = 6
+    boolean = 7
+    string = 8
+    array = 9
+
+    def gguf_string(value):
+        encoded = value.encode("utf-8")
+        return struct.pack("<Q", len(encoded)) + encoded
+
+    entries = []
+
+    def scalar(key, kind, value):
+        if kind == uint32:
+            payload = struct.pack("<I", value)
+        elif kind == float32:
+            payload = struct.pack("<f", value)
+        elif kind == boolean:
+            payload = struct.pack("<B", value)
+        elif kind == string:
+            payload = gguf_string(value)
+        else:
+            raise AssertionError(kind)
+        entries.append(gguf_string(key) + struct.pack("<I", kind) + payload)
+
+    def values(key, kind, items):
+        payload = struct.pack("<IQ", kind, len(items))
+        if kind == uint32:
+            payload += b"".join(struct.pack("<I", item) for item in items)
+        elif kind == float32:
+            payload += b"".join(struct.pack("<f", item) for item in items)
+        elif kind == string:
+            payload += b"".join(gguf_string(item) for item in items)
+        else:
+            raise AssertionError(kind)
+        entries.append(gguf_string(key) + struct.pack("<I", array) + payload)
+
+    shape = {
+        "deepseek4.block_count": 43,
+        "deepseek4.embedding_length": 4096,
+        "deepseek4.vocab_size": 129280,
+        "deepseek4.attention.head_count": 64,
+        "deepseek4.attention.head_count_kv": 1,
+        "deepseek4.attention.key_length": 512,
+        "deepseek4.attention.value_length": 512,
+        "deepseek4.rope.dimension_count": 64,
+        "deepseek4.attention.q_lora_rank": 1024,
+        "deepseek4.attention.output_lora_rank": 1024,
+        "deepseek4.attention.output_group_count": 8,
+        "deepseek4.expert_count": 256,
+        "deepseek4.expert_used_count": 6,
+        "deepseek4.expert_feed_forward_length": 2048,
+        "deepseek4.expert_shared_count": 1,
+        "deepseek4.hash_layer_count": 3,
+        "deepseek4.attention.sliding_window": 128,
+        "deepseek4.attention.indexer.head_count": 64,
+        "deepseek4.attention.indexer.key_length": 128,
+        "deepseek4.attention.indexer.top_k": 512,
+        "deepseek4.hyper_connection.count": 4,
+        "deepseek4.hyper_connection.sinkhorn_iterations": 20,
+    }
+    for key, value in shape.items():
+        scalar(key, uint32, value)
+    for key, value in {
+        "deepseek4.rope.freq_base": 10000.0,
+        "deepseek4.attention.compress_rope_freq_base": 160000.0,
+        "deepseek4.expert_weights_scale": 1.5,
+        "deepseek4.attention.layer_norm_rms_epsilon": 1.0e-6,
+        "deepseek4.hyper_connection.epsilon": 1.0e-6,
+    }.items():
+        scalar(key, float32, value)
+    scalar("deepseek4.expert_weights_norm", boolean, True)
+    ratios = [0, 0] + [4 if layer % 2 == 0 else 128 for layer in range(2, 43)]
+    values("deepseek4.attention.compress_ratios", uint32, ratios)
+    values("deepseek4.swiglu_clamp_exp", float32, [10.0] * 43)
+    tokens = [
+        "<｜begin▁of▁sentence｜>", "<｜end▁of▁sentence｜>",
+        "<｜User｜>", "<｜Assistant｜>", "<think>", "</think>",
+        "｜DSML｜", "p", "a", "r", "i", "t", "y",
+    ]
+    values("tokenizer.ggml.tokens", string, tokens)
+    values("tokenizer.ggml.merges", string, [])
+    return b"GGUF" + struct.pack("<IQQ", 3, 0, len(entries)) + b"".join(entries)
 
 
 class RuntimeHubHandler(BaseHTTPRequestHandler):
@@ -65,7 +153,7 @@ class RuntimeWiringTests(unittest.TestCase):
         manifest["variants"] = manifest["variants"][:1]
         variant = manifest["variants"][0]
         payloads = {
-            variant["receiver"]["path"]: b"byte-identical-receiver-gguf-fixture",
+            variant["receiver"]["path"]: build_tokenizer_gguf(),
             variant["ds4_vision"]["tower"]["path"]: b"verified-tower",
             variant["ds4_vision"]["projector"]["path"]: b"verified-projector",
             variant["ds4_vision"]["config"]["path"]: b'{"verified":true}',
@@ -160,36 +248,54 @@ class RuntimeWiringTests(unittest.TestCase):
             f"/owner/repo/resolve/{SHA}/variants.json",
         ])
 
-    def test_both_binaries_handoff_the_verified_receiver_before_model_open(self):
+    def test_hf_and_local_model_paths_produce_identical_deterministic_output(self):
         env = os.environ.copy()
         env["HF_ENDPOINT"] = self.endpoint
         for name in ("HF_TOKEN", "HF_TOKEN_PATH", "HF_HOME", "XDG_CACHE_HOME"):
             env.pop(name, None)
-        for binary, extra, expected_roles in (
-            ("ds4", ["--inspect"], "verified_roles=[receiver] vision=inactive"),
-            ("ds4-server", [],
-             "verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=inactive"),
-        ):
-            with self.subTest(binary=binary), tempfile.TemporaryDirectory() as cache:
-                result = subprocess.run(
-                    [str(ROOT / binary), "--cpu", "--hf", "owner/repo",
-                     "--hf-cache-dir", cache, *extra],
-                    cwd=ROOT,
-                    env=env,
-                    text=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    timeout=10,
-                    check=False,
-                )
-                output = result.stdout + result.stderr
-                self.assertNotEqual(result.returncode, 0, output)
-                self.assertIn("repository='owner/repo'", output)
-                self.assertIn(f"revision='{SHA}'", output)
-                self.assertIn("selector='Headroom128-IQ2_XXS'", output)
-                self.assertIn("receiver='Headroom128-IQ2_XXS/", output)
-                self.assertIn(expected_roles, output)
-                self.assertIn("model is not a GGUF file", output)
+        with tempfile.TemporaryDirectory() as cache:
+            env["DS4_LOCK_FILE"] = str(Path(cache) / "ds4.lock")
+            common = ["--dump-tokens", "-p", "parity"]
+            by_hf = subprocess.run(
+                [str(ROOT / "ds4"), "--hf", "owner/repo",
+                 "--hf-cache-dir", cache, *common],
+                cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=10, check=False,
+            )
+            self.assertEqual(by_hf.returncode, 0, by_hf.stdout + by_hf.stderr)
+            self.assertIn("repository='owner/repo'", by_hf.stderr)
+            self.assertIn(f"revision='{SHA}'", by_hf.stderr)
+            self.assertIn("selector='Headroom128-IQ2_XXS'", by_hf.stderr)
+            self.assertIn("verified_roles=[receiver] vision=inactive", by_hf.stderr)
+
+            receiver_path = next(Path(cache).rglob("*.gguf"))
+            by_local_model = subprocess.run(
+                [str(ROOT / "ds4"), "--model", str(receiver_path), *common],
+                cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=10, check=False,
+            )
+            self.assertEqual(by_local_model.returncode, 0,
+                             by_local_model.stdout + by_local_model.stderr)
+            self.assertEqual(by_hf.stdout, by_local_model.stdout)
+            self.assertEqual(by_local_model.stderr, "")
+
+    def test_server_handoffs_verified_receiver_before_weight_binding(self):
+        env = os.environ.copy()
+        env["HF_ENDPOINT"] = self.endpoint
+        with tempfile.TemporaryDirectory() as cache:
+            env["DS4_LOCK_FILE"] = str(Path(cache) / "ds4.lock")
+            result = subprocess.run(
+                [str(ROOT / "ds4-server"), "--cpu", "--hf", "owner/repo",
+                 "--hf-cache-dir", cache],
+                cwd=ROOT, env=env, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=10, check=False,
+            )
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("repository='owner/repo'", output)
+        self.assertIn(f"revision='{SHA}'", output)
+        self.assertIn("verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=inactive", output)
+        self.assertIn("required tensor is missing: token_embd.weight", output)
 
 
 if __name__ == "__main__":
