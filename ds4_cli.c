@@ -2086,6 +2086,9 @@ static cli_config parse_options(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     cli_config cfg = parse_options(argc, argv);
+#ifdef DS4_TEST_HOOKS
+    cfg.engine.test_metadata_only_inspect = cfg.inspect;
+#endif
     ds4_hf_runtime hf_runtime = {0};
     if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
         char hf_err[512] = {0};

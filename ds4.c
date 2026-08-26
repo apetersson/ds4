@@ -57436,6 +57436,21 @@ int ds4_engine_create_with_gpu_config(ds4_engine **out,
     return ds4_engine_open_internal(out, opt, gpu_cfg);
 }
 
+static void engine_open_inspect_support(ds4_engine *e,
+                                        const ds4_engine_options *opt) {
+    if (!opt->mtp_path || !opt->mtp_path[0] ||
+        opt->distributed.role != DS4_DISTRIBUTED_NONE) return;
+    model_open(&e->mtp_model, opt->mtp_path, false, false);
+    ds4_dspark_summary dspark = {0};
+    e->support_kind =
+        support_model_detect(&e->mtp_model, &e->support_stages, &dspark);
+    if (e->support_kind == DS4_SUPPORT_DSPARK) {
+        dspark_weights_bind_optional(&e->dspark_weights,
+                                     &e->mtp_model,
+                                     &dspark);
+    }
+}
+
 static int ds4_engine_open_internal(ds4_engine **out,
                                      const ds4_engine_options *opt,
                                      const ds4_gpu_config *gpu_cfg) {
@@ -57584,27 +57599,16 @@ static int ds4_engine_open_internal(ds4_engine **out,
                     ds4_backend_name(e->backend));
         }
     }
-    /* Inspection needs only parsed GGUF metadata and tensor descriptors. Keep
-     * it ahead of weight binding so deterministic metadata-only fixtures and
-     * genuinely partial diagnostic files can inspect a discovered support
-     * model without pretending the receiver is executable. */
-    if (opt->inspect_only) {
-        if (opt->mtp_path && opt->mtp_path[0] &&
-            opt->distributed.role == DS4_DISTRIBUTED_NONE) {
-            model_open(&e->mtp_model, opt->mtp_path, false, false);
-            ds4_dspark_summary dspark = {0};
-            e->support_kind =
-                support_model_detect(&e->mtp_model, &e->support_stages,
-                                     &dspark);
-            if (e->support_kind == DS4_SUPPORT_DSPARK) {
-                dspark_weights_bind_optional(&e->dspark_weights,
-                                             &e->mtp_model,
-                                             &dspark);
-            }
-        }
+#ifdef DS4_TEST_HOOKS
+    /* The fake-Hub startup fixture is metadata-only by design. This seam is
+     * absent from release builds, whose --inspect continues through required
+     * receiver tensor and layout validation below. */
+    if (opt->inspect_only && opt->test_metadata_only_inspect) {
+        engine_open_inspect_support(e, opt);
         *out = e;
         return 0;
     }
+#endif
     weights_bind(&e->weights,
                  &e->model,
                  load_slice,
@@ -57771,6 +57775,11 @@ static int ds4_engine_open_internal(ds4_engine **out,
                     (double)requested_cache_bytes / 1073741824.0,
                     (double)e->ssd_streaming_cache_bytes / 1073741824.0);
         }
+    }
+    if (opt->inspect_only) {
+        engine_open_inspect_support(e, opt);
+        *out = e;
+        return 0;
     }
     if (e->backend == DS4_BACKEND_CPU && !cpu_load_directional_steering(e)) {
         ds4_engine_close(e);

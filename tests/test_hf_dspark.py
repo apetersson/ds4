@@ -17,6 +17,7 @@ from test_hf_runtime import build_tokenizer_gguf
 
 
 ROOT = Path(__file__).resolve().parents[1]
+TEST_CLI = ROOT / "tests" / "test_hf_dspark_cli"
 FIXTURE = ROOT / "tests" / "fixtures" / "hf" / "variants-v2.json"
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
@@ -158,9 +159,10 @@ class HFDsparkTests(unittest.TestCase):
         env["DS4_LOCK_FILE"] = str(Path(self.cache.name) / "ds4.lock")
         return env
 
-    def run_ds4(self, *args, timeout=10):
+    def run_ds4(self, *args, executable=None, timeout=10):
         return subprocess.run(
-            [str(ROOT / "ds4"), *args], cwd=ROOT, env=self.env(), text=True,
+            [str(executable or ROOT / "ds4"), *args],
+            cwd=ROOT, env=self.env(), text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
             check=False,
         )
@@ -193,7 +195,7 @@ class HFDsparkTests(unittest.TestCase):
 
     def test_exact_selected_companion_starts_amid_decoys(self):
         result = self.run_ds4("--cpu", "--inspect", *self.hf_args(),
-                              "--dspark")
+                              "--dspark", executable=TEST_CLI)
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertEqual(self.artifact_requests(), [
@@ -243,6 +245,26 @@ class HFDsparkTests(unittest.TestCase):
         ])
         self.assertNotIn("HF repository=", output)
 
+    def test_internally_consistent_cross_profile_catalog_fails_early(self):
+        wrong_profile = copy.deepcopy(self.other["dspark"])
+        wrong_profile["path"] = (
+            self.target["directory"] +
+            "/dspark-DeepSeek-V4-Flash-0731-Quality128-Q8_0.gguf"
+        )
+        wrong_profile["bytes"] = len(self.other_dspark)
+        wrong_profile["sha256"] = sha256(self.other_dspark)
+        self.target["dspark"] = wrong_profile
+        self.payloads[wrong_profile["path"]] = self.other_dspark
+        self.publish()
+
+        result = self.run_ds4("--cpu", "--inspect", *self.hf_args(),
+                              "--dspark")
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("receiver and DSpark profiles differ", output)
+        self.assertEqual(self.artifact_requests(), [])
+        self.assertNotIn("HF repository=", output)
+
     def test_ssd_streaming_is_rejected_before_network(self):
         result = self.run_ds4(*self.hf_args(), "--dspark", "--ssd-streaming")
         output = result.stdout + result.stderr
@@ -254,7 +276,8 @@ class HFDsparkTests(unittest.TestCase):
         explicit = Path(self.cache.name) / "explicit-dspark.gguf"
         explicit.write_bytes(build_dspark_gguf("explicit-local-support"))
         result = self.run_ds4("--cpu", "--inspect", *self.hf_args(),
-                              "--dspark", "--mtp", str(explicit))
+                              "--dspark", "--mtp", str(explicit),
+                              executable=TEST_CLI)
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertEqual(self.artifact_requests(),
@@ -269,11 +292,22 @@ class HFDsparkTests(unittest.TestCase):
             "--dspark-confidence", "0.4", "--dspark-strict",
             "--mtp-exact-sampling", "--mtp-draft", "5",
             "--mtp-margin", "2.0",
+            executable=TEST_CLI,
         )
         output = result.stdout + result.stderr
         self.assertEqual(result.returncode, 0, output)
         self.assertIn("verified_roles=[receiver,dspark]", output)
         self.assertIn("support model (DSpark, stages=3)", output)
+
+    def test_production_inspect_still_rejects_missing_receiver_tensors(self):
+        receiver = Path(self.cache.name) / "metadata-only-receiver.gguf"
+        receiver.write_bytes(self.receiver)
+        result = self.run_ds4("--cpu", "--inspect", "--model",
+                              str(receiver))
+        output = result.stdout + result.stderr
+        self.assertNotEqual(result.returncode, 0, output)
+        self.assertIn("required tensor is missing: token_embd.weight", output)
+        self.assertNotIn("model:", output)
 
     def test_server_receives_verified_catalog_support_before_model_binding(self):
         result = subprocess.run(
