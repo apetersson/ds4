@@ -12,6 +12,7 @@
 
 #define MXFP4_TYPE 39u
 #define IQ2_XXS_TYPE 16u
+#define Q2_K_TYPE 10u
 #define QK_MXFP4 32u
 #define QK_IQ2_XXS 256u
 #define N_TOTAL_EXPERT 8u
@@ -31,6 +32,16 @@ typedef struct {
 
 typedef char block_iq2_xxs_must_be_66_bytes[
     sizeof(block_iq2_xxs) == 66u ? 1 : -1];
+
+typedef struct {
+    uint8_t scales[QK_IQ2_XXS / 16u];
+    uint8_t qs[QK_IQ2_XXS / 4u];
+    uint16_t d;
+    uint16_t dmin;
+} block_q2_k;
+
+typedef char block_q2_k_must_be_84_bytes[
+    sizeof(block_q2_k) == 84u ? 1 : -1];
 
 static const float mxfp4_values[16] = {
     0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f,
@@ -85,27 +96,6 @@ static void fill_matrix(block_mxfp4 *matrix, uint32_t salt) {
                     const uint8_t hi = (uint8_t)(
                         (salt * 3u + expert + row * 5u + block * 7u + i * 3u) & 15u);
                     b->qs[i] = (uint8_t)(lo | (hi << 4u));
-                }
-            }
-        }
-    }
-}
-
-static void fill_positive_matrix(block_mxfp4 *matrix, uint32_t salt) {
-    const uint32_t blocks_per_row = DIM / QK_MXFP4;
-    for (uint32_t expert = 0; expert < N_TOTAL_EXPERT; expert++) {
-        for (uint32_t row = 0; row < DIM; row++) {
-            block_mxfp4 *blocks = matrix +
-                ((uint64_t)expert * DIM + row) * blocks_per_row;
-            for (uint32_t block = 0; block < blocks_per_row; block++) {
-                blocks[block].e = (uint8_t)(121u +
-                    ((salt + expert + row + block) % 5u));
-                for (uint32_t i = 0; i < QK_MXFP4 / 2u; i++) {
-                    const uint8_t lo = (uint8_t)(
-                        ((salt + expert + row + block + i) % 7u) + 1u);
-                    const uint8_t hi = (uint8_t)(
-                        ((salt + expert + row + block + i + 3u) % 7u) + 1u);
-                    blocks[block].qs[i] = (uint8_t)(lo | (hi << 4u));
                 }
             }
         }
@@ -888,6 +878,7 @@ static int test_all_mxfp4(void) {
 
 static float test_f16_to_f32(uint16_t value) {
     switch (value) {
+    case 0x3000u: return 0.125f;
     case 0x3400u: return 0.25f;
     case 0x3800u: return 0.5f;
     case 0x3c00u: return 1.0f;
@@ -898,31 +889,126 @@ static float test_f16_to_f32(uint16_t value) {
 
 static void fill_iq2_matrix(block_iq2_xxs *matrix, uint32_t salt) {
     static const uint16_t scales[] = { 0x3400u, 0x3800u, 0x3c00u, 0x4000u };
+    enum { TEST_GRID_COUNT = 11 };
     for (uint32_t expert = 0; expert < N_TOTAL_EXPERT; expert++) {
         for (uint32_t row = 0; row < DIM; row++) {
             block_iq2_xxs *block = matrix + (uint64_t)expert * DIM + row;
             block->d = scales[(salt + expert * 3u + row) % 4u];
-            memset(block->qs, 0, sizeof(block->qs));
+            for (uint32_t group = 0; group < QK_IQ2_XXS / 32u; group++) {
+                uint32_t grids = 0;
+                uint32_t signs_scales =
+                    ((salt + expert + row * 3u + group * 5u) & 15u) << 28u;
+                for (uint32_t lane = 0; lane < 4u; lane++) {
+                    const uint32_t grid =
+                        (salt + expert * 7u + row * 5u + group * 3u + lane) %
+                        TEST_GRID_COUNT;
+                    const uint32_t sign =
+                        (salt * 3u + expert * 11u + row + group * 13u + lane * 17u) & 127u;
+                    grids |= grid << (8u * lane);
+                    signs_scales |= sign << (7u * lane);
+                }
+                memcpy(block->qs + group * 4u, &grids, sizeof(grids));
+                memcpy(block->qs + group * 4u + 2u,
+                       &signs_scales, sizeof(signs_scales));
+            }
         }
     }
 }
 
-/* Grid index zero with zero sign/scale bits is the constant +1 IQ2_XXS grid.
- * This keeps the reference compact while still testing the production fused
- * IQ2 gate/up kernels and their row/expert addressing. */
-static float dot_iq2_constant(const block_iq2_xxs *row, const float *x) {
-    float sum = 0.0f;
-    for (uint32_t i = 0; i < DIM; i++) sum += x[i];
-    return test_f16_to_f32(row->d) * sum;
+static const uint64_t test_iq2_grids[11] = {
+    UINT64_C(0x0808080808080808), UINT64_C(0x080808080808082b),
+    UINT64_C(0x0808080808081919), UINT64_C(0x0808080808082b08),
+    UINT64_C(0x0808080808082b2b), UINT64_C(0x0808080808190819),
+    UINT64_C(0x0808080808191908), UINT64_C(0x08080808082b0808),
+    UINT64_C(0x08080808082b082b), UINT64_C(0x08080808082b2b08),
+    UINT64_C(0x08080808082b2b2b),
+};
+
+static uint8_t test_iq2_sign_mask(uint32_t sign_index) {
+    uint32_t bits = sign_index;
+    bits ^= bits >> 4u;
+    bits ^= bits >> 2u;
+    bits ^= bits >> 1u;
+    return (uint8_t)(sign_index | ((bits & 1u) << 7u));
 }
 
-static int test_mixed_iq2_mxfp4(void) {
+static float dot_iq2(const block_iq2_xxs *row, const float *x) {
+    float sum = 0.0f;
+    const float d = test_f16_to_f32(row->d);
+    for (uint32_t group = 0; group < QK_IQ2_XXS / 32u; group++) {
+        uint32_t grids = 0;
+        uint32_t signs_scales = 0;
+        memcpy(&grids, row->qs + group * 4u, sizeof(grids));
+        memcpy(&signs_scales, row->qs + group * 4u + 2u,
+               sizeof(signs_scales));
+        const float scale =
+            0.125f * d * (float)(2u * (signs_scales >> 28u) + 1u);
+        for (uint32_t lane = 0; lane < 4u; lane++) {
+            const uint32_t grid_index = (grids >> (8u * lane)) & 255u;
+            const uint32_t sign_index =
+                (signs_scales >> (7u * lane)) & 127u;
+            const uint8_t sign_mask = test_iq2_sign_mask(sign_index);
+            const uint8_t *grid =
+                (const uint8_t *)&test_iq2_grids[grid_index];
+            for (uint32_t i = 0; i < 8u; i++) {
+                const float sign = (sign_mask & (1u << i)) ? -1.0f : 1.0f;
+                sum += scale * sign * (float)grid[i] *
+                       x[group * 32u + lane * 8u + i];
+            }
+        }
+    }
+    return sum;
+}
+
+static void fill_q2_matrix(block_q2_k *matrix, uint32_t salt) {
+    static const uint16_t d_values[] = { 0x3400u, 0x3800u };
+    static const uint16_t min_values[] = { 0x3000u, 0x3400u };
+    for (uint32_t expert = 0; expert < N_TOTAL_EXPERT; expert++) {
+        for (uint32_t row = 0; row < DIM; row++) {
+            block_q2_k *block = matrix + (uint64_t)expert * DIM + row;
+            block->d = d_values[(salt + expert + row) & 1u];
+            block->dmin = min_values[(salt + expert * 3u + row) & 1u];
+            for (uint32_t group = 0; group < QK_IQ2_XXS / 16u; group++) {
+                const uint8_t scale = (uint8_t)(1u +
+                    ((salt + expert + row * 3u + group * 5u) % 7u));
+                const uint8_t min = (uint8_t)(
+                    (salt * 3u + expert * 5u + row + group) % 4u);
+                block->scales[group] = (uint8_t)(scale | (min << 4u));
+            }
+            for (uint32_t i = 0; i < sizeof(block->qs); i++) {
+                block->qs[i] = (uint8_t)(
+                    salt + expert * 19u + row * 7u + i * 11u);
+            }
+        }
+    }
+}
+
+static float dot_q2(const block_q2_k *row, const float *x) {
+    const float d = test_f16_to_f32(row->d);
+    const float dmin = test_f16_to_f32(row->dmin);
+    float sum = 0.0f;
+    for (uint32_t group = 0; group < QK_IQ2_XXS / 16u; group++) {
+        const uint32_t half = group / 8u;
+        const uint32_t within = group % 8u;
+        const uint32_t shift = (within / 2u) * 2u;
+        const uint32_t qbase = half * 32u + (within & 1u) * 16u;
+        const uint8_t sm = row->scales[group];
+        const float scale = d * (float)(sm & 15u);
+        const float min = dmin * (float)(sm >> 4u);
+        for (uint32_t i = 0; i < 16u; i++) {
+            const uint32_t q = (row->qs[qbase + i] >> shift) & 3u;
+            sum += (scale * (float)q - min) * x[group * 16u + i];
+        }
+    }
+    return sum;
+}
+
+static int test_mixed_iq2_q2(void) {
     enum { MAX_TOKENS = 5 };
     const uint64_t page = (uint64_t)getpagesize();
     const uint64_t gate_row_bytes = sizeof(block_iq2_xxs);
     const uint64_t gate_expert_bytes = DIM * gate_row_bytes;
-    const uint64_t down_row_bytes =
-        (DIM / QK_MXFP4) * sizeof(block_mxfp4);
+    const uint64_t down_row_bytes = sizeof(block_q2_k);
     const uint64_t down_expert_bytes = DIM * down_row_bytes;
     const uint64_t gate_tensor_bytes = N_TOTAL_EXPERT * gate_expert_bytes;
     const uint64_t down_tensor_bytes = N_TOTAL_EXPERT * down_expert_bytes;
@@ -933,13 +1019,13 @@ static int test_mixed_iq2_mxfp4(void) {
 
     void *model = NULL;
     if (posix_memalign(&model, (size_t)page, (size_t)model_size) != 0) {
-        fprintf(stderr, "mixed IQ2/MXFP4 Metal model allocation failed\n");
+        fprintf(stderr, "mixed IQ2/Q2 Metal model allocation failed\n");
         return 0;
     }
     memset(model, 0, (size_t)model_size);
     fill_iq2_matrix((block_iq2_xxs *)((uint8_t *)model + gate_offset), 1u);
     fill_iq2_matrix((block_iq2_xxs *)((uint8_t *)model + up_offset), 3u);
-    fill_positive_matrix((block_mxfp4 *)((uint8_t *)model + down_offset), 13u);
+    fill_q2_matrix((block_q2_k *)((uint8_t *)model + down_offset), 13u);
 
     float x[MAX_TOKENS * DIM];
     int32_t selected[MAX_TOKENS * N_EXPERT];
@@ -964,12 +1050,12 @@ static int test_mixed_iq2_mxfp4(void) {
         (const block_iq2_xxs *)((const uint8_t *)model + gate_offset);
     const block_iq2_xxs *up_matrix =
         (const block_iq2_xxs *)((const uint8_t *)model + up_offset);
-    const block_mxfp4 *down_matrix =
-        (const block_mxfp4 *)((const uint8_t *)model + down_offset);
+    const block_q2_k *down_matrix =
+        (const block_q2_k *)((const uint8_t *)model + down_offset);
     const uint64_t down_blocks_per_expert =
-        down_expert_bytes / sizeof(block_mxfp4);
+        down_expert_bytes / sizeof(block_q2_k);
     const uint64_t down_blocks_per_row =
-        down_row_bytes / sizeof(block_mxfp4);
+        down_row_bytes / sizeof(block_q2_k);
 
     for (uint32_t n_tokens = 1; ok && n_tokens <= MAX_TOKENS; n_tokens++) {
         const uint64_t pair_rows = (uint64_t)n_tokens * N_EXPERT;
@@ -995,9 +1081,9 @@ static int test_mixed_iq2_mxfp4(void) {
                 const uint32_t expert = (uint32_t)selected[pair];
                 for (uint32_t row = 0; row < DIM; row++) {
                     const uint64_t value = pair * DIM + row;
-                    gate_ref[value] = dot_iq2_constant(
+                    gate_ref[value] = dot_iq2(
                         gate_matrix + (uint64_t)expert * DIM + row, token_x);
-                    up_ref[value] = dot_iq2_constant(
+                    up_ref[value] = dot_iq2(
                         up_matrix + (uint64_t)expert * DIM + row, token_x);
                     const float gate = fminf(gate_ref[value], 7.0f);
                     const float up = fmaxf(-7.0f, fminf(up_ref[value], 7.0f));
@@ -1009,7 +1095,7 @@ static int test_mixed_iq2_mxfp4(void) {
                 for (uint32_t slot = 0; slot < N_EXPERT; slot++) {
                     const uint64_t pair = (uint64_t)token * N_EXPERT + slot;
                     const uint32_t expert = (uint32_t)selected[pair];
-                    sum += dot_mxfp4(
+                    sum += dot_q2(
                         down_matrix + (uint64_t)expert * down_blocks_per_expert +
                             (uint64_t)row * down_blocks_per_row,
                         mid_ref + pair * DIM);
@@ -1020,7 +1106,7 @@ static int test_mixed_iq2_mxfp4(void) {
         if (ok && (!values_have_signal(gate_ref, pair_values) ||
                    !values_have_signal(mid_ref, pair_values) ||
                    !values_have_signal(out_ref, out_values))) {
-            fprintf(stderr, "mixed IQ2/MXFP4 reference unexpectedly has no signal\n");
+            fprintf(stderr, "mixed IQ2/Q2 reference unexpectedly has no signal\n");
             ok = 0;
         }
 
@@ -1044,7 +1130,7 @@ static int test_mixed_iq2_mxfp4(void) {
         ok = ok && ds4_gpu_routed_moe_batch_tensor(
             out_tensor, gate_tensor, up_tensor, mid_tensor, experts_tensor,
             model, model_size, gate_offset, up_offset, down_offset,
-            IQ2_XXS_TYPE, MXFP4_TYPE, gate_expert_bytes, gate_row_bytes,
+            IQ2_XXS_TYPE, Q2_K_TYPE, gate_expert_bytes, gate_row_bytes,
             down_expert_bytes, down_row_bytes, DIM, DIM, DIM,
             selected_tensor, weights_tensor, N_TOTAL_EXPERT, N_EXPERT,
             7.0f, x_tensor, 0u, n_tokens, &mid_is_f16, true);
@@ -1060,13 +1146,13 @@ static int test_mixed_iq2_mxfp4(void) {
         if (ok) {
             char name[24];
             snprintf(name, sizeof(name), "mixed%u-gate", n_tokens);
-            ok = compare_values(name, gate_gpu, gate_ref, pair_values, 2.0e-5f);
+            ok = compare_values(name, gate_gpu, gate_ref, pair_values, 2.0e-4f);
             snprintf(name, sizeof(name), "mixed%u-up", n_tokens);
-            ok = ok && compare_values(name, up_gpu, up_ref, pair_values, 2.0e-5f);
+            ok = ok && compare_values(name, up_gpu, up_ref, pair_values, 2.0e-4f);
             snprintf(name, sizeof(name), "mixed%u-mid", n_tokens);
-            ok = ok && compare_values(name, mid_gpu, mid_ref, pair_values, 2.0e-5f);
+            ok = ok && compare_values(name, mid_gpu, mid_ref, pair_values, 2.0e-4f);
             snprintf(name, sizeof(name), "mixed%u-out", n_tokens);
-            ok = ok && compare_values(name, out_gpu, out_ref, out_values, 3.0e-4f);
+            ok = ok && compare_values(name, out_gpu, out_ref, out_values, 1.0e-2f);
         }
 
         ds4_gpu_tensor_free(out_tensor);
@@ -1089,12 +1175,12 @@ static int test_mixed_iq2_mxfp4(void) {
 
     ds4_gpu_cleanup();
     free(model);
-    fprintf(stderr, "mixed IQ2/MXFP4 Metal tokens 1-5: %s\n", ok ? "PASS" : "FAIL");
+    fprintf(stderr, "mixed IQ2/Q2 Metal tokens 1-5: %s\n", ok ? "PASS" : "FAIL");
     return ok;
 }
 
 int main(void) {
     const int all_mxfp4_ok = test_all_mxfp4() == 0;
-    const int mixed_ok = test_mixed_iq2_mxfp4();
+    const int mixed_ok = test_mixed_iq2_q2();
     return all_mxfp4_ok && mixed_ok ? 0 : 1;
 }
