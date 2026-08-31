@@ -129,8 +129,9 @@ static int compare_values(const char *name, const float *actual,
 }
 
 static int test_streaming_single_span_replaces_views(void) {
+    enum { MODEL_LAYERS = 43 };
     const uint64_t page = (uint64_t)getpagesize();
-    const uint64_t model_size = 4u * page;
+    const uint64_t model_size = (MODEL_LAYERS + 1u) * page;
     void *model = NULL;
     if (posix_memalign(&model, (size_t)page, (size_t)model_size) != 0) {
         fprintf(stderr, "Metal streaming span model allocation failed\n");
@@ -141,28 +142,22 @@ static int test_streaming_single_span_replaces_views(void) {
     int ok = ds4_gpu_init() != 0;
     ds4_gpu_set_ssd_streaming(true);
     const uint64_t size = page;
-    const uint64_t first = page;
-    const uint64_t second = 3u * page;
-    ok = ok && ds4_gpu_set_model_map_spans(model,
-                                           model_size,
-                                           &first,
-                                           &size,
-                                           1u,
-                                           size);
-    ok = ok && ds4_gpu_test_model_view_count() == 1u;
-    ok = ok && ds4_gpu_set_model_map_spans(model,
-                                           model_size,
-                                           &second,
-                                           &size,
-                                           1u,
-                                           size);
-    ok = ok && ds4_gpu_test_model_view_count() == 1u;
+    for (uint32_t layer = 0; layer < MODEL_LAYERS && ok; layer++) {
+        const uint64_t offset = (uint64_t)(layer + 1u) * page;
+        ok = ds4_gpu_set_model_map_spans(model,
+                                         model_size,
+                                         &offset,
+                                         &size,
+                                         1u,
+                                         size) != 0;
+        ok = ok && ds4_gpu_test_model_view_count() == 1u;
+    }
 
     ds4_gpu_set_ssd_streaming(false);
     ds4_gpu_cleanup();
     free(model);
     fprintf(stderr,
-            "Metal streaming single-span view replacement: %s\n",
+            "Metal streaming 43-layer single-span view replacement: %s\n",
             ok ? "PASS" : "FAIL");
     return ok;
 }
