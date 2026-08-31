@@ -5,9 +5,22 @@ python_bin=${VISION_PYTHON:-python3.12}
 venv_dir=${VISION_VENV:-.venv-vision}
 
 if ! command -v "$python_bin" >/dev/null 2>&1; then
-    echo "error: $python_bin is required for the qualified Vision-Exp runtime" >&2
-    echo "       install Python 3.12, or set VISION_PYTHON=/path/to/python3.12" >&2
-    exit 1
+    if [ "$python_bin" = "python3.12" ] &&
+       [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+        brew_python="$(brew --prefix python@3.12)/bin/python3.12"
+        if [ ! -x "$brew_python" ]; then
+            echo "Python 3.12 is missing; installing it with Homebrew"
+            brew install python@3.12
+        fi
+        if [ -x "$brew_python" ]; then
+            python_bin=$brew_python
+        fi
+    fi
+    if ! command -v "$python_bin" >/dev/null 2>&1; then
+        echo "error: $python_bin is required for the qualified Vision-Exp runtime" >&2
+        echo "       install Python 3.12, or set VISION_PYTHON=/path/to/python3.12" >&2
+        exit 1
+    fi
 fi
 
 python_version=$(

@@ -201,6 +201,12 @@ HF_ENDPOINT=https://huggingface.co ./ds4 -hf OWNER/CATALOG_REPO \
 ./ds4 -hf OWNER/CATALOG_REPO --hf-cache-dir /fast/cache --offline
 ```
 
+The cache filesystem must support atomic hard links so verified artifacts can
+be published without overwriting an existing immutable entry. APFS and ext4
+are suitable; ExFAT is not. Unlike the degraded copy mode used by general HF
+clients on filesystems without symlinks, DS4 fails closed rather than weakening
+the cache integrity contract. Select a compatible disk with `--hf-cache-dir`.
+
 Offline mode performs no network access and succeeds only when the selected
 immutable snapshot and every requested role are present and verified.
 
@@ -245,6 +251,9 @@ Common failures are intentionally distinct:
 - An offline miss means the exact revision or a requested role was not fully
   verified in that cache. Run once online with the same endpoint, cache,
   revision, selector, and runtime flags.
+- A cache atomic-hard-link error means the selected filesystem is unsupported;
+  pass `--hf-cache-dir` pointing to APFS, ext4, or another filesystem with hard
+  links instead of using an ExFAT cache.
 - Selector errors list the catalog variants. Missing or incomplete vision
   roles fail closed; use `--no-vision` only when text-only service is intended.
 - Wrong-sibling and unsupported schema/runtime-revision errors require a

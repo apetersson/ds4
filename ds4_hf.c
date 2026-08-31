@@ -3561,6 +3561,14 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
     if (linkat(parent_fd, metadata_tmp_leaf, parent_fd, metadata_leaf, 0)) {
         int saved_errno = errno;
         unlinkat(parent_fd, metadata_tmp_leaf, 0);
+        if (saved_errno == ENOTSUP || saved_errno == EOPNOTSUPP) {
+            acquisition_context_fail(
+                err, errlen, plan, artifact,
+                "cache filesystem lacks atomic hard-link support; use "
+                "--hf-cache-dir DIR on APFS, ext4, or another "
+                "hard-link-capable filesystem");
+            goto done;
+        }
         acquisition_context_fail(
             err, errlen, plan, artifact,
             "cannot exclusively publish immutable cache metadata: %s",
@@ -3571,6 +3579,14 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
         int saved_errno = errno;
         unlinkat(parent_fd, metadata_leaf, 0);
         unlinkat(parent_fd, metadata_tmp_leaf, 0);
+        if (saved_errno == ENOTSUP || saved_errno == EOPNOTSUPP) {
+            acquisition_context_fail(
+                err, errlen, plan, artifact,
+                "cache filesystem lacks atomic hard-link support; use "
+                "--hf-cache-dir DIR on APFS, ext4, or another "
+                "hard-link-capable filesystem");
+            goto done;
+        }
         acquisition_context_fail(
             err, errlen, plan, artifact,
             "cannot exclusively publish verified cache entry: %s",
@@ -3823,6 +3839,13 @@ static bool publish_regular_exclusive(int parent_fd, const char *leaf,
     }
     unlinkat(parent_fd, temporary, 0);
     if (!ok) {
+        if (saved_errno == ENOTSUP || saved_errno == EOPNOTSUPP) {
+            return fail(
+                err, errlen,
+                "HF cache filesystem lacks atomic hard-link support; "
+                "use --hf-cache-dir DIR on APFS, ext4, or another "
+                "hard-link-capable filesystem");
+        }
         return fail(err, errlen, "cannot publish HF metadata cache entry: %s",
                     strerror(saved_errno));
     }

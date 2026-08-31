@@ -35,6 +35,7 @@
 *.dSYM/
 __pycache__/
 *.pyc
+/.venv-vision/
 /gguf-tools/libds4quants.dylib
 /gguf-tools/libds4quants.so
 /misc/
