@@ -68,7 +68,13 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test test-hf test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-hf-vision test-hf-dspark test-hf-diagnostics test-rocm test-glm53-kda-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-mxfp4-quantizer-test dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+.PHONY: all help clean test test-hf test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-hf-vision test-hf-dspark test-hf-diagnostics test-rocm test-glm53-kda-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-mxfp4-quantizer-test dspark-acceptance dspark-verify-depth mtp-verify-depth vision-exp-setup cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+
+VISION_PYTHON ?= python3.12
+VISION_VENV ?= .venv-vision
+
+vision-exp-setup: ds4-server
+	VISION_PYTHON="$(VISION_PYTHON)" VISION_VENV="$(VISION_VENV)" ./scripts/setup_vision_exp.sh
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
@@ -81,6 +87,7 @@ help:
 	@echo "  make cpu          Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make test         Build and run tests"
 	@echo "  make test-hf      Run the deterministic, credential-free HF resolver suite"
+	@echo "  make vision-exp-setup  Build ./ds4-server and create the Vision-Exp Python environment"
 	@echo "  make metal-decode-schedule-bench  Build the balanced Metal decode schedule benchmark"
 	@echo "  make metal-prefill-variant-bench  Build the balanced Metal prefill variant benchmark"
 	@echo "  make check-mxfp4-half-lut  Verify the checked-in MXFP4 half LUT matches the generator"
@@ -167,6 +174,7 @@ help:
 	@echo "  make test-rocm           Core regression suite on ROCm-only hosts"
 	@echo "  make cpu                 Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make test                Build and run tests"
+	@echo "  make vision-exp-setup    Build ./ds4-server and create the Vision-Exp Python environment"
 	@echo "  make dspark-verify-depth Run DSpark speculative verification smoke if support GGUF is present"
 	@echo "  make mtp-verify-depth    Run legacy MTP speculative verification smoke if MTP GGUF is present"
 	@echo "  make clean               Remove build outputs"
