@@ -3197,10 +3197,13 @@ static void compare_all_tensors(st_db *db,
             fprintf(stderr, "error: comparison type/name mismatch for %s\n", planned->name);
             exit(1);
         }
+        const tensor_meta *source = i < tmpl->n_tensors
+            ? &tmpl->tensors[i]
+            : planned;
         byte_buf generated = generate_tensor(
             db,
             planned->name,
-            &tmpl->tensors[i],
+            source,
             planned->type,
             p->n_experts,
             p->n_threads,
