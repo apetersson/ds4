@@ -12,9 +12,12 @@
 #define DS4_HF_COMMIT_SHA_LEN 40
 #define DS4_HF_URL_MAX 4096
 
-/* variants.json v2 is deliberately bounded and data-only. These limits are
- * part of the parser contract, not tunables supplied by a repository. */
-#define DS4_HF_MANIFEST_VERSION 2
+/* variants.json is deliberately bounded and data-only. Schema v2 describes
+ * the original DeepEncoderV2 + llama.cpp companion catalog. Schema v3 also
+ * permits the native DeepSeek-V4 Vision-Exp tower/config bundle. These limits
+ * are part of the parser contract, not tunables supplied by a repository. */
+#define DS4_HF_MANIFEST_VERSION 3
+#define DS4_HF_MANIFEST_MIN_VERSION 2
 #define DS4_HF_MANIFEST_MAX_BYTES (256u * 1024u)
 #define DS4_HF_MANIFEST_MAX_DEPTH 16
 #define DS4_HF_MANIFEST_MAX_TOKENS 8192
@@ -115,9 +118,15 @@ typedef struct {
 
 typedef struct {
     ds4_hf_manifest_artifact tower;
+    bool has_projector;
     ds4_hf_manifest_artifact projector;
     ds4_hf_manifest_artifact config;
 } ds4_hf_manifest_vision_bundle;
+
+typedef enum {
+    DS4_HF_VISION_CONTRACT_DEEPENCODER_V2,
+    DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE,
+} ds4_hf_manifest_vision_contract;
 
 /* Independently computed digests of canonical name/shape/BF16 tensor streams.
  * These are intentionally distinct from artifact file hashes: equal values
@@ -137,13 +146,16 @@ typedef struct {
     bool is_default;
     ds4_hf_manifest_artifact receiver;
     ds4_hf_manifest_vision_bundle ds4_vision;
+    bool has_llama_cpp_mmproj;
     ds4_hf_manifest_artifact llama_cpp_mmproj;
+    bool has_bf16_tensor_identity;
     ds4_hf_manifest_bf16_identity bf16_tensor_identity;
     bool has_dspark;
     ds4_hf_manifest_artifact dspark;
 } ds4_hf_manifest_variant;
 
 typedef struct {
+    ds4_hf_manifest_vision_contract contract;
     char image_token[DS4_HF_METADATA_MAX];
     uint32_t image_token_id;
     uint32_t image_size;
@@ -167,6 +179,9 @@ typedef struct {
     char separator_placement[DS4_HF_METADATA_MAX];
     double mean[3];
     double std[3];
+    uint32_t patch_size;
+    uint32_t downsample_ratio;
+    uint32_t maximum_tokens;
 } ds4_hf_manifest_vision_metadata;
 
 typedef struct {

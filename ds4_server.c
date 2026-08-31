@@ -14910,15 +14910,17 @@ int main(int argc, char **argv) {
             }
             cfg.vision.tower = ds4_hf_runtime_open_path(
                 &hf_runtime, DS4_HF_ROLE_VISION_TOWER);
-            /* The modern native Vision-Exp encoder consumes the catalog
-             * config as --vision-adapter; the legacy projector remains
-             * integrity-verified for dual-runtime catalog parity. */
+            const bool native_vision =
+                hf_runtime.vision_metadata.contract ==
+                    DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE;
             cfg.vision.adapter = ds4_hf_runtime_open_path(
-                &hf_runtime, DS4_HF_ROLE_VISION_CONFIG);
+                &hf_runtime, native_vision ? DS4_HF_ROLE_VISION_CONFIG :
+                                             DS4_HF_ROLE_VISION_PROJECTOR);
             cfg.vision.tower_fd = hf_runtime_role_fd(
                 &hf_runtime, DS4_HF_ROLE_VISION_TOWER);
             cfg.vision.adapter_fd = hf_runtime_role_fd(
-                &hf_runtime, DS4_HF_ROLE_VISION_CONFIG);
+                &hf_runtime, native_vision ? DS4_HF_ROLE_VISION_CONFIG :
+                                             DS4_HF_ROLE_VISION_PROJECTOR);
         }
         if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
             cfg.engine.mtp_path = ds4_hf_runtime_open_path(
@@ -14934,12 +14936,22 @@ int main(int argc, char **argv) {
             &hf_runtime.plan.artifacts[0];
         const bool dspark_verified = ds4_hf_runtime_role_verified(
             &hf_runtime, DS4_HF_ROLE_DSPARK);
-        const char *verified_roles =
-            hf_runtime.vision_bundle_verified && dspark_verified ?
+        const bool native_vision =
+            hf_runtime.vision_metadata.contract ==
+                DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE;
+        const char *verified_roles;
+        if (hf_runtime.vision_bundle_verified && native_vision) {
+            verified_roles = dspark_verified ?
+                "[receiver,ds4_vision.tower,ds4_vision.config,dspark]" :
+                "[receiver,ds4_vision.tower,ds4_vision.config]";
+        } else if (hf_runtime.vision_bundle_verified) {
+            verified_roles = dspark_verified ?
                 "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config,dspark]" :
-            hf_runtime.vision_bundle_verified ?
-                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
-            dspark_verified ? "[receiver,dspark]" : "[receiver]";
+                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]";
+        } else {
+            verified_roles = dspark_verified ? "[receiver,dspark]" :
+                                               "[receiver]";
+        }
         server_log(DS4_LOG_DEFAULT,
                    "ds4-server: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=%s dspark=%s support=%s",
                    hf_runtime.plan.repository, hf_runtime.plan.revision,

@@ -1,0 +1,53 @@
+{
+  "schema_version": 3,
+  "repository": "apetersson/DeepSeek-V4-Flash-Vision-Exp-Abliterated",
+  "default_selector": "Reference-Native-GGUF",
+  "pipeline_tag": "image-text-to-text",
+  "shared_vision": {
+    "kind": "deepseek4-vision-exp-native",
+    "image_token": "<｜image｜>",
+    "image_token_id": 129279,
+    "encoder_dim": 1024,
+    "receiver_dim": 4096,
+    "patch_size": 14,
+    "downsample_ratio": 3,
+    "maximum_tokens": 384
+  },
+  "variants": [
+    {
+      "selector": "Reference-Native-GGUF",
+      "directory": "Reference-Native-GGUF",
+      "default": true,
+      "receiver": {
+        "path": "Reference-Native-GGUF/DeepSeek-V4-Flash-Vision-Exp-Abliterated-NativePreserved-F16-F32-MXFP4.gguf",
+        "bytes": 164697137152,
+        "sha256": "4b46c3b767c09ed707f2e89122e8a0ea9a92e0f714ffd5a5d3656c91f1cc69b4",
+        "precision": "MXFP4-F16-F32",
+        "profile": "Reference-Native",
+        "capabilities": {"required": ["deepseek4", "text-generation"], "optional": ["ssd-streaming"]},
+        "runtime": {"ds4": {"minimum_revision": "native-vision-exp-catalog-v1"}},
+        "gguf_metadata": {"architecture": "deepseek4"}
+      },
+      "ds4_vision": {
+        "tower": {
+          "path": "Reference-Native-GGUF/DeepSeek-V4-Flash-Vision-Exp-Abliterated-Native.safetensors",
+          "bytes": 932814112,
+          "sha256": "adc059422d6bd36389707ad5b29164279d0a564a931f15ae8e63cc6e0d7d1d7c",
+          "precision": "BF16",
+          "profile": "Vision-Exp-Native",
+          "capabilities": {"required": ["ds4-vision"], "optional": []},
+          "runtime": {"ds4": {"minimum_revision": "native-vision-exp-catalog-v1"}}
+        },
+        "config": {
+          "path": "Reference-Native-GGUF/config.json",
+          "bytes": 2165,
+          "sha256": "6cd841bdd6702f5e2ac34671bc78047ed80817102465525ae2a41c502abbcd75",
+          "precision": "JSON",
+          "profile": "Vision-Exp-Native",
+          "capabilities": {"required": ["ds4-vision"], "optional": []},
+          "runtime": {"ds4": {"minimum_revision": "native-vision-exp-catalog-v1"}}
+        }
+      }
+    }
+  ]
+}

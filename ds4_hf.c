@@ -953,7 +953,8 @@ static bool manifest_valid_sha256(const char *hash) {
 
 static bool manifest_validate_artifact(manifest_json_parser *jp,
                                        const ds4_hf_manifest_artifact *artifact,
-                                       manifest_artifact_role role) {
+                                       manifest_artifact_role role,
+                                       bool native_vision_contract) {
     if (!manifest_safe_path(artifact->path)) return json_fail(jp, "unsafe artifact path '%s'", artifact->path);
     if (!artifact->bytes) return json_fail(jp, "artifact '%s' has invalid zero byte count", artifact->path);
     if (!manifest_valid_sha256(artifact->sha256)) return json_fail(jp, "artifact '%s' has malformed SHA-256", artifact->path);
@@ -967,7 +968,8 @@ static bool manifest_validate_artifact(manifest_json_parser *jp,
     case ARTIFACT_RECEIVER:
         required = DS4_HF_CAP_DEEPSEEK4 | DS4_HF_CAP_TEXT_GENERATION;
         allowed = required | DS4_HF_CAP_SSD_STREAMING;
-        want_ds4 = want_llama = want_gguf = true;
+        want_ds4 = want_gguf = true;
+        want_llama = !native_vision_contract;
         break;
     case ARTIFACT_DS4_VISION:
         required = allowed = DS4_HF_CAP_DS4_VISION;
@@ -1018,13 +1020,13 @@ static bool manifest_parse_vision_bundle(manifest_json_parser *jp,
             if (!manifest_mark_field(jp, &seen, 1, key) || !manifest_parse_artifact(jp, &bundle->tower)) return false;
         } else if (!strcmp(key, "projector")) {
             if (!manifest_mark_field(jp, &seen, 2, key) || !manifest_parse_artifact(jp, &bundle->projector)) return false;
+            bundle->has_projector = true;
         } else if (!strcmp(key, "config")) {
             if (!manifest_mark_field(jp, &seen, 4, key) || !manifest_parse_artifact(jp, &bundle->config)) return false;
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
     if (!(seen & 1)) return json_fail(jp, "incomplete DS4 vision bundle: missing exact role ds4_vision.tower");
-    if (!(seen & 2)) return json_fail(jp, "incomplete DS4 vision bundle: missing exact role ds4_vision.projector");
     if (!(seen & 4)) return json_fail(jp, "incomplete DS4 vision bundle: missing exact role ds4_vision.config");
     return true;
 }
@@ -1104,7 +1106,19 @@ static bool manifest_parse_shared_vision(manifest_json_parser *jp,
     while (more) {
         char key[DS4_HF_METADATA_MAX];
         if (!manifest_json_key(jp, key, sizeof(key))) return false;
-        if (!strcmp(key, "image_token")) {
+        if (!strcmp(key, "kind")) {
+            char kind[DS4_HF_METADATA_MAX];
+            if (!manifest_mark_field(jp, &seen, 2048, key) ||
+                !manifest_json_charge(jp) ||
+                !manifest_json_string(jp, kind, sizeof(kind))) return false;
+            if (!strcmp(kind, "deepencoder-v2")) {
+                vision->contract = DS4_HF_VISION_CONTRACT_DEEPENCODER_V2;
+            } else if (!strcmp(kind, "deepseek4-vision-exp-native")) {
+                vision->contract = DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE;
+            } else {
+                return json_fail(jp, "unsupported shared_vision kind '%s'", kind);
+            }
+        } else if (!strcmp(key, "image_token")) {
             if (!manifest_mark_field(jp, &seen, 1, key) || !manifest_json_charge(jp) ||
                 !manifest_json_string(jp, vision->image_token, sizeof(vision->image_token))) return false;
         } else if (!strcmp(key, "image_token_id")) {
@@ -1129,15 +1143,45 @@ static bool manifest_parse_shared_vision(manifest_json_parser *jp,
         } else if (!strcmp(key, "preprocessing")) {
             if (!manifest_mark_field(jp, &seen, 1024, key) ||
                 !manifest_parse_preprocessing(jp, vision)) return false;
+        } else if (!strcmp(key, "patch_size")) {
+            if (!manifest_mark_field(jp, &seen, 4096, key) ||
+                !manifest_json_u32(jp, &vision->patch_size)) return false;
+        } else if (!strcmp(key, "downsample_ratio")) {
+            if (!manifest_mark_field(jp, &seen, 8192, key) ||
+                !manifest_json_u32(jp, &vision->downsample_ratio)) return false;
+        } else if (!strcmp(key, "maximum_tokens")) {
+            if (!manifest_mark_field(jp, &seen, 16384, key) ||
+                !manifest_json_u32(jp, &vision->maximum_tokens)) return false;
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
-    if (seen != 2047) return json_fail(jp, "shared_vision contract is incomplete");
+    if (vision->contract == DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE) {
+        const uint64_t required = 1u | 2u | 8u | 16u | 2048u | 4096u |
+                                  8192u | 16384u;
+        if (seen != required) {
+            return json_fail(jp, "native Vision-Exp shared_vision contract is incomplete or mixed with DeepEncoderV2 fields");
+        }
+    } else {
+        const uint64_t legacy = 2047u;
+        const uint64_t explicit_kind = legacy | 2048u;
+        if (seen != legacy && seen != explicit_kind) {
+            return json_fail(jp, "DeepEncoderV2 shared_vision contract is incomplete");
+        }
+    }
     return true;
 }
 
 static bool manifest_validate_shared_vision(manifest_json_parser *jp,
                                             const ds4_hf_manifest_vision_metadata *vision) {
+    if (vision->contract == DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE) {
+        if (strcmp(vision->image_token, "<｜image｜>") ||
+            vision->image_token_id != 129279 || vision->encoder_dim != 1024 ||
+            vision->receiver_dim != 4096 || vision->patch_size != 14 ||
+            vision->downsample_ratio != 3 || vision->maximum_tokens != 384) {
+            return json_fail(jp, "shared_vision is incompatible with the native DeepSeek-V4 Vision-Exp contract");
+        }
+        return true;
+    }
     if (strcmp(vision->image_token, "<｜image｜>") || vision->image_token_id != 129279 ||
         vision->image_size != 1024 || vision->encoder_dim != 896 ||
         vision->receiver_dim != 4096 || vision->tokens_per_view != 256 ||
@@ -1268,10 +1312,12 @@ static bool manifest_parse_variant(manifest_json_parser *jp,
         } else if (!strcmp(key, "llama_cpp_mmproj")) {
             if (!manifest_mark_field(jp, &seen, 32, key) ||
                 !manifest_parse_artifact(jp, &variant->llama_cpp_mmproj)) return false;
+            variant->has_llama_cpp_mmproj = true;
         } else if (!strcmp(key, "bf16_tensor_identity")) {
             if (!manifest_mark_field(jp, &seen, 64, key) ||
                 !manifest_parse_bf16_identity(
                     jp, &variant->bf16_tensor_identity)) return false;
+            variant->has_bf16_tensor_identity = true;
         } else if (!strcmp(key, "dspark")) {
             if (!manifest_mark_field(jp, &seen, 128, key) ||
                 !manifest_parse_artifact(jp, &variant->dspark)) return false;
@@ -1279,10 +1325,9 @@ static bool manifest_parse_variant(manifest_json_parser *jp,
         } else if (!manifest_json_skip_value(jp)) return false;
         if (!manifest_json_next(jp, '}', &more)) return false;
     }
-    if ((seen & 127u) != 127u) {
+    if ((seen & 31u) != 31u) {
         return json_fail(
-            jp, "variant is missing selector, directory, default, receiver, "
-                "ds4_vision, llama_cpp_mmproj, or bf16_tensor_identity");
+            jp, "variant is missing selector, directory, default, receiver, or ds4_vision");
     }
     return true;
 }
@@ -1445,63 +1490,104 @@ bool ds4_hf_llama_gguf_metadata_valid(
     return true;
 }
 
-static bool manifest_validate_variant(manifest_json_parser *jp,
-                                      const ds4_hf_manifest_variant *variant) {
+static bool manifest_validate_variant(
+    manifest_json_parser *jp, const ds4_hf_manifest_variant *variant,
+    ds4_hf_manifest_vision_contract vision_contract) {
     if (!manifest_safe_atom(variant->selector) || strchr(variant->selector, '+') ||
         !manifest_safe_path(variant->directory)) {
         return json_fail(jp, "variant selector or directory is unsafe");
     }
-    if (!manifest_validate_artifact(jp, &variant->receiver, ARTIFACT_RECEIVER) ||
-        !manifest_validate_artifact(jp, &variant->ds4_vision.tower, ARTIFACT_DS4_VISION) ||
-        !manifest_validate_artifact(jp, &variant->ds4_vision.projector, ARTIFACT_DS4_VISION) ||
-        !manifest_validate_artifact(jp, &variant->ds4_vision.config, ARTIFACT_DS4_VISION) ||
-        !manifest_validate_artifact(jp, &variant->llama_cpp_mmproj, ARTIFACT_LLAMA_MMPROJ) ||
-        (variant->has_dspark && !manifest_validate_artifact(jp, &variant->dspark, ARTIFACT_DSPARK))) return false;
+    const bool native =
+        vision_contract == DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE;
+    if (!manifest_validate_artifact(jp, &variant->receiver,
+                                    ARTIFACT_RECEIVER, native) ||
+        !manifest_validate_artifact(jp, &variant->ds4_vision.tower,
+                                    ARTIFACT_DS4_VISION, native) ||
+        !manifest_validate_artifact(jp, &variant->ds4_vision.config,
+                                    ARTIFACT_DS4_VISION, native) ||
+        (variant->ds4_vision.has_projector &&
+         !manifest_validate_artifact(jp, &variant->ds4_vision.projector,
+                                     ARTIFACT_DS4_VISION, native)) ||
+        (variant->has_llama_cpp_mmproj &&
+         !manifest_validate_artifact(jp, &variant->llama_cpp_mmproj,
+                                     ARTIFACT_LLAMA_MMPROJ, native)) ||
+        (variant->has_dspark &&
+         !manifest_validate_artifact(jp, &variant->dspark,
+                                     ARTIFACT_DSPARK, native))) return false;
     if (!manifest_suffix(variant->ds4_vision.tower.path, ".safetensors") ||
-        !manifest_suffix(variant->ds4_vision.projector.path, ".safetensors") ||
         !manifest_suffix(variant->ds4_vision.config.path, ".json")) {
-        return json_fail(jp, "DS4 vision bundle paths must be data-only safetensors/safetensors/JSON roles");
+        return json_fail(jp, "DS4 vision tower/config paths must be data-only safetensors/JSON roles");
     }
-    if (strcmp(variant->ds4_vision.tower.precision, "BF16") ||
-        strcmp(variant->ds4_vision.tower.profile, "DeepEncoderV2")) {
-        return json_fail(
-            jp, "exact role ds4_vision.tower requires BF16 DeepEncoderV2 metadata");
+
+    if (native) {
+        if (variant->ds4_vision.has_projector ||
+            variant->has_llama_cpp_mmproj ||
+            variant->has_bf16_tensor_identity) {
+            return json_fail(jp, "native Vision-Exp variants cannot declare DeepEncoderV2 projector/mmproj identity roles");
+        }
+        if (strcmp(variant->ds4_vision.tower.precision, "BF16") ||
+            strcmp(variant->ds4_vision.tower.profile, "Vision-Exp-Native") ||
+            strcmp(variant->ds4_vision.config.precision, "JSON") ||
+            strcmp(variant->ds4_vision.config.profile, "Vision-Exp-Native")) {
+            return json_fail(jp, "native Vision-Exp tower/config metadata is incompatible");
+        }
+    } else {
+        if (!variant->ds4_vision.has_projector)
+            return json_fail(jp, "incomplete DS4 vision bundle: missing exact role ds4_vision.projector");
+        if (!variant->has_llama_cpp_mmproj)
+            return json_fail(jp, "DeepEncoderV2 variant is missing llama_cpp_mmproj");
+        if (!variant->has_bf16_tensor_identity)
+            return json_fail(jp, "DeepEncoderV2 variant is missing bf16_tensor_identity");
+        if (!manifest_suffix(variant->ds4_vision.projector.path,
+                             ".safetensors")) {
+            return json_fail(jp, "DS4 DeepEncoderV2 projector must be a safetensors role");
+        }
+        if (strcmp(variant->ds4_vision.tower.precision, "BF16") ||
+            strcmp(variant->ds4_vision.tower.profile, "DeepEncoderV2")) {
+            return json_fail(
+                jp, "exact role ds4_vision.tower requires BF16 DeepEncoderV2 metadata");
+        }
+        if (strcmp(variant->ds4_vision.projector.precision, "BF16") ||
+            strcmp(variant->ds4_vision.projector.profile, "896-to-4096")) {
+            return json_fail(
+                jp, "exact role ds4_vision.projector requires BF16 896-to-4096 metadata");
+        }
+        if (strcmp(variant->ds4_vision.config.precision, "JSON") ||
+            strcmp(variant->ds4_vision.config.profile, "DeepEncoderV2")) {
+            return json_fail(
+                jp, "exact role ds4_vision.config requires JSON DeepEncoderV2 metadata");
+        }
+        const ds4_hf_manifest_bf16_identity *identity =
+            &variant->bf16_tensor_identity;
+        if (strcmp(variant->llama_cpp_mmproj.precision, "BF16") ||
+            strcmp(identity->canonicalization,
+                   "named-tensor-name-shape-bf16le-v1") ||
+            !manifest_valid_sha256(identity->source_tower_sha256) ||
+            !manifest_valid_sha256(identity->source_projector_sha256) ||
+            !manifest_valid_sha256(identity->mmproj_tower_sha256) ||
+            !manifest_valid_sha256(identity->mmproj_projector_sha256)) {
+            return json_fail(
+                jp, "BF16 tensor identity contract is missing or malformed");
+        }
+        if (strcmp(identity->source_tower_sha256,
+                   identity->mmproj_tower_sha256) ||
+            strcmp(identity->source_projector_sha256,
+                   identity->mmproj_projector_sha256)) {
+            return json_fail(
+                jp, "raw DS4 and llama.cpp mmproj BF16 tensor identities differ");
+        }
     }
-    if (strcmp(variant->ds4_vision.projector.precision, "BF16") ||
-        strcmp(variant->ds4_vision.projector.profile, "896-to-4096")) {
-        return json_fail(
-            jp, "exact role ds4_vision.projector requires BF16 896-to-4096 metadata");
-    }
-    if (strcmp(variant->ds4_vision.config.precision, "JSON") ||
-        strcmp(variant->ds4_vision.config.profile, "DeepEncoderV2")) {
-        return json_fail(
-            jp, "exact role ds4_vision.config requires JSON DeepEncoderV2 metadata");
-    }
-    const ds4_hf_manifest_bf16_identity *identity =
-        &variant->bf16_tensor_identity;
-    if (strcmp(variant->llama_cpp_mmproj.precision, "BF16") ||
-        strcmp(identity->canonicalization,
-               "named-tensor-name-shape-bf16le-v1") ||
-        !manifest_valid_sha256(identity->source_tower_sha256) ||
-        !manifest_valid_sha256(identity->source_projector_sha256) ||
-        !manifest_valid_sha256(identity->mmproj_tower_sha256) ||
-        !manifest_valid_sha256(identity->mmproj_projector_sha256)) {
-        return json_fail(
-            jp, "BF16 tensor identity contract is missing or malformed");
-    }
-    if (strcmp(identity->source_tower_sha256,
-               identity->mmproj_tower_sha256) ||
-        strcmp(identity->source_projector_sha256,
-               identity->mmproj_projector_sha256)) {
-        return json_fail(
-            jp, "raw DS4 and llama.cpp mmproj BF16 tensor identities differ");
-    }
-    const char *paths[] = {
-        variant->receiver.path, variant->ds4_vision.tower.path,
-        variant->ds4_vision.projector.path, variant->ds4_vision.config.path,
-        variant->llama_cpp_mmproj.path,
-    };
-    for (size_t i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+
+    const char *paths[5];
+    size_t path_count = 0;
+    paths[path_count++] = variant->receiver.path;
+    paths[path_count++] = variant->ds4_vision.tower.path;
+    if (variant->ds4_vision.has_projector)
+        paths[path_count++] = variant->ds4_vision.projector.path;
+    paths[path_count++] = variant->ds4_vision.config.path;
+    if (variant->has_llama_cpp_mmproj)
+        paths[path_count++] = variant->llama_cpp_mmproj.path;
+    for (size_t i = 0; i < path_count; i++) {
         if (!manifest_same_directory(variant->directory, paths[i])) {
             return json_fail(jp, "variant '%s' artifact is outside its declared sibling directory", variant->selector);
         }
@@ -1515,18 +1601,21 @@ static bool manifest_validate_variant(manifest_json_parser *jp,
                          "variant '%s' receiver and DSpark profiles differ",
                          variant->selector);
     }
-    if (!ds4_hf_llama_primary_selectable(variant->selector,
-                                         variant->receiver.path)) {
-        return json_fail(jp,
-                         "variant '%s' selector cannot select its primary GGUF under llama.cpp tag rules",
-                         variant->selector);
-    }
-    char sibling_error[256];
-    if (!ds4_hf_llama_siblings_valid(variant->receiver.path,
-                                     variant->llama_cpp_mmproj.path,
-                                     variant->has_dspark ? variant->dspark.path : NULL,
-                                     sibling_error, sizeof(sibling_error))) {
-        return json_fail(jp, "variant '%s': %s", variant->selector, sibling_error);
+    if (!native) {
+        if (!ds4_hf_llama_primary_selectable(variant->selector,
+                                             variant->receiver.path)) {
+            return json_fail(jp,
+                             "variant '%s' selector cannot select its primary GGUF under llama.cpp tag rules",
+                             variant->selector);
+        }
+        char sibling_error[256];
+        if (!ds4_hf_llama_siblings_valid(
+                variant->receiver.path, variant->llama_cpp_mmproj.path,
+                variant->has_dspark ? variant->dspark.path : NULL,
+                sibling_error, sizeof(sibling_error))) {
+            return json_fail(jp, "variant '%s': %s", variant->selector,
+                             sibling_error);
+        }
     }
     return true;
 }
@@ -1594,9 +1683,17 @@ bool ds4_hf_manifest_parse(const char *json,
     manifest_json_ws(&jp);
     if (jp.p != jp.end) return json_fail(&jp, "trailing data after manifest object");
     if (seen != 31) return json_fail(&jp, "manifest is missing a required top-level field");
-    if (manifest->schema_version != DS4_HF_MANIFEST_VERSION) {
-        return json_fail(&jp, "unsupported variants.json major version %u; this runtime supports version %u",
-                         manifest->schema_version, DS4_HF_MANIFEST_VERSION);
+    if (manifest->schema_version < DS4_HF_MANIFEST_MIN_VERSION ||
+        manifest->schema_version > DS4_HF_MANIFEST_VERSION) {
+        return json_fail(&jp, "unsupported variants.json major version %u; this runtime supports versions %u through %u",
+                         manifest->schema_version,
+                         DS4_HF_MANIFEST_MIN_VERSION,
+                         DS4_HF_MANIFEST_VERSION);
+    }
+    if (manifest->schema_version == 2 &&
+        manifest->shared_vision.contract !=
+            DS4_HF_VISION_CONTRACT_DEEPENCODER_V2) {
+        return json_fail(&jp, "variants.json version 2 only supports the DeepEncoderV2 vision contract");
     }
     if (!manifest_valid_repository(manifest->repository)) return json_fail(&jp, "manifest repository must be OWNER/REPO");
     if (!manifest_safe_atom(manifest->default_selector)) return json_fail(&jp, "manifest default_selector is unsafe");
@@ -1610,7 +1707,10 @@ bool ds4_hf_manifest_parse(const char *json,
                 return json_fail(&jp, "duplicate selector '%s'", variant->selector);
             }
         }
-        if (!manifest_validate_variant(&jp, variant)) return false;
+        if (!manifest_validate_variant(&jp, variant,
+                                       manifest->shared_vision.contract)) {
+            return false;
+        }
         if (variant->is_default) {
             defaults++;
             if (!ds4_hf_selector_equal(variant->selector, manifest->default_selector)) {
@@ -1636,6 +1736,10 @@ const ds4_hf_manifest_variant *ds4_hf_manifest_find_variant(
 
 bool ds4_hf_manifest_visual_rows_valid(const ds4_hf_manifest *manifest,
                                        uint32_t rows) {
+    if (manifest && manifest->shared_vision.contract ==
+                        DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE) {
+        return rows > 0 && rows <= manifest->shared_vision.maximum_tokens;
+    }
     if (!manifest || rows < manifest->shared_vision.separator_tokens) return false;
     uint32_t payload = rows - manifest->shared_vision.separator_tokens;
     if (!manifest->shared_vision.tokens_per_view ||
@@ -2765,18 +2869,20 @@ bool ds4_hf_acquisition_plan_build(
                            &variant->ds4_vision.tower,
                            cfg->vision_source == DS4_HF_VISION_CATALOG,
                            endpoint_component, repo_namespace) ||
-        !plan_add_artifact(plan, DS4_HF_ROLE_VISION_PROJECTOR,
-                           &variant->ds4_vision.projector,
-                           cfg->vision_source == DS4_HF_VISION_CATALOG,
-                           endpoint_component, repo_namespace) ||
+        (variant->ds4_vision.has_projector &&
+         !plan_add_artifact(plan, DS4_HF_ROLE_VISION_PROJECTOR,
+                            &variant->ds4_vision.projector,
+                            cfg->vision_source == DS4_HF_VISION_CATALOG,
+                            endpoint_component, repo_namespace)) ||
         !plan_add_artifact(plan, DS4_HF_ROLE_VISION_CONFIG,
                            &variant->ds4_vision.config,
                            cfg->vision_source == DS4_HF_VISION_CATALOG,
                            endpoint_component, repo_namespace) ||
-        !plan_add_artifact(plan, DS4_HF_ROLE_LLAMA_CPP_MMPROJ,
-                           &variant->llama_cpp_mmproj,
-                           materialize_llama_cpp_mmproj,
-                           endpoint_component, repo_namespace)) {
+        (variant->has_llama_cpp_mmproj &&
+         !plan_add_artifact(plan, DS4_HF_ROLE_LLAMA_CPP_MMPROJ,
+                            &variant->llama_cpp_mmproj,
+                            materialize_llama_cpp_mmproj,
+                            endpoint_component, repo_namespace))) {
         return acquisition_context_fail(err, errlen, plan, NULL,
                                         "cache destination is too long");
     }
@@ -4175,9 +4281,10 @@ static void variant_capabilities(const ds4_hf_manifest_variant *variant,
     const ds4_hf_manifest_artifact *artifacts[] = {
         &variant->receiver,
         &variant->ds4_vision.tower,
-        &variant->ds4_vision.projector,
+        variant->ds4_vision.has_projector ?
+            &variant->ds4_vision.projector : NULL,
         &variant->ds4_vision.config,
-        &variant->llama_cpp_mmproj,
+        variant->has_llama_cpp_mmproj ? &variant->llama_cpp_mmproj : NULL,
         variant->has_dspark ? &variant->dspark : NULL,
     };
     memset(summary, 0, sizeof(*summary));
@@ -4207,6 +4314,11 @@ static void variant_capabilities(const ds4_hf_manifest_variant *variant,
 static bool variant_llama_heuristics(const ds4_hf_manifest_variant *variant,
                                      bool *primary,
                                      bool *siblings) {
+    if (!variant->has_llama_cpp_mmproj) {
+        *primary = false;
+        *siblings = false;
+        return false;
+    }
     char ignored[256] = {0};
     *primary = ds4_hf_llama_primary_selectable(variant->selector,
                                                variant->receiver.path);
@@ -4258,11 +4370,17 @@ static void print_json_variant(FILE *fp,
     fputs(",\"ds4_vision\":{\"tower\":", fp);
     print_json_artifact(fp, &variant->ds4_vision.tower);
     fputs(",\"projector\":", fp);
-    print_json_artifact(fp, &variant->ds4_vision.projector);
+    if (variant->ds4_vision.has_projector)
+        print_json_artifact(fp, &variant->ds4_vision.projector);
+    else
+        fputs("null", fp);
     fputs(",\"config\":", fp);
     print_json_artifact(fp, &variant->ds4_vision.config);
     fputs("},\"llama_cpp_mmproj\":", fp);
-    print_json_artifact(fp, &variant->llama_cpp_mmproj);
+    if (variant->has_llama_cpp_mmproj)
+        print_json_artifact(fp, &variant->llama_cpp_mmproj);
+    else
+        fputs("null", fp);
     fputs(",\"dspark\":", fp);
     if (variant->has_dspark) print_json_artifact(fp, &variant->dspark);
     else fputs("null", fp);
@@ -4312,11 +4430,17 @@ static void print_human_variant(FILE *fp,
             variant->is_default ? " (default)" : "");
     print_human_artifact(fp, "receiver", &variant->receiver);
     print_human_artifact(fp, "ds4_vision.tower", &variant->ds4_vision.tower);
-    print_human_artifact(fp, "ds4_vision.projector",
-                         &variant->ds4_vision.projector);
+    if (variant->ds4_vision.has_projector)
+        print_human_artifact(fp, "ds4_vision.projector",
+                             &variant->ds4_vision.projector);
+    else
+        fputs("  ds4_vision.projector: unavailable\n", fp);
     print_human_artifact(fp, "ds4_vision.config", &variant->ds4_vision.config);
-    print_human_artifact(fp, "llama_cpp_mmproj",
-                         &variant->llama_cpp_mmproj);
+    if (variant->has_llama_cpp_mmproj)
+        print_human_artifact(fp, "llama_cpp_mmproj",
+                             &variant->llama_cpp_mmproj);
+    else
+        fputs("  llama_cpp_mmproj: unavailable\n", fp);
     if (variant->has_dspark)
         print_human_artifact(fp, "dspark", &variant->dspark);
     else
@@ -4348,6 +4472,7 @@ typedef struct {
     uint64_t ds4_vision_dspark;
     uint64_t llama_cpp_mmproj;
     bool ds4_vision_dspark_available;
+    bool llama_cpp_mmproj_available;
 } diagnostic_totals;
 
 static bool diagnostics_totals(const ds4_hf_diagnostics *diagnostics,
@@ -4359,14 +4484,19 @@ static bool diagnostics_totals(const ds4_hf_diagnostics *diagnostics,
     totals->ds4_vision_dspark = v->receiver.bytes;
     totals->llama_cpp_mmproj = v->receiver.bytes;
     totals->ds4_vision_dspark_available = v->has_dspark;
+    totals->llama_cpp_mmproj_available = v->has_llama_cpp_mmproj;
     if (!add_total(&totals->ds4_vision, v->ds4_vision.tower.bytes) ||
-        !add_total(&totals->ds4_vision, v->ds4_vision.projector.bytes) ||
         !add_total(&totals->ds4_vision_dspark, v->ds4_vision.tower.bytes) ||
-        !add_total(&totals->ds4_vision_dspark, v->ds4_vision.projector.bytes) ||
+        (v->ds4_vision.has_projector &&
+         (!add_total(&totals->ds4_vision,
+                     v->ds4_vision.projector.bytes) ||
+          !add_total(&totals->ds4_vision_dspark,
+                     v->ds4_vision.projector.bytes))) ||
         (v->has_dspark &&
          !add_total(&totals->ds4_vision_dspark, v->dspark.bytes)) ||
-        !add_total(&totals->llama_cpp_mmproj,
-                   v->llama_cpp_mmproj.bytes)) return false;
+        (v->has_llama_cpp_mmproj &&
+         !add_total(&totals->llama_cpp_mmproj,
+                    v->llama_cpp_mmproj.bytes))) return false;
     for (size_t i = 0; i < diagnostics->plan.artifact_count; i++) {
         const ds4_hf_acquisition_artifact *artifact =
             &diagnostics->plan.artifacts[i];
@@ -4439,8 +4569,12 @@ static void print_json_dry_run(FILE *fp, const ds4_hf_cli_config *cfg,
             fprintf(fp, "%" PRIu64, totals.ds4_vision_dspark);
         else
             fputs("null", fp);
-        fprintf(fp, ",\"llama_cpp_receiver_mmproj_bytes\":%" PRIu64 "}}\n",
-                totals.llama_cpp_mmproj);
+        fputs(",\"llama_cpp_receiver_mmproj_bytes\":", fp);
+        if (totals.llama_cpp_mmproj_available)
+            fprintf(fp, "%" PRIu64, totals.llama_cpp_mmproj);
+        else
+            fputs("null", fp);
+        fputs("}}\n", fp);
     } else {
         fputs("],\"totals\":null}\n", fp);
     }
@@ -4481,8 +4615,12 @@ static void print_human_dry_run(FILE *fp, const ds4_hf_cli_config *cfg,
             fprintf(fp, "%" PRIu64, totals.ds4_vision_dspark);
         else
             fputs("unavailable", fp);
-        fprintf(fp, "\n  llama_cpp_receiver_mmproj_bytes: %" PRIu64 "\n",
-                totals.llama_cpp_mmproj);
+        fputs("\n  llama_cpp_receiver_mmproj_bytes: ", fp);
+        if (totals.llama_cpp_mmproj_available)
+            fprintf(fp, "%" PRIu64, totals.llama_cpp_mmproj);
+        else
+            fputs("unavailable", fp);
+        fputc('\n', fp);
     } else {
         fputs("totals: overflow\n", fp);
     }
@@ -4624,7 +4762,8 @@ static bool safetensors_parse_projector_metadata(
 }
 
 static bool safetensors_semantics_valid(const char *json, size_t json_len,
-                                        ds4_hf_artifact_role role) {
+                                        ds4_hf_artifact_role role,
+                                        ds4_hf_manifest_vision_contract contract) {
     char parse_error[256] = {0};
     manifest_json_parser jp = {
         json, json + json_len, 0, 0, parse_error, sizeof(parse_error),
@@ -4653,7 +4792,51 @@ static bool safetensors_semantics_valid(const char *json, size_t json_len,
         } else {
             safetensors_tensor tensor;
             if (!safetensors_parse_tensor(&jp, &tensor)) return false;
-            if (role == DS4_HF_ROLE_VISION_TOWER) {
+            if (role == DS4_HF_ROLE_VISION_TOWER &&
+                contract == DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE) {
+                static const uint64_t patch[] = {1024, 588};
+                static const uint64_t qkv[] = {3072, 1024};
+                static const uint64_t aligner_w1[] = {4096, 9216};
+                static const uint64_t aligner_w2[] = {4096, 4096};
+                static const uint64_t control[] = {4096};
+                if (!strcmp(name, "vision.patch_embed.proj.weight")) {
+                    if ((tensors_seen & 1u) ||
+                        !safetensors_tensor_is(&tensor, patch, 2)) return false;
+                    tensors_seen |= 1u;
+                } else if (!strcmp(name, "vision.blocks.0.attn.wqkv.weight")) {
+                    if ((tensors_seen & 2u) ||
+                        !safetensors_tensor_is(&tensor, qkv, 2)) return false;
+                    tensors_seen |= 2u;
+                } else if (!strcmp(name, "vision.blocks.31.attn.wqkv.weight")) {
+                    if ((tensors_seen & 4u) ||
+                        !safetensors_tensor_is(&tensor, qkv, 2)) return false;
+                    tensors_seen |= 4u;
+                } else if (!strcmp(name, "aligner.w1.weight")) {
+                    if ((tensors_seen & 8u) ||
+                        !safetensors_tensor_is(&tensor, aligner_w1, 2)) return false;
+                    tensors_seen |= 8u;
+                } else if (!strcmp(name, "aligner.w2.weight")) {
+                    if ((tensors_seen & 16u) ||
+                        !safetensors_tensor_is(&tensor, aligner_w2, 2)) return false;
+                    tensors_seen |= 16u;
+                } else if (!strcmp(name, "image_start")) {
+                    if ((tensors_seen & 32u) ||
+                        !safetensors_tensor_is(&tensor, control, 1)) return false;
+                    tensors_seen |= 32u;
+                } else if (!strcmp(name, "image_pad")) {
+                    if ((tensors_seen & 64u) ||
+                        !safetensors_tensor_is(&tensor, control, 1)) return false;
+                    tensors_seen |= 64u;
+                } else if (!strcmp(name, "image_newline")) {
+                    if ((tensors_seen & 128u) ||
+                        !safetensors_tensor_is(&tensor, control, 1)) return false;
+                    tensors_seen |= 128u;
+                } else if (!strcmp(name, "image_end")) {
+                    if ((tensors_seen & 256u) ||
+                        !safetensors_tensor_is(&tensor, control, 1)) return false;
+                    tensors_seen |= 256u;
+                }
+            } else if (role == DS4_HF_ROLE_VISION_TOWER) {
                 static const uint64_t patch[] = {768, 3, 16, 16};
                 static const uint64_t pos[] = {1, 64, 64, 768};
                 static const uint64_t neck[] = {256, 768, 1, 1};
@@ -4710,6 +4893,8 @@ static bool safetensors_semantics_valid(const char *json, size_t json_len,
     manifest_json_ws(&jp);
     if (jp.p != jp.end) return false;
     if (role == DS4_HF_ROLE_VISION_TOWER) {
+        if (contract == DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE)
+            return tensors_seen == 511u;
         return tensors_seen == 63u && sam_namespace && qwen_namespace;
     }
     return role == DS4_HF_ROLE_VISION_PROJECTOR && tensors_seen == 7u &&
@@ -4775,7 +4960,8 @@ static bool runtime_safetensors_role_compatible(
     header[header_len] = '\0';
     bool compatible = readable &&
                       safetensors_semantics_valid(header, (size_t)header_len,
-                                                  role);
+                                                  role,
+                                                  runtime->vision_metadata.contract);
     free(header);
     if (!compatible) {
         return fail(err, errlen,
@@ -4803,28 +4989,39 @@ bool ds4_hf_runtime_role_verified(const ds4_hf_runtime *runtime,
 
 bool ds4_hf_runtime_vision_artifacts_compatible(
     const ds4_hf_runtime *runtime, char *err, size_t errlen) {
-    static const ds4_hf_artifact_role required[] = {
-        DS4_HF_ROLE_VISION_TOWER,
-        DS4_HF_ROLE_VISION_PROJECTOR,
-        DS4_HF_ROLE_VISION_CONFIG,
-    };
     if (!runtime || !runtime->repository) {
         return fail(err, errlen,
                     "catalog vision compatibility requires a repository runtime");
     }
-    for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); i++) {
-        if (!ds4_hf_runtime_role_verified(runtime, required[i])) {
-            return fail(err, errlen, "catalog vision role '%s' is not hash-verified",
-                        ds4_hf_artifact_role_name(required[i]));
+    static const ds4_hf_artifact_role base_required[] = {
+        DS4_HF_ROLE_VISION_TOWER,
+        DS4_HF_ROLE_VISION_CONFIG,
+    };
+    for (size_t i = 0; i < sizeof(base_required) /
+                            sizeof(base_required[0]); i++) {
+        if (!ds4_hf_runtime_role_verified(runtime, base_required[i])) {
+            return fail(err, errlen,
+                        "catalog vision role '%s' is not hash-verified",
+                        ds4_hf_artifact_role_name(base_required[i]));
         }
+    }
+    const bool native = runtime->vision_metadata.contract ==
+                        DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE;
+    if (!native && !ds4_hf_runtime_role_verified(
+                       runtime, DS4_HF_ROLE_VISION_PROJECTOR)) {
+        return fail(err, errlen,
+                    "catalog vision role '%s' is not hash-verified",
+                    ds4_hf_artifact_role_name(
+                        DS4_HF_ROLE_VISION_PROJECTOR));
     }
     if (!runtime->vision_bundle_verified) {
         return fail(err, errlen, "catalog DS4 vision bundle is incomplete");
     }
     if (!runtime_safetensors_role_compatible(
             runtime, DS4_HF_ROLE_VISION_TOWER, err, errlen) ||
-        !runtime_safetensors_role_compatible(
-            runtime, DS4_HF_ROLE_VISION_PROJECTOR, err, errlen)) {
+        (!native && !runtime_safetensors_role_compatible(
+                        runtime, DS4_HF_ROLE_VISION_PROJECTOR,
+                        err, errlen))) {
         return false;
     }
     return true;
@@ -4922,8 +5119,11 @@ bool ds4_hf_runtime_prepare(const ds4_hf_cli_config *cfg,
     }
     runtime->vision_bundle_verified =
         ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_VISION_TOWER) &&
-        ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_VISION_PROJECTOR) &&
-        ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_VISION_CONFIG);
+        ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_VISION_CONFIG) &&
+        (runtime->vision_metadata.contract ==
+             DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE ||
+         ds4_hf_runtime_role_verified(runtime,
+                                      DS4_HF_ROLE_VISION_PROJECTOR));
     if (!ds4_hf_runtime_role_verified(runtime, DS4_HF_ROLE_RECEIVER)) {
         ds4_hf_runtime_close_verified(runtime);
         return fail(err, errlen,

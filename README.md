@@ -159,6 +159,15 @@ llama.cpp-style aliases `-hf`, `-hfr`, `--hf-repo`, and `--hf` are equivalent:
 ./ds4-server -hf OWNER/CATALOG_REPO:Headroom128-IQ2_XXS \
   --vision-python /path/to/python --vision-encoder /path/to/encoder.py
 
+# Native DeepSeek-V4 Vision-Exp catalog: receiver, native tower, and config
+# are selected, downloaded, and verified from one immutable repository commit.
+./ds4-server \
+  -hf apetersson/DeepSeek-V4-Flash-Vision-Exp-Abliterated:Reference-Native-GGUF \
+  --vision-python /path/to/torch-venv/bin/python \
+  --vision-encoder ./misc/encode-deepseek4-vision.py \
+  --metal --ctx 2048 \
+  --ssd-streaming --ssd-streaming-cache-experts 48GB
+
 # Explicitly stay text-only, or override the complete catalog vision bundle.
 ./ds4-server -hf OWNER/CATALOG_REPO --no-vision
 ./ds4-server -hf OWNER/CATALOG_REPO \
@@ -196,13 +205,15 @@ Offline mode performs no network access and succeeds only when the selected
 immutable snapshot and every requested role are present and verified.
 
 The catalog's `variants.json` is a bounded, data-only DS4 integrity manifest.
-It declares exact receiver, raw DS4 vision, llama.cpp mmproj, and optional
-DSpark roles with byte sizes, hashes, capabilities, and minimum runtime
-revisions. It is never executable and does not enable repository code or
-`trust_remote_code`. llama.cpp does not consume this manifest: its compatible
-layout instead depends on an ordinary primary GGUF plus lowercase `mmproj-`
-and `dspark-` siblings in the same variant directory and on compatible GGUF
-metadata.
+Schema v2 declares the original receiver, raw DeepEncoderV2, llama.cpp mmproj,
+and optional DSpark roles. Schema v3 can instead declare a native Vision-Exp
+tower/config bundle without inventing an mmproj or duplicate projector role.
+Every artifact has an exact byte size, hash, capability set, and minimum
+runtime revision. The manifest is never executable and does not enable
+repository code or `trust_remote_code`. llama.cpp does not consume this
+manifest: compatible v2 layouts instead depend on an ordinary primary GGUF
+plus lowercase `mmproj-` and `dspark-` siblings in the same variant directory
+and on compatible GGUF metadata.
 
 | Purpose | DS4 | llama.cpp |
 |---|---|---|

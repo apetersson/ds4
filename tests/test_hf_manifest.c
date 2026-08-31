@@ -165,6 +165,50 @@ static void test_production_fixture(const char *json, size_t json_len) {
           !ds4_hf_manifest_visual_rows_valid(&manifest, 1537));
 }
 
+static void test_native_vision_fixture(void) {
+    size_t json_len = 0;
+    char *json = read_file("tests/fixtures/hf/variants-v3-native.json",
+                           &json_len);
+    ds4_hf_manifest manifest;
+    char err[512] = {0};
+    bool ok = json && ds4_hf_manifest_parse(json, json_len, &manifest,
+                                            err, sizeof(err));
+    CHECK("native Vision-Exp variants v3 fixture parses", ok);
+    if (!ok) {
+        fprintf(stderr, "  diagnostic: %s\n", err);
+        free(json);
+        return;
+    }
+    const ds4_hf_manifest_variant *native =
+        ds4_hf_manifest_find_variant(&manifest, "reference-native-gguf");
+    CHECK("native Vision-Exp shared contract is retained",
+          manifest.schema_version == 3 &&
+          manifest.shared_vision.contract ==
+              DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE &&
+          manifest.shared_vision.image_token_id == 129279 &&
+          manifest.shared_vision.encoder_dim == 1024 &&
+          manifest.shared_vision.receiver_dim == 4096 &&
+          manifest.shared_vision.patch_size == 14 &&
+          manifest.shared_vision.downsample_ratio == 3 &&
+          manifest.shared_vision.maximum_tokens == 384);
+    CHECK("native Vision-Exp variant needs only receiver, tower, and config",
+          native && native->is_default && !native->has_dspark &&
+          !native->ds4_vision.has_projector &&
+          !native->has_llama_cpp_mmproj &&
+          !native->has_bf16_tensor_identity &&
+          native->receiver.supports_ds4 &&
+          !native->receiver.supports_llama_cpp &&
+          native->ds4_vision.tower.bytes == UINT64_C(932814112) &&
+          native->ds4_vision.config.bytes == UINT64_C(2165));
+    CHECK("native Vision-Exp accepts variable visual rows through its bound",
+          ds4_hf_manifest_visual_rows_valid(&manifest, 1) &&
+          ds4_hf_manifest_visual_rows_valid(&manifest, 115) &&
+          ds4_hf_manifest_visual_rows_valid(&manifest, 384) &&
+          !ds4_hf_manifest_visual_rows_valid(&manifest, 0) &&
+          !ds4_hf_manifest_visual_rows_valid(&manifest, 385));
+    free(json);
+}
+
 static void test_llama_discovery_without_manifest(void) {
     char err[512] = {0};
     CHECK("Headroom128 satisfies llama.cpp sibling discovery without manifest data",
@@ -316,8 +360,8 @@ static void test_schema_rejections(const char *json) {
                     "\"future_optional_top_level\": [1, {\"nested\": \"ignored\"}]",
                     "\"future_optional_top_level\": [1e400, 123456789012345678901234567890123456789012345678901234567890123456789, {\"nested\": \"ignored\"}]");
     expect_rejected("unsupported major version fails actionably", json,
-                    "\"schema_version\": 2", "\"schema_version\": 3",
-                    "unsupported variants.json major version 3");
+                    "\"schema_version\": 2", "\"schema_version\": 4",
+                    "unsupported variants.json major version 4");
     expect_rejected("unknown required capability fails actionably", json,
                     "\"required\": [\"deepseek4\", \"text-generation\"]",
                     "\"required\": [\"deepseek4\", \"unknown-required\"]",
@@ -386,10 +430,11 @@ static void test_schema_rejections(const char *json) {
                     "exact role ds4_vision.config requires JSON DeepEncoderV2");
     expect_rejected("missing llama.cpp companion bundles are rejected", json,
                     "\"llama_cpp_mmproj\": {", "\"future_mmproj\": {",
-                    "variant is missing");
+                    "DeepEncoderV2 variant is missing llama_cpp_mmproj");
     expect_rejected("missing independent BF16 identity record is rejected", json,
                     "\"bf16_tensor_identity\": {",
-                    "\"future_bf16_tensor_identity\": {", "variant is missing");
+                    "\"future_bf16_tensor_identity\": {",
+                    "DeepEncoderV2 variant is missing bf16_tensor_identity");
     expect_rejected("raw-to-mmproj tower tensor mismatch is rejected", json,
                     "\"tower_sha256\": \"9999999999999999999999999999999999999999999999999999999999999999\"",
                     "\"tower_sha256\": \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"",
@@ -566,6 +611,7 @@ int main(void) {
     if (!json) return 1;
 
     test_production_fixture(json, json_len);
+    test_native_vision_fixture();
     test_llama_discovery_without_manifest();
     test_llama_metadata_without_manifest();
     test_schema_rejections(json);

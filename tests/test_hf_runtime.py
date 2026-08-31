@@ -19,6 +19,8 @@ PROBE = Path(os.environ.get(
     "DS4_HF_RUNTIME_PROBE", ROOT / "tests" / "test_hf_runtime_probe"
 ))
 FIXTURE = ROOT / "tests" / "fixtures" / "hf" / "variants-v2.json"
+NATIVE_FIXTURE = (ROOT / "tests" / "fixtures" / "hf" /
+                  "variants-v3-native.json")
 SHA = "0123456789abcdef0123456789abcdef01234567"
 
 
@@ -60,6 +62,20 @@ def build_vision_projector(proj0_shape=(4096, 896)):
         "encoder_dim": "896",
         "hidden": "4096",
         "image_token_id": "129279",
+    })
+
+
+def build_native_vision_tower():
+    return build_safetensors({
+        "vision.patch_embed.proj.weight": [1024, 588],
+        "vision.blocks.0.attn.wqkv.weight": [3072, 1024],
+        "vision.blocks.31.attn.wqkv.weight": [3072, 1024],
+        "aligner.w1.weight": [4096, 9216],
+        "aligner.w2.weight": [4096, 4096],
+        "image_start": [4096],
+        "image_pad": [4096],
+        "image_newline": [4096],
+        "image_end": [4096],
     })
 
 
@@ -312,6 +328,38 @@ class RuntimeWiringTests(unittest.TestCase):
         self.assertEqual(offline, first)
         self.assertEqual(offline_requests, [],
                          "offline runtime performed an HF request")
+
+    def test_native_vision_catalog_verifies_receiver_tower_and_config(self):
+        manifest = json.loads(NATIVE_FIXTURE.read_text(encoding="utf-8"))
+        manifest["repository"] = "owner/repo"
+        variant = manifest["variants"][0]
+        payloads = {
+            variant["receiver"]["path"]: build_tokenizer_gguf(),
+            variant["ds4_vision"]["tower"]["path"]:
+                build_native_vision_tower(),
+            variant["ds4_vision"]["config"]["path"]:
+                b'{"vision_patch_size":14,"hidden_size":4096}',
+        }
+        for artifact in (variant["receiver"],
+                         variant["ds4_vision"]["tower"],
+                         variant["ds4_vision"]["config"]):
+            data = payloads[artifact["path"]]
+            artifact["bytes"] = len(data)
+            artifact["sha256"] = sha256(data)
+
+        RuntimeHubHandler.requests = []
+        RuntimeHubHandler.payloads = payloads
+        RuntimeHubHandler.manifest = json.dumps(manifest).encode("utf-8")
+        values, requests = self.run_probe("native")
+        self.assertEqual(values["selector"], "Reference-Native-GGUF")
+        self.assertEqual(values["vision_verified"], "true")
+        self.assertEqual(values["vision_compatible"], "true")
+        self.assertEqual(
+            values["verified_roles"],
+            "receiver,ds4_vision.tower,ds4_vision.config",
+        )
+        self.assertEqual(len([p for p in requests if p.endswith(
+            (".gguf", ".safetensors", "config.json"))]), 3)
 
     def test_no_vision_and_explicit_override_download_receiver_only(self):
         for mode in ("no-vision", "explicit"):

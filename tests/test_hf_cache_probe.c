@@ -41,6 +41,7 @@ static void set_variant(ds4_hf_manifest_variant *variant,
                  prefix == 'H' ?
                  "7c74da5ef8c62e140b8b62eae2ec4bb1b396c2b8a58e9c746a8d163722fe4ea0" :
                  "737c20349cd5cd24b63422d9d7c16b6ad994a2ca0c55834e253128975f9e6d7b");
+    variant->ds4_vision.has_projector = true;
     snprintf(path, sizeof(path), "%s/%c-config.json", directory, prefix);
     set_artifact(&variant->ds4_vision.config, path, 16,
                  prefix == 'H' ?
@@ -51,6 +52,7 @@ static void set_variant(ds4_hf_manifest_variant *variant,
                  prefix == 'H' ?
                  "78b5d7f4ada22a1d22cfc73a9325b62ccedb753fc2e3ecf96898db2bab1f1cb3" :
                  "ffff977280449d926a0fdb7f9f0ef1a23677ec80ef193c29a0eff9cd515ee869");
+    variant->has_llama_cpp_mmproj = true;
     snprintf(path, sizeof(path), "%s/dspark-%c.gguf", directory, prefix);
     set_artifact(&variant->dspark, path, 20,
                  prefix == 'H' ?

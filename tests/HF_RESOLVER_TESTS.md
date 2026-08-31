@@ -16,9 +16,10 @@ Coverage is split by failure boundary:
 - `test_hf_args.c` and `test_hf_cli.sh`: aliases, precedence, local/HF
   conflicts, exact-file selection, offline mode, text-only vision behavior,
   complete local vision overrides, and DSpark opt-in.
-- `test_hf_manifest.c`: bounded schema-v2 parsing, receiver/vision/mmproj/
-  DSpark roles, selector matching, llama.cpp primary and lowercase sibling
-  rules, nested directories, and cross-directory decoys.
+- `test_hf_manifest.c`: bounded schema-v2/v3 parsing, receiver/vision/mmproj/
+  DSpark roles, native Vision-Exp tower/config contracts, selector matching,
+  llama.cpp primary and lowercase sibling rules, nested directories, and
+  cross-directory decoys.
 - `test_hf_transport.py`: immutable branch/tag resolution, endpoint routing,
   authentication failures, token precedence, timeouts, and safe diagnostics.
 - `test_hf_cache.py` and `test_hf_integrity.py`: selective downloads,
@@ -26,7 +27,8 @@ Coverage is split by failure boundary:
   offline reuse, SHA-256/size verification, cache identity, symlink and
   special-file rejection, and verified-file-descriptor handoff.
 - `test_hf_runtime.py`: byte-identical local/HF receiver execution, server
-  auto-vision, override/disable behavior, exact missing roles, semantic vision
+  auto-vision for DeepEncoderV2 and native Vision-Exp catalogs,
+  override/disable behavior, exact missing roles, semantic vision
   compatibility, and verified startup handoff.
 - `test_hf_dspark.py`: exact same-profile opt-in, decoys, cross-profile
   rejection, explicit local precedence, and server/CLI wiring.
