@@ -34863,7 +34863,8 @@ static bool imatrix_collect_tensor_batch(
         uint32_t               il,
         uint32_t               n_tokens) {
     if (!c || n_tokens == 0) return true;
-    if (!ffn_norm || !routed_mid || !router_selected ||
+    if (!ffn_norm || !routed_gate || !routed_up || !routed_mid ||
+        !router_selected || !router_weights ||
         n_tokens > c->cap_tokens) return false;
 
     const uint64_t norm_bytes = (uint64_t)n_tokens * DS4_N_EMBD * sizeof(float);
@@ -34898,7 +34899,6 @@ static bool imatrix_collect_tensor_batch(
         }
     }
     if (!routed_mid_observable) {
-        if (!routed_gate || !routed_up || !router_weights) return false;
         const uint64_t weights_bytes =
             (uint64_t)n_tokens * DS4_N_EXPERT_USED * sizeof(float);
         if (ds4_gpu_tensor_read(routed_gate, 0, c->routed_gate_buf,
@@ -40816,11 +40816,8 @@ static bool imatrix_collect_glm_one(
     if (!g || il >= DS4_N_LAYER) return false;
     return imatrix_collect_tensor_batch(c,
                                         g->ffn_norm,
-                                        NULL,
-                                        NULL,
                                         g->ffn_mid,
                                         g->router_selected,
-                                        NULL,
                                         false,
                                         il,
                                         1);
