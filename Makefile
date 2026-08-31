@@ -63,7 +63,7 @@ DS4_LINK_LIBS ?= $(CUDA_LDLIBS)
 METAL_LDLIBS := $(LDLIBS)
 endif
 
-.PHONY: all help clean test test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-hf-vision test-hf-dspark test-hf-diagnostics test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
+.PHONY: all help clean test test-hf test-hf-cli test-hf-manifest test-hf-transport test-hf-cache test-hf-integrity test-hf-runtime test-hf-vision test-hf-dspark test-hf-diagnostics test-rocm test-metal-session-batch test-mxfp4-cuda test-mxfp4-rocm test-cuda-session-batch test-cuda-mixed-batch dspark-acceptance dspark-verify-depth mtp-verify-depth cpu cuda cuda-spark cuda-generic cuda-regression strix-halo rocm
 
 ifeq ($(UNAME_S),Darwin)
 .PHONY: metal-decode-schedule-bench metal-prefill-variant-bench check-mxfp4-half-lut
@@ -75,6 +75,7 @@ help:
 	@echo "  make              Build Metal ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make cpu          Build CPU-only ./ds4, ./ds4-server, ./ds4-bench, ./ds4-eval, and ./ds4-agent"
 	@echo "  make test         Build and run tests"
+	@echo "  make test-hf      Run the deterministic, credential-free HF resolver suite"
 	@echo "  make metal-decode-schedule-bench  Build the balanced Metal decode schedule benchmark"
 	@echo "  make metal-prefill-variant-bench  Build the balanced Metal prefill variant benchmark"
 	@echo "  make check-mxfp4-half-lut  Verify the checked-in MXFP4 half LUT matches the generator"
@@ -525,6 +526,25 @@ tests/test_hf_diagnostics_probe: tests/test_hf_diagnostics_probe.c ds4_hf.c ds4_
 
 test-hf-diagnostics: ds4 ds4-server tests/test_hf_diagnostics_probe
 	python3 tests/test_hf_diagnostics.py
+
+# Keep this as one ordered recipe so `make -j test-hf` cannot race cache and
+# runtime fixtures against binaries that are still being linked. Every network
+# request is served by a loopback fake Hub; production credentials are neither
+# required nor read by the test processes.
+test-hf: tests/test_hf_args tests/test_hf_manifest tests/test_hf_transport_probe \
+		tests/test_hf_cache_probe tests/test_hf_runtime_probe \
+		tests/test_hf_dspark_cli tests/test_hf_diagnostics_probe \
+		ds4 ds4-server ds4_test
+	./tests/test_hf_args
+	./tests/test_hf_manifest
+	./tests/test_hf_cli.sh
+	python3 tests/test_hf_transport.py
+	python3 tests/test_hf_cache.py
+	python3 tests/test_hf_integrity.py
+	python3 tests/test_hf_runtime.py
+	python3 tests/test_hf_dspark.py
+	python3 tests/test_hf_diagnostics.py
+	./ds4_test --server
 
 ds4_agent_test: ds4_agent_test.o ds4_help.o ds4_web.o ds4_kvstore.o linenoise.o $(CORE_OBJS)
 ifeq ($(UNAME_S),Darwin)
