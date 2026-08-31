@@ -34788,6 +34788,9 @@ typedef struct {
     float *ffn_norm_buf;
     float *routed_mid_buf;
     uint16_t *routed_mid_f16_buf;
+    float *routed_gate_buf;
+    float *routed_up_buf;
+    float *router_weights_buf;
     int   *selected_buf;
     float *sq_tmp;
     uint32_t cap_tokens;
@@ -34814,10 +34817,15 @@ static bool imatrix_collector_init(ds4_imatrix_collector *c, uint32_t cap_tokens
     c->ffn_norm_buf = xmalloc((size_t)c->cap_tokens * DS4_N_EMBD * sizeof(c->ffn_norm_buf[0]));
     c->routed_mid_buf = xmalloc((size_t)c->cap_tokens * DS4_N_EXPERT_USED * DS4_N_FF_EXP * sizeof(c->routed_mid_buf[0]));
     c->routed_mid_f16_buf = xmalloc((size_t)c->cap_tokens * DS4_N_EXPERT_USED * DS4_N_FF_EXP * sizeof(c->routed_mid_f16_buf[0]));
+    c->routed_gate_buf = xmalloc((size_t)c->cap_tokens * DS4_N_EXPERT_USED * DS4_N_FF_EXP * sizeof(c->routed_gate_buf[0]));
+    c->routed_up_buf = xmalloc((size_t)c->cap_tokens * DS4_N_EXPERT_USED * DS4_N_FF_EXP * sizeof(c->routed_up_buf[0]));
+    c->router_weights_buf = xmalloc((size_t)c->cap_tokens * DS4_N_EXPERT_USED * sizeof(c->router_weights_buf[0]));
     c->selected_buf = xmalloc((size_t)c->cap_tokens * DS4_N_EXPERT_USED * sizeof(c->selected_buf[0]));
     c->sq_tmp = xmalloc((size_t)DS4_N_EMBD * sizeof(c->sq_tmp[0]));
     return c->gate_up_sum2 && c->down_sum2 && c->ffn_norm_buf &&
-           c->routed_mid_buf && c->routed_mid_f16_buf && c->selected_buf && c->sq_tmp;
+           c->routed_mid_buf && c->routed_mid_f16_buf &&
+           c->routed_gate_buf && c->routed_up_buf && c->router_weights_buf &&
+           c->selected_buf && c->sq_tmp;
 }
 
 static void imatrix_collector_free(ds4_imatrix_collector *c) {
@@ -34827,6 +34835,9 @@ static void imatrix_collector_free(ds4_imatrix_collector *c) {
     free(c->ffn_norm_buf);
     free(c->routed_mid_buf);
     free(c->routed_mid_f16_buf);
+    free(c->routed_gate_buf);
+    free(c->routed_up_buf);
+    free(c->router_weights_buf);
     free(c->selected_buf);
     free(c->sq_tmp);
     memset(c, 0, sizeof(*c));
@@ -34843,13 +34854,17 @@ static float *imatrix_down_ptr(ds4_imatrix_collector *c, uint32_t il, uint32_t e
 static bool imatrix_collect_tensor_batch(
         ds4_imatrix_collector *c,
         ds4_gpu_tensor        *ffn_norm,
+        ds4_gpu_tensor        *routed_gate,
+        ds4_gpu_tensor        *routed_up,
         ds4_gpu_tensor        *routed_mid,
         ds4_gpu_tensor        *router_selected,
+        ds4_gpu_tensor        *router_weights,
         bool                   routed_mid_is_f16,
         uint32_t               il,
         uint32_t               n_tokens) {
     if (!c || n_tokens == 0) return true;
-    if (!ffn_norm || !routed_mid || !router_selected ||
+    if (!ffn_norm || !routed_gate || !routed_up || !routed_mid ||
+        !router_selected || !router_weights ||
         n_tokens > c->cap_tokens) return false;
 
     const uint64_t norm_bytes = (uint64_t)n_tokens * DS4_N_EMBD * sizeof(float);
@@ -34867,6 +34882,35 @@ static bool imatrix_collect_tensor_batch(
         return false;
     }
 
+    bool routed_mid_observable = false;
+    if (routed_mid_is_f16) {
+        for (uint64_t i = 0; i < mid_elems; i++) {
+            if (c->routed_mid_f16_buf[i] != 0) {
+                routed_mid_observable = true;
+                break;
+            }
+        }
+    } else {
+        for (uint64_t i = 0; i < mid_elems; i++) {
+            if (c->routed_mid_buf[i] != 0.0f) {
+                routed_mid_observable = true;
+                break;
+            }
+        }
+    }
+    if (!routed_mid_observable) {
+        const uint64_t weights_bytes =
+            (uint64_t)n_tokens * DS4_N_EXPERT_USED * sizeof(float);
+        if (ds4_gpu_tensor_read(routed_gate, 0, c->routed_gate_buf,
+                                mid_elems * sizeof(float)) == 0 ||
+            ds4_gpu_tensor_read(routed_up, 0, c->routed_up_buf,
+                                mid_elems * sizeof(float)) == 0 ||
+            ds4_gpu_tensor_read(router_weights, 0, c->router_weights_buf,
+                                weights_bytes) == 0) {
+            return false;
+        }
+    }
+
     for (uint32_t t = 0; t < n_tokens; t++) {
         const float *x = c->ffn_norm_buf + (size_t)t * DS4_N_EMBD;
         for (uint32_t i = 0; i < DS4_N_EMBD; i++) c->sq_tmp[i] = x[i] * x[i];
@@ -34881,7 +34925,17 @@ static bool imatrix_collect_tensor_batch(
 
             float *down = imatrix_down_ptr(c, il, (uint32_t)expert);
             const size_t mid_off = ((size_t)t * DS4_N_EXPERT_USED + slot) * DS4_N_FF_EXP;
-            if (routed_mid_is_f16) {
+            if (!routed_mid_observable) {
+                const float route_weight =
+                    c->router_weights_buf[(size_t)t * DS4_N_EXPERT_USED + slot];
+                const float *gate = c->routed_gate_buf + mid_off;
+                const float *up = c->routed_up_buf + mid_off;
+                for (uint32_t i = 0; i < DS4_N_FF_EXP; i++) {
+                    const float silu = gate[i] / (1.0f + expf(-gate[i]));
+                    const float v = silu * up[i] * route_weight;
+                    down[i] += v * v;
+                }
+            } else if (routed_mid_is_f16) {
                 const uint16_t *mid = c->routed_mid_f16_buf + mid_off;
                 for (uint32_t i = 0; i < DS4_N_FF_EXP; i++) {
                     const float v = f16_to_f32(mid[i]);
@@ -34908,8 +34962,11 @@ static bool imatrix_collect_layer_batch(
     if (!g) return false;
     return imatrix_collect_tensor_batch(c,
                                         metal_graph_batch_ffn_norm(g),
+                                        metal_graph_batch_routed_gate(g),
+                                        metal_graph_batch_routed_up(g),
                                         metal_graph_batch_routed_mid(g),
                                         metal_graph_batch_router_selected(g),
+                                        metal_graph_batch_router_weights(g),
                                         g->batch_routed_mid_is_f16,
                                         il,
                                         n_tokens);
@@ -57030,7 +57087,10 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
         free(dataset);
         return 1;
     }
-    g.quality = e->quality;
+    /* Calibration must leave gate/up rows materialized so the collector can
+     * reconstruct a routed SwiGLU input when an optimized MoE kernel does not
+     * expose its intermediate buffer. Restore the engine setting on exit. */
+    g.quality = true;
     g.ssd_streaming = e->ssd_streaming;
     g.ssd_streaming_cold = e->ssd_streaming_cold;
     g.streaming_preload_experts = e->ssd_streaming_preload_experts;
@@ -57043,6 +57103,7 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
         free(dataset);
         return 1;
     }
+    ds4_gpu_set_quality(true);
 
     fprintf(stderr,
             "ds4: collecting routed-MoE imatrix from %s (model=%s, layers=%u, experts=%u, ctx=%d, chunk=%u)\n",
@@ -57158,6 +57219,7 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
 
     imatrix_collector_free(&collector);
     metal_graph_free(&g);
+    ds4_gpu_set_quality(e->quality);
     free(dataset);
     return ok ? 0 : 1;
 #endif
