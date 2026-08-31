@@ -974,7 +974,9 @@ static void imatrix_load(imatrix_store *im, const char *path, bool strict) {
             for (int j = 0; j < nval; j++) values[j] /= (float)ncall;
         }
         for (int j = 0; j < nval; j++) {
-            if (!isfinite(values[j])) die("non-finite imatrix value");
+            if (!isfinite(values[j]) || values[j] < 0.0f) {
+                die("imatrix values must be finite and non-negative");
+            }
         }
         im->entries[i] = (imatrix_entry){ .name = name, .values = values, .n_values = nval };
     }
@@ -1004,6 +1006,14 @@ static void imatrix_load(imatrix_store *im, const char *path, bool strict) {
 
 static bool imatrix_enabled(const imatrix_store *im) {
     return im && im->n_entries > 0;
+}
+
+static bool imatrix_vector_has_signal(const float *values, int64_t n_values) {
+    if (!values || n_values <= 0) return false;
+    for (int64_t i = 0; i < n_values; i++) {
+        if (values[i] > 0.0f) return true;
+    }
+    return false;
 }
 
 static const float *imatrix_find(
@@ -1497,6 +1507,13 @@ static byte_buf generate_regular_hf(st_db *db, const char *gguf_name, const char
     if (target_uses_imatrix(target)) {
         const char *names[2] = { gguf_name, hf_name };
         imat = imatrix_find(imatrix, names, 2, tmpl->ne[0], -1, 0);
+        if (imat && !imatrix_vector_has_signal(imat, tmpl->ne[0])) {
+            fprintf(stderr,
+                    "deepseek4-quantize: %s has an all-zero imatrix vector; "
+                    "using weight-based fallback\n",
+                    gguf_name);
+            imat = NULL;
+        }
     }
     byte_buf b = f32_to_type(f32, n, target, tmpl->ne[0], imat);
     if ((target == DS4Q_TYPE_BF16 || target == DS4Q_TYPE_F16) &&
@@ -1547,6 +1564,7 @@ typedef struct {
     byte_buf *out;
     int next;
     int done;
+    int zero_imatrix_fallbacks;
     pthread_mutex_t lock;
 } expert_job;
 
@@ -1591,6 +1609,12 @@ static void generate_one_expert(expert_job *j, int xid) {
     if (target_uses_imatrix(j->target)) {
         const char *names[2] = { j->gguf_name, weight_name };
         imat = imatrix_find(j->imatrix, names, 2, j->ncols, xid, j->n_experts);
+        if (imat && !imatrix_vector_has_signal(imat, j->ncols)) {
+            imat = NULL;
+            pthread_mutex_lock(&j->lock);
+            j->zero_imatrix_fallbacks++;
+            pthread_mutex_unlock(&j->lock);
+        }
     }
     byte_buf q = f32_to_type(f32, n, j->target, j->ncols, imat);
     if (q.size != j->per_expert) die("expert quantized size mismatch");
@@ -1650,6 +1674,14 @@ static byte_buf generate_expert(st_db *db, const char *gguf_name, const tensor_m
     for (int i = 1; i < worker_count; i++) pthread_create(&threads[i], NULL, expert_worker, &job);
     expert_worker(&job);
     for (int i = 1; i < worker_count; i++) pthread_join(threads[i], NULL);
+    if (job.zero_imatrix_fallbacks != 0) {
+        fprintf(stderr,
+                "deepseek4-quantize: %s used weight-based fallback for "
+                "%d/%d unobserved experts\n",
+                gguf_name,
+                job.zero_imatrix_fallbacks,
+                n_experts);
+    }
     pthread_mutex_destroy(&job.lock);
     free(threads);
     return out;

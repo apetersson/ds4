@@ -162,6 +162,28 @@ static void write_fixture(const char *root, fixture_kind kind) {
     if (fclose(f) != 0) fail_errno("close safetensors index");
 }
 
+static void write_zero_imatrix(const char *root, const char *name,
+                               size_t n_values) {
+    char path[4096];
+    snprintf(path, sizeof(path), "%s/zero.imatrix.dat", root);
+    FILE *f = fopen(path, "wb");
+    if (!f) fail_errno("open zero imatrix fixture");
+    const int32_t entries = 1;
+    const int32_t name_len = (int32_t)strlen(name);
+    const int32_t calls = 1;
+    const int32_t values = (int32_t)n_values;
+    write_all(f, &entries, sizeof(entries));
+    write_all(f, &name_len, sizeof(name_len));
+    write_all(f, name, (size_t)name_len);
+    write_all(f, &calls, sizeof(calls));
+    write_all(f, &values, sizeof(values));
+    float zero = 0.0f;
+    for (size_t i = 0; i < n_values; i++) {
+        write_all(f, &zero, sizeof(zero));
+    }
+    if (fclose(f) != 0) fail_errno("close zero imatrix fixture");
+}
+
 static char *read_file(const char *path) {
     FILE *f = fopen(path, "rb");
     if (!f) fail_errno("open command output");
@@ -230,6 +252,45 @@ static int check_case(const char *name, const char *binary, const char *root,
     }
     free(result.out);
     free(result.err);
+    return ok ? 0 : 1;
+}
+
+static int check_zero_imatrix_fallback(const char *binary, const char *root,
+                                       const char *target) {
+    char imatrix_path[4096];
+    snprintf(imatrix_path, sizeof(imatrix_path), "%s/zero.imatrix.dat", root);
+    const char *fallback_reference[] = {
+        "--routed-w1", target, "--routed-w2", "mxfp4",
+        "--routed-w3", "mxfp4", "--n-experts", "1",
+        "--compare-tensor", "mtp.0.ffn_gate_exps.weight", NULL,
+    };
+    const char *fallback_zero[] = {
+        "--routed-w1", target, "--routed-w2", "mxfp4",
+        "--routed-w3", "mxfp4", "--n-experts", "1",
+        "--compare-tensor", "mtp.0.ffn_gate_exps.weight",
+        "--imatrix", imatrix_path, NULL,
+    };
+    command_result expected = run_quantizer(binary, root, fallback_reference);
+    command_result actual = run_quantizer(binary, root, fallback_zero);
+    const bool ok = expected.status == 0 &&
+                    actual.status == 0 &&
+                    strcmp(expected.out, actual.out) == 0 &&
+                    strstr(actual.err,
+                           "used weight-based fallback for 1/1 unobserved experts") != NULL;
+    if (!ok) {
+        fprintf(stderr,
+                "FAIL: zero imatrix %s expert fallback\n"
+                "reference exit=%d stdout:\n%s\n"
+                "zero-imatrix exit=%d stdout:\n%s\nstderr:\n%s",
+                target,
+                expected.status, expected.out,
+                actual.status, actual.out,
+                actual.err);
+    }
+    free(expected.out);
+    free(expected.err);
+    free(actual.out);
+    free(actual.err);
     return ok ? 0 : 1;
 }
 
@@ -303,9 +364,15 @@ int main(int argc, char **argv) {
                          FIXTURE_UNALIGNED, preserve, false, NULL,
                          "expert dimensions are invalid");
 
+    write_fixture(root, FIXTURE_GOOD);
+    write_zero_imatrix(root, "mtp.0.ffn_gate_exps.weight", 256);
+    failed += check_zero_imatrix_fallback(binary, root, "iq2_xxs");
+    failed += check_zero_imatrix_fallback(binary, root, "q2_k");
+
     const char *files[] = {
         "model-00001-of-00001.safetensors",
-        "model.safetensors.index.json", "stdout", "stderr",
+        "model.safetensors.index.json", "zero.imatrix.dat",
+        "stdout", "stderr",
     };
     for (size_t i = 0; i < ARRAY_LEN(files); i++) {
         char path[4096];
