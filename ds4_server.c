@@ -719,6 +719,8 @@ static void random_tool_id(char *dst, size_t dstlen, api_style api) {
 
 typedef struct server server;
 
+static void server_log(ds4_log_type type, const char *fmt, ...);
+
 typedef struct {
     const char *python;
     const char *encoder;
@@ -782,7 +784,12 @@ typedef struct {
     int cap;
 } chat_msgs;
 
-enum { DS4V_FLAG_BEGIN_END = 1u };
+enum {
+    DS4V_FLAG_BEGIN_END = 1u,
+    /* The rows came from the native Vision-Exp tower and expect the receiver's
+     * per-layer visual router biases.  Older retrofit sidecars leave this off. */
+    DS4V_FLAG_VISUAL_ROUTING = 2u,
+};
 
 typedef struct {
     char magic[8];
@@ -1057,7 +1064,8 @@ static bool load_ds4v_payload(const char *path, ds4v_payload *out,
         out->header.header_bytes != sizeof(out->header) ||
         count == 0 || count > 1281 ||
         out->header.hidden_size != 4096 ||
-        (out->header.flags & ~DS4V_FLAG_BEGIN_END) != 0) {
+        (out->header.flags &
+         ~(DS4V_FLAG_BEGIN_END | DS4V_FLAG_VISUAL_ROUTING)) != 0) {
         if (err && errlen) snprintf(err, errlen, "invalid or unsupported DS4VEMB1 payload");
         fclose(fp);
         memset(out, 0, sizeof(*out));
@@ -1232,7 +1240,8 @@ static bool replace_image_marker(char **text, const char *replacement) {
     return true;
 }
 
-static bool prepare_openai_image(const server_vision_config *vision,
+static bool prepare_openai_image(ds4_engine *engine,
+                                 const server_vision_config *vision,
                                  request *r, chat_msgs *msgs,
                                  char *err, size_t errlen) {
     if (!r->image_url) return true;
@@ -1248,6 +1257,11 @@ static bool prepare_openai_image(const server_vision_config *vision,
     if (!load_ds4v_payload(r->embedding_span_path, &r->embedding_payload,
                            err, errlen))
         return false;
+    if ((r->embedding_payload.header.flags & DS4V_FLAG_VISUAL_ROUTING) &&
+        !ds4_engine_has_visual_routing(engine)) {
+        server_log(DS4_LOG_WARNING,
+                   "ds4-server: warning: native Vision-Exp sidecar is attached to a receiver without the complete visual-routing bias set; output is a compatibility fallback, not reference-equivalent");
+    }
     char *tokens = repeat_image_token(r->embedding_payload.header.token_count);
     if (!tokens) {
         snprintf(err, errlen, "image route-token expansion overflow");
@@ -3581,7 +3595,7 @@ static bool parse_chat_request(ds4_engine *e, server *s,
         request_free(r);
         return false;
     }
-    if (!prepare_openai_image(vision, r, &msgs, err, errlen)) {
+    if (!prepare_openai_image(e, vision, r, &msgs, err, errlen)) {
         chat_msgs_free(&msgs);
         free(tool_schemas);
         request_free(r);
@@ -17313,6 +17327,53 @@ static void test_openai_image_content_preserves_order(void) {
     chat_msgs_free(&msgs);
 }
 
+static void test_ds4v_payload_marks_native_visual_routing(void) {
+    char path[] = "/tmp/ds4v-payload-test-XXXXXX";
+    int fd = mkstemp(path);
+    TEST_ASSERT(fd >= 0);
+    if (fd < 0) return;
+
+    ds4v_header header = {
+        .version = 1,
+        .header_bytes = sizeof(ds4v_header),
+        .token_count = 1,
+        .hidden_size = 4096,
+        .flags = DS4V_FLAG_VISUAL_ROUTING,
+        .begin_token = -1,
+        .end_token = -1,
+    };
+    memcpy(header.magic, "DS4VEMB1", sizeof(header.magic));
+    int32_t route = 129279;
+    float rows[4096] = {0};
+    bool wrote = write(fd, &header, sizeof(header)) == sizeof(header) &&
+                 write(fd, &route, sizeof(route)) == sizeof(route) &&
+                 write(fd, rows, sizeof(rows)) == sizeof(rows);
+    TEST_ASSERT(wrote);
+    TEST_ASSERT(close(fd) == 0);
+
+    ds4v_payload payload = {0};
+    char err[128] = {0};
+    TEST_ASSERT(load_ds4v_payload(path, &payload, err, sizeof(err)));
+    TEST_ASSERT(payload.header.flags & DS4V_FLAG_VISUAL_ROUTING);
+    TEST_ASSERT(!ds4_engine_has_visual_routing(NULL));
+    free(payload.routes);
+    free(payload.rows);
+
+    header.flags = 1u << 31;
+    fd = open(path, O_WRONLY | O_TRUNC);
+    TEST_ASSERT(fd >= 0);
+    if (fd >= 0) {
+        wrote = write(fd, &header, sizeof(header)) == sizeof(header) &&
+                write(fd, &route, sizeof(route)) == sizeof(route) &&
+                write(fd, rows, sizeof(rows)) == sizeof(rows);
+        TEST_ASSERT(wrote);
+        TEST_ASSERT(close(fd) == 0);
+        memset(&payload, 0, sizeof(payload));
+        TEST_ASSERT(!load_ds4v_payload(path, &payload, err, sizeof(err)));
+    }
+    unlink(path);
+}
+
 static void append_tool_heavy_schema(buf *b, int idx) {
     if (idx) buf_putc(b, ',');
     buf_puts(b, "{\"type\":\"function\",\"function\":{\"name\":");
@@ -19000,6 +19061,7 @@ static void ds4_server_unit_tests_run(void) {
     test_json_skip_has_nesting_limit();
     test_request_parsers_reject_malformed_duplicate_owned_fields();
     test_openai_image_content_preserves_order();
+    test_ds4v_payload_marks_native_visual_routing();
     test_json_parser_handles_tool_heavy_requests();
     test_json_string_handles_surrogates();
     test_json_int_handles_non_finite_values();

@@ -51460,6 +51460,14 @@ bool ds4_engine_has_output_head(ds4_engine *e) {
     return e && weights_have_output_head(&e->weights);
 }
 
+bool ds4_engine_has_visual_routing(ds4_engine *e) {
+    if (!e) return false;
+    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
+        if (!e->weights.layer[il].ffn_exp_probs_b_vl) return false;
+    }
+    return true;
+}
+
 #ifndef DS4_NO_GPU
 static bool ds4_engine_glm_mtp_spec_enabled(const ds4_engine *e) {
     return e && e->backend != DS4_BACKEND_CPU &&

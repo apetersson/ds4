@@ -29,6 +29,7 @@ from torch import nn
 
 MAGIC = b"DS4VEMB1"
 VERSION = 1
+FLAG_VISUAL_ROUTING = 1 << 1
 HEADER = struct.Struct("<8sIIIIiiiI32s")
 IMAGE_TOKEN_ID = 129279
 HIDDEN_SIZE = 4096
@@ -295,7 +296,16 @@ def write_payload(path: Path, routes: np.ndarray, rows: np.ndarray, digest: byte
     routes = np.ascontiguousarray(routes, dtype="<i4")
     rows = np.ascontiguousarray(rows, dtype="<f4")
     header = HEADER.pack(
-        MAGIC, VERSION, HEADER.size, rows.shape[0], rows.shape[1], 0, -1, -1, 0, digest
+        MAGIC,
+        VERSION,
+        HEADER.size,
+        rows.shape[0],
+        rows.shape[1],
+        FLAG_VISUAL_ROUTING,
+        -1,
+        -1,
+        0,
+        digest,
     )
     with path.open("wb") as handle:
         handle.write(header)
