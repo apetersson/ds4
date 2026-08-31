@@ -1,0 +1,38 @@
+pi_version=0.84.3
+pi_binary=/Users/andreas/.nvm/versions/node/v24.14.0/bin/pi
+image=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png
+78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11  /Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png
+CASE=ds4-encoder
+Title: Orion System Status
+Throughput: 42.7 tok/s
+Latency: 338 ms
+Memory: 114.9 GiB
+Flow: Sensor -> Encoder -> Router -> Decoder
+Snapshot: 2026-08-21 | Status: NOMINAL
+---
+CASE=ds4-real
+Title: Orion System Status
+Throughput: 42.7 tok/s
+Latency: 338 ms
+Memory: 114.9 GiB
+Flow: Sensor -> Encoder -> Router -> Decoder
+Snapshot: 2026-08-21 | Status: NOMINAL
+---
+CASE=ds4-zero
+Title: DeepSeek-V4-Flash-0731-Abliterated-Vision
+Throughput: 1,024 tokens/s
+Latency: 128 ms
+Memory: 4.2 GB
+Flow: Input -> Tokenize -> Generate -> Output
+Snapshot: 2025-07-31
+Status: Healthy
+---
+CASE=ds4-shuffle
+Title: Throughput
+Throughput: 4.2 GB/s
+Latency: 114 ms
+Memory: 38 GB
+Flow: Snapshot -> Encoder -> Decoder -> Status
+Snapshot: 2024-07-31
+Status: Ready
+---

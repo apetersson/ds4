@@ -1,6 +1,7 @@
 #include "ds4.h"
 #include "ds4_distributed.h"
 #include "ds4_gpu_args.h"
+#include "ds4_hf.h"
 #include "ds4_help.h"
 #include "ds4_kvstore.h"
 #include "rax.h"
@@ -878,6 +879,8 @@ typedef struct {
     const char *encoder;
     const char *tower;
     const char *adapter;
+    int tower_fd;
+    int adapter_fd;
     pthread_mutex_t *mu;
 } server_vision_config;
 
@@ -1305,6 +1308,52 @@ static bool vision_config_complete(const server_vision_config *vision) {
            vision->tower && vision->adapter;
 }
 
+static bool vision_preflight_path(const char *role, const char *path, int fd,
+                                  bool executable, char *err, size_t errlen) {
+    struct stat st;
+    bool ok = fd >= 3 ? fstat(fd, &st) == 0 :
+                        path && stat(path, &st) == 0;
+    if (!ok || !S_ISREG(st.st_mode) ||
+        (fd < 3 && access(path, executable ? X_OK : R_OK) != 0)) {
+        snprintf(err, errlen, "vision role %s is not a %s regular file",
+                 role, executable ? "trusted executable" : "readable");
+        return false;
+    }
+    return true;
+}
+
+static bool vision_runtime_preflight(const server_vision_config *vision,
+                                     char *err, size_t errlen) {
+    if (!vision || !vision->python) {
+        snprintf(err, errlen, "vision role python is missing");
+        return false;
+    }
+    if (!vision->encoder) {
+        snprintf(err, errlen, "vision role encoder is missing");
+        return false;
+    }
+    if (!vision->tower) {
+        snprintf(err, errlen, "vision role ds4_vision.tower is missing");
+        return false;
+    }
+    if (!vision->adapter) {
+        snprintf(err, errlen, "vision role ds4_vision.config is missing");
+        return false;
+    }
+    return vision_preflight_path("python", vision->python, -1, true,
+                                 err, errlen) &&
+           vision_preflight_path("encoder", vision->encoder, -1, false,
+                                 err, errlen) &&
+           vision_preflight_path("ds4_vision.tower", vision->tower,
+                                 vision->tower_fd, false, err, errlen) &&
+           vision_preflight_path("ds4_vision.config", vision->adapter,
+                                 vision->adapter_fd, false, err, errlen);
+}
+
+static bool vision_fd_preserved(const server_vision_config *vision, int fd) {
+    return vision && (fd == vision->tower_fd || fd == vision->adapter_fd);
+}
+
 static bool run_vision_encoder(const server_vision_config *vision,
                                const char *image_url, uint32_t start_pos,
                                char **output,
@@ -1345,7 +1394,15 @@ static bool run_vision_encoder(const server_vision_config *vision,
         if (setenv("DS4_VISION_START_POS", start_pos_text, 1) != 0) _exit(126);
         long max_fd = sysconf(_SC_OPEN_MAX);
         if (max_fd < 0) max_fd = 1024;
-        for (int fd = 3; fd < max_fd; fd++) close(fd);
+        for (int fd = 3; fd < max_fd; fd++) {
+            if (vision_fd_preserved(vision, fd)) {
+                int flags = fcntl(fd, F_GETFD);
+                if (flags >= 0) (void)fcntl(fd, F_SETFD,
+                                              flags & ~FD_CLOEXEC);
+            } else {
+                close(fd);
+            }
+        }
         execl(vision->python, vision->python, vision->encoder,
               "--image-url-file", input_template,
               "--output", output_template,
@@ -9738,6 +9795,7 @@ static void id_list_push_unique(stop_list *ids, const char *id);
 
 struct server {
     ds4_engine *engine;
+    ds4_hf_runtime *hf_runtime;
     server_vision_config vision;
     server_slot *slots;
     int slot_count;
@@ -14370,6 +14428,7 @@ static void set_client_socket_nonblocking(int fd) {
 
 typedef struct {
     ds4_engine_options engine;
+    ds4_hf_cli_config hf;
     server_vision_config vision;
     const char *gpu_vram_arg;
     const char *gpu_devices_arg;
@@ -14480,6 +14539,7 @@ static void server_close_resources(server *s) {
     pthread_cond_destroy(&s->cv);
     pthread_mutex_destroy(&s->mu);
     ds4_engine_close(s->engine);
+    ds4_hf_runtime_close_verified(s->hf_runtime);
     memset(s, 0, sizeof(*s));
 }
 
@@ -14530,8 +14590,10 @@ static server_config parse_options(int argc, char **argv) {
         .mixed_prefill_quantum = 128,
     };
     c.kv_cache = kv_cache_default_options();
+    ds4_hf_cli_init(&c.hf);
 
     bool directional_steering_scale_set = false;
+    bool model_explicit = false;
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
         if (!strcmp(arg, "-h") || !strcmp(arg, "--help")) {
@@ -14540,6 +14602,17 @@ static server_config parse_options(int argc, char **argv) {
             usage(stdout, topic);
             exit(0);
         }
+        char hf_parse_err[256] = {0};
+        ds4_hf_cli_parse_result hf_parse =
+            ds4_hf_cli_parse_arg(&c.hf, true, &i, argc, argv,
+                                 hf_parse_err, sizeof(hf_parse_err));
+        if (hf_parse == DS4_HF_CLI_ERROR) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s",
+                       hf_parse_err[0] ? hf_parse_err :
+                           "invalid Hugging Face option");
+            exit(2);
+        }
+        if (hf_parse == DS4_HF_CLI_MATCHED) continue;
         char dist_parse_err[256] = {0};
         ds4_dist_cli_parse_result dist_parse =
             ds4_dist_parse_cli_arg(arg,
@@ -14558,6 +14631,12 @@ static server_config parse_options(int argc, char **argv) {
         if (dist_parse == DS4_DIST_CLI_MATCHED) continue;
 
         if (!strcmp(arg, "-m") || !strcmp(arg, "--model")) {
+            if (model_explicit) {
+                server_log(DS4_LOG_DEFAULT,
+                           "ds4-server: duplicate option: %s", arg);
+                exit(2);
+            }
+            model_explicit = true;
             c.engine.model_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--vision-python")) {
             c.vision.python = need_arg(&i, argc, argv, arg);
@@ -14728,11 +14807,22 @@ static server_config parse_options(int argc, char **argv) {
     if (c.engine.directional_steering_file && !directional_steering_scale_set) {
         c.engine.directional_steering_ffn = 1.0f;
     }
-    const bool any_vision = c.vision.python || c.vision.encoder ||
-                            c.vision.tower || c.vision.adapter;
-    if (any_vision && !vision_config_complete(&c.vision)) {
+    c.engine.mtp_path = c.hf.mtp_path;
+    c.engine.dspark = c.engine.dspark || c.hf.dspark_requested;
+    char hf_err[256];
+    if (!ds4_hf_cli_validate(&c.hf, true, model_explicit,
+                             c.engine.dspark, hf_err, sizeof(hf_err))) {
+        server_log(DS4_LOG_DEFAULT, "ds4-server: %s", hf_err);
+        exit(2);
+    }
+    c.vision.python = c.hf.vision_python;
+    c.vision.encoder = c.hf.vision_encoder;
+    c.vision.tower = c.hf.vision_tower;
+    c.vision.adapter = c.hf.vision_adapter;
+    if (c.engine.dspark && c.engine.ssd_streaming) {
         server_log(DS4_LOG_DEFAULT,
-                   "ds4-server: vision requires --vision-python, --vision-encoder, --vision-tower, and --vision-adapter");
+                   "ds4-server: --dspark is not compatible with "
+                   "--ssd-streaming; disable one before receiver allocation");
         exit(2);
     }
     char dist_err[256];
@@ -14763,6 +14853,16 @@ static void server_request_decode_stop(server *s) {
     pthread_mutex_unlock(&s->model_mu);
 }
 
+static int hf_runtime_role_fd(const ds4_hf_runtime *runtime,
+                              ds4_hf_artifact_role role) {
+    if (!runtime) return -1;
+    for (size_t i = 0; i < runtime->plan.artifact_count; i++) {
+        if (runtime->plan.artifacts[i].role == role)
+            return runtime->verified_fds[i];
+    }
+    return -1;
+}
+
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     struct sigaction sa;
@@ -14773,9 +14873,98 @@ int main(int argc, char **argv) {
     sigaction(SIGTERM, &sa, NULL);
 
     server_config cfg = parse_options(argc, argv);
+    if (cfg.hf.list_variants || cfg.hf.dry_run) {
+        ds4_hf_diagnostics diagnostics;
+        char hf_err[1024] = {0};
+        if (!ds4_hf_diagnostics_prepare(&cfg.hf, &diagnostics,
+                                        hf_err, sizeof(hf_err))) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s",
+                       hf_err[0] ? hf_err :
+                           "Hugging Face diagnostics failed");
+            return 2;
+        }
+        ds4_hf_diagnostics_print(stdout, &cfg.hf, &diagnostics);
+        return 0;
+    }
+    const bool vision_requested =
+        cfg.hf.vision_source == DS4_HF_VISION_CATALOG ||
+        cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT;
+    ds4_hf_runtime hf_runtime = {0};
+    if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
+        char hf_err[1024] = {0};
+        if (!ds4_hf_runtime_prepare(&cfg.hf, &hf_runtime,
+                                    hf_err, sizeof(hf_err))) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s",
+                       hf_err[0] ? hf_err :
+                           "Hugging Face receiver preparation failed");
+            return 2;
+        }
+        cfg.engine.model_path = ds4_hf_runtime_open_path(
+            &hf_runtime, DS4_HF_ROLE_RECEIVER);
+        if (cfg.hf.vision_source == DS4_HF_VISION_CATALOG) {
+            if (!ds4_hf_runtime_vision_artifacts_compatible(
+                    &hf_runtime, hf_err, sizeof(hf_err))) {
+                server_log(DS4_LOG_DEFAULT, "ds4-server: %s", hf_err);
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 2;
+            }
+            cfg.vision.tower = ds4_hf_runtime_open_path(
+                &hf_runtime, DS4_HF_ROLE_VISION_TOWER);
+            /* The modern native Vision-Exp encoder consumes the catalog
+             * config as --vision-adapter; the legacy projector remains
+             * integrity-verified for dual-runtime catalog parity. */
+            cfg.vision.adapter = ds4_hf_runtime_open_path(
+                &hf_runtime, DS4_HF_ROLE_VISION_CONFIG);
+            cfg.vision.tower_fd = hf_runtime_role_fd(
+                &hf_runtime, DS4_HF_ROLE_VISION_TOWER);
+            cfg.vision.adapter_fd = hf_runtime_role_fd(
+                &hf_runtime, DS4_HF_ROLE_VISION_CONFIG);
+        }
+        if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
+            cfg.engine.mtp_path = ds4_hf_runtime_open_path(
+                &hf_runtime, DS4_HF_ROLE_DSPARK);
+            if (!cfg.engine.mtp_path) {
+                server_log(DS4_LOG_DEFAULT,
+                           "ds4-server: HF runtime handoff did not verify the selected DSpark role");
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 2;
+            }
+        }
+        const ds4_hf_acquisition_artifact *receiver =
+            &hf_runtime.plan.artifacts[0];
+        const bool dspark_verified = ds4_hf_runtime_role_verified(
+            &hf_runtime, DS4_HF_ROLE_DSPARK);
+        const char *verified_roles =
+            hf_runtime.vision_bundle_verified && dspark_verified ?
+                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config,dspark]" :
+            hf_runtime.vision_bundle_verified ?
+                "[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config]" :
+            dspark_verified ? "[receiver,dspark]" : "[receiver]";
+        server_log(DS4_LOG_DEFAULT,
+                   "ds4-server: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=%s dspark=%s support=%s",
+                   hf_runtime.plan.repository, hf_runtime.plan.revision,
+                   hf_runtime.plan.selector, receiver->repo_path,
+                   verified_roles,
+                   cfg.hf.vision_source == DS4_HF_VISION_CATALOG ?
+                       "verified-pending-receiver" : "inactive",
+                   cfg.engine.dspark ? "requested" : "not-requested",
+                   cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG ? "catalog" :
+                   cfg.hf.dspark_source == DS4_HF_DSPARK_EXPLICIT_MTP ?
+                       "explicit-mtp" : "none");
+    }
+    if (vision_requested) {
+        char vision_err[512] = {0};
+        if (!vision_runtime_preflight(&cfg.vision, vision_err,
+                                      sizeof(vision_err))) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s", vision_err);
+            ds4_hf_runtime_close_verified(&hf_runtime);
+            return 2;
+        }
+    }
     if (cfg.chdir_path && chdir(cfg.chdir_path) != 0) {
         server_log(DS4_LOG_DEFAULT, "ds4-server: failed to chdir to %s: %s",
                    cfg.chdir_path, strerror(errno));
+        ds4_hf_runtime_close_verified(&hf_runtime);
         return 1;
     }
 
@@ -14793,11 +14982,15 @@ int main(int argc, char **argv) {
                                &gpu_cfg, &skip_cuda,
                                gpu_err, sizeof(gpu_err)) != 0) {
             fprintf(stderr, "ds4-server: %s\n", gpu_err);
+            ds4_hf_runtime_close_verified(&hf_runtime);
             return 2;
         }
         cfg.engine.backend = skip_cuda ? DS4_BACKEND_CPU : DS4_BACKEND_CUDA;
         if (skip_cuda) {
-            if (ds4_engine_open(&engine, &cfg.engine) != 0) return 1;
+            if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 1;
+            }
         } else {
             const bool was_auto =
                 (cfg.gpu_vram_arg && !strcmp(cfg.gpu_vram_arg, "auto")) ||
@@ -14809,9 +15002,13 @@ int main(int argc, char **argv) {
                 fflush(stdout);
             }
             if (ds4_engine_create_with_gpu_config(
-                    &engine, &cfg.engine, &gpu_cfg) != 0) return 1;
+                    &engine, &cfg.engine, &gpu_cfg) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 1;
+            }
         }
     } else if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+        ds4_hf_runtime_close_verified(&hf_runtime);
         return 1;
     }
 
@@ -14821,7 +15018,20 @@ int main(int argc, char **argv) {
         };
         int rc = ds4_dist_run(engine, &cfg.engine.distributed, &gen);
         ds4_engine_close(engine);
+        ds4_hf_runtime_close_verified(&hf_runtime);
         return rc;
+    }
+
+    if (cfg.hf.vision_source == DS4_HF_VISION_CATALOG) {
+        char hf_err[512] = {0};
+        if (!ds4_hf_runtime_vision_compatible(
+                &hf_runtime, (uint32_t)ds4_engine_image_token_id(engine),
+                hf_err, sizeof(hf_err))) {
+            server_log(DS4_LOG_DEFAULT, "ds4-server: %s", hf_err);
+            ds4_engine_close(engine);
+            ds4_hf_runtime_close_verified(&hf_runtime);
+            return 2;
+        }
     }
 
     const int slot_count = cfg.batched_sessions > 0 ? cfg.batched_sessions : 1;
@@ -14833,6 +15043,7 @@ int main(int argc, char **argv) {
 
     server s = {0};
     s.engine = engine;
+    s.hf_runtime = &hf_runtime;
     s.vision = cfg.vision;
     s.ctx_size = cfg.ctx_size;
     s.slot_count = slot_count;

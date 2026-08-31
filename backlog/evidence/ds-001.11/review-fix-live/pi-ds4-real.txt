@@ -1,0 +1,6 @@
+Title: Orion System Status
+Throughput: 42.7 tok/s
+Latency: 338 ms
+Memory: 114.9 GiB
+Flow: Sensor -> Encoder -> Router -> Decoder
+Snapshot: 2026-08-21 | Status: NOMINAL

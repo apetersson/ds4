@@ -1,0 +1,6 @@
+{
+  "error": {
+    "message": "ds4_embedding_span_path is not accepted by the public API",
+    "type": "invalid_request_error"
+  }
+}

@@ -171,6 +171,11 @@ typedef struct {
     bool ssd_streaming_cold;
     bool ssd_streaming_full_layers_set;
     bool inspect_only;
+#ifdef DS4_TEST_HOOKS
+    /* Deterministic fake-Hub tests may inspect metadata-only GGUF fixtures.
+     * Release builds still require the complete receiver tensor layout. */
+    bool test_metadata_only_inspect;
+#endif
     /* Multi-GPU placement uses this to price per-layer KV storage. */
     int placement_ctx_hint;
     /* Number of independently allocated session graphs/caches to reserve. */
@@ -550,6 +555,8 @@ bool ds4_engine_has_output_head(ds4_engine *e);
  * presenting an older receiver as native Vision-Exp. */
 bool ds4_engine_has_visual_routing(ds4_engine *e);
 bool ds4_engine_has_mtp(ds4_engine *e);
+bool ds4_engine_has_dspark(ds4_engine *e);
+int ds4_engine_image_token_id(ds4_engine *e);
 int ds4_engine_mtp_draft_tokens(ds4_engine *e);
 const ds4_tokens *ds4_session_tokens(ds4_session *s);
 

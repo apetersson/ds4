@@ -1,0 +1,6 @@
+{
+  "error": {
+    "message": "image_url must be a bounded base64 data:image URL",
+    "type": "invalid_request_error"
+  }
+}

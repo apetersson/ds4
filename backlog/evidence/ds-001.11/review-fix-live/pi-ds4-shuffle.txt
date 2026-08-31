@@ -1,0 +1,7 @@
+Title: Throughput
+Throughput: 4.2 GB/s
+Latency: 114 ms
+Memory: 38 GB
+Flow: Snapshot -> Encoder -> Decoder -> Status
+Snapshot: 2024-07-31
+Status: Ready

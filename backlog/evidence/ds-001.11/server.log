@@ -1,0 +1,70 @@
+0826 09:13:40 ds4-server: HF repository='apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision' revision='0123456789abcdef0123456789abcdef01234567' selector='Headroom128-IQ2_XXS' receiver='Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf' verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=verified-pending-receiver dspark=not-requested
+ds4: Metal device Apple M1 Ultra, 128.00 GiB RAM
+ds4: Metal 4 tensor API disabled for pre-M5/pre-A19 devices
+ds4: drift-patch flags hc_stable=on norm_unify=on kv_raw_f32=off rope_exp2_log2=off math_safe=off tensor_matmul=off
+ds4: Metal model views created in 3.708 ms, residency requested in 788.075 ms, warmup 3.283 ms (mapped 82697.67 MiB from offset 5.09 MiB)
+ds4: Metal mapped mmaped model as 2 overlapping shared buffers
+ds4: metal backend initialized for graph diagnostics
+ds4: memory: KV 0.18 GiB (raw 0.17 + compressed 0.02) + buffers 0.01 GiB + resident model 80.76 GiB = 80.95 GiB planned
+ds4: memory detail: ctx=2048 prefill_cap=2048 raw_kv_rows=2048 compressed_kv_rows=514 backend=metal
+0826 09:13:41 ds4-server: context buffers 197.20 MiB (ctx=2048, backend=metal, prefill_chunk=2048, raw_kv_rows=2048, compressed_kv_rows=514)
+0826 09:13:41 ds4-server: HF runtime repository='apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision' revision='0123456789abcdef0123456789abcdef01234567' selector='Headroom128-IQ2_XXS' receiver='Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf' verified_roles=[receiver,ds4_vision.tower,ds4_vision.projector,ds4_vision.config] vision=active dspark=inactive
+0826 09:13:41 ds4-server: listening on http://127.0.0.1:18082
+0826 09:17:35 ds4-server: chat ctx=0..14:14 prompt start
+0826 09:17:37 ds4-server: chat ctx=0..14:14 prompt done 1.278s
+0826 09:17:37 ds4-server: chat ctx=14..20:6 gen=6 decoding chunk=22.62 t/s avg=22.62 t/s 0.265s
+0826 09:17:37 ds4-server: chat ctx=0..14:14 gen=6 finish=stop 1.544s
+/private/tmp/dsv4-vision-venv/lib/python3.11/site-packages/transformers/utils/hub.py:110: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
+  warnings.warn(
+{"adapter": "/dev/fd/6", "adapter_step": 4800, "checkpoint_tiles": 2, "device": "mps", "format": "DS4VEMB1", "hidden_size": 4096, "image": "/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png", "image_sha256": "78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11", "interchange_dtype": "float32", "seconds": 10.867462624795735, "served_tiles": 2, "tokens": 769, "tower": "/dev/fd/5", "variant": "flycockpit-deepencoderv2-004800", "views": 3, "weight_dtype": "bfloat16"}
+0826 09:18:22 ds4-server: live kv cache miss live=20 prompt=801 common=2 reason=token-mismatch
+0826 09:18:22 ds4-server: chat ctx=0..801:801 prompt start
+0826 09:18:29 ds4-server: chat ctx=0..801:801 prompt done 7.410s
+0826 09:18:31 ds4-server: chat ctx=801..851:50 gen=50 decoding chunk=21.20 t/s avg=21.20 t/s 2.358s
+0826 09:18:32 ds4-server: chat ctx=851..869:18 gen=68 decoding chunk=21.90 t/s avg=21.38 t/s 3.180s
+0826 09:18:32 ds4-server: chat ctx=0..801:801 gen=68 finish=stop 10.590s
+0826 09:18:57 ds4-server: live kv cache miss live=869 prompt=801 common=801 reason=token-mismatch
+0826 09:18:57 ds4-server: chat ctx=0..801:801 prompt start
+0826 09:19:02 ds4-server: chat ctx=0..801:801 prompt done 5.221s
+0826 09:19:04 ds4-server: chat ctx=801..851:50 gen=50 decoding chunk=21.19 t/s avg=21.19 t/s 2.360s
+0826 09:19:05 ds4-server: chat ctx=851..869:18 gen=68 decoding chunk=20.54 t/s avg=21.01 t/s 3.236s
+0826 09:19:05 ds4-server: chat ctx=0..801:801 gen=68 finish=stop 8.458s
+0826 09:19:05 ds4-server: live kv cache miss live=869 prompt=801 common=801 reason=token-mismatch
+0826 09:19:05 ds4-server: chat ctx=0..801:801 prompt start
+0826 09:19:09 ds4-server: chat ctx=0..801:801 prompt done 4.261s
+0826 09:19:12 ds4-server: chat ctx=801..851:50 gen=50 decoding chunk=21.31 t/s avg=21.31 t/s 2.346s
+0826 09:19:14 ds4-server: chat ctx=851..901:50 gen=100 decoding chunk=20.83 t/s avg=21.07 t/s 4.747s
+0826 09:19:15 ds4-server: chat ctx=901..929:28 gen=128 decoding chunk=20.93 t/s avg=21.04 t/s 6.085s
+0826 09:19:15 ds4-server: chat ctx=0..801:801 gen=128 finish=length 10.346s
+0826 09:19:15 ds4-server: live kv cache miss live=929 prompt=801 common=801 reason=token-mismatch
+0826 09:19:15 ds4-server: chat ctx=0..801:801 prompt start
+0826 09:19:20 ds4-server: chat ctx=0..801:801 prompt done 4.435s
+0826 09:19:22 ds4-server: chat ctx=801..851:50 gen=50 decoding chunk=21.42 t/s avg=21.42 t/s 2.334s
+0826 09:19:23 ds4-server: chat ctx=851..858:7 gen=57 decoding chunk=20.62 t/s avg=21.32 t/s 2.674s
+0826 09:19:23 ds4-server: chat ctx=0..801:801 gen=57 finish=stop 7.110s
+/private/tmp/dsv4-vision-venv/lib/python3.11/site-packages/transformers/utils/hub.py:110: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
+  warnings.warn(
+{"adapter": "/dev/fd/6", "adapter_step": 4800, "checkpoint_tiles": 2, "device": "mps", "format": "DS4VEMB1", "hidden_size": 4096, "image": "data-url", "image_sha256": "78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11", "interchange_dtype": "float32", "seconds": 10.226999999955297, "served_tiles": 2, "tokens": 769, "tower": "/dev/fd/5", "variant": "flycockpit-deepencoderv2-004800", "views": 3, "weight_dtype": "bfloat16"}
+0826 09:20:41 ds4-server: live kv cache miss live=858 prompt=1259 common=1 reason=token-mismatch
+0826 09:20:41 ds4-server: chat ctx=0..1259:1259 prompt start
+0826 09:20:49 ds4-server: chat ctx=0..1259:1259 prompt done 7.879s
+0826 09:20:49 ds4-server: chat ctx=1259..1264:5 gen=5 decoding chunk=21.99 t/s avg=21.99 t/s 0.227s
+0826 09:20:49 ds4-server: chat ctx=0..1259:1259 gen=5 finish=stop 8.106s
+/private/tmp/dsv4-vision-venv/lib/python3.11/site-packages/transformers/utils/hub.py:110: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
+  warnings.warn(
+{"adapter": "/dev/fd/6", "adapter_step": 4800, "checkpoint_tiles": 2, "device": "mps", "format": "DS4VEMB1", "hidden_size": 4096, "image": "data-url", "image_sha256": "78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11", "interchange_dtype": "float32", "seconds": 10.218132874928415, "served_tiles": 2, "tokens": 769, "tower": "/dev/fd/5", "variant": "flycockpit-deepencoderv2-004800", "views": 3, "weight_dtype": "bfloat16"}
+0826 09:21:23 ds4-server: live kv cache miss live=1264 prompt=1271 common=474 reason=token-mismatch
+0826 09:21:23 ds4-server: chat ctx=0..1271:1271 prompt start
+0826 09:21:31 ds4-server: chat ctx=0..1271:1271 prompt done 8.167s
+0826 09:21:34 ds4-server: chat ctx=1271..1321:50 gen=50 decoding chunk=20.83 t/s avg=20.83 t/s 2.400s
+0826 09:21:35 ds4-server: chat ctx=1321..1338:17 gen=67 decoding chunk=20.93 t/s avg=20.86 t/s 3.212s
+0826 09:21:35 ds4-server: chat ctx=0..1271:1271 gen=67 finish=stop 11.380s
+/private/tmp/dsv4-vision-venv/lib/python3.11/site-packages/transformers/utils/hub.py:110: FutureWarning: Using `TRANSFORMERS_CACHE` is deprecated and will be removed in v5 of Transformers. Use `HF_HOME` instead.
+  warnings.warn(
+{"adapter": "/dev/fd/6", "adapter_step": 4800, "checkpoint_tiles": 2, "device": "mps", "format": "DS4VEMB1", "hidden_size": 4096, "image": "data-url", "image_sha256": "78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11", "interchange_dtype": "float32", "seconds": 10.09735270915553, "served_tiles": 2, "tokens": 769, "tower": "/dev/fd/5", "variant": "flycockpit-deepencoderv2-004800", "views": 3, "weight_dtype": "bfloat16"}
+0826 09:22:02 ds4-server: live kv cache miss live=1338 prompt=1276 common=473 reason=token-mismatch
+0826 09:22:02 ds4-server: chat ctx=0..1276:1276 prompt start
+0826 09:22:11 ds4-server: chat ctx=0..1276:1276 prompt done 8.376s
+0826 09:22:11 ds4-server: chat ctx=1276..1280:4 gen=4 decoding chunk=20.72 t/s avg=20.72 t/s 0.193s
+0826 09:22:11 ds4-server: chat ctx=0..1276:1276 gen=4 finish=stop 8.570s
+0826 09:22:19 ds4-server: shutdown requested, draining requests

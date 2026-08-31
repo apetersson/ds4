@@ -1,0 +1,28 @@
+Vanilla Pi harness failure audit (preserved, not counted as passing evidence)
+
+1. The first four-provider text-mode run used the original client descriptor
+   contextWindow=2048. Pi exited zero for ds4-encoder, ds4-real, ds4-zero, and
+   ds4-shuffle, but each pi-ds4-*.txt file was exactly 0 bytes and the combined
+   matrix contained only CASE delimiters. Those four filenames were then
+   overwritten by the corrected rerun; this audit records the observed sizes
+   rather than pretending the first run passed.
+
+2. pi-text-probe.stdout and pi-text-probe.stderr are the retained exact empty
+   text-mode probe files (0 bytes each).
+
+3. pi-json-text-probe.stdout is the retained raw Pi JSON event stream for the
+   same undersized descriptor. It proves Pi sent the request and received only
+   `P`, with stopReason=length, rawStopReason=length, output=1, and totalTokens=439.
+   pi-json-text-probe.stderr is exactly empty.
+
+4. pi-json-ds4-encoder.jsonl is the retained raw image probe before correcting
+   the descriptor. Its final assistant message is exactly `Title`, with
+   stopReason=length, rawStopReason=length, output=1, and totalTokens=1364.
+   pi-json-ds4-encoder.stderr is exactly empty.
+
+Disposition: evidence-harness metadata defect, not a DS4 server implementation
+defect. Pi estimates the inline image against its model catalog contextWindow
+before sending max_tokens. The corrected descriptor reports the catalog window
+131072 while the actual DS4 receiver remains independently and strictly bounded
+by the unchanged launch flags --ctx 2048 --tokens 192. The corrected literal
+four-provider text-mode replay is preserved in pi-matrix.txt and pi-ds4-*.txt.

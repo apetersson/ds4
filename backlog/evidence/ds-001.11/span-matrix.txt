@@ -1,0 +1,35 @@
+CASE=real elapsed=8.486s
+Title: Orion System Status
+Throughput: 42.7 toks
+Latency: 38 ms
+Memory: 114.9 GiB
+Request flow: Sensor -> Encoder -> Router -> Decoder
+Status: Target-only | DSpark
+Snapshot: 2026-08-24 | Status: NOMINAL
+---
+CASE=zero elapsed=10.363s
+**Dashboard Analysis:**
+
+- **Title:** System Performance Monitor
+- **Throughput:** 2,847 requests/sec
+- **Latency:** 412 ms avg
+- **Memory:** 61% used (7.8 GB / 12.8 GB)
+- **Request Flow (in order):**
+  1. **API Gateway** → 2,847 req/s
+  2. **Auth Service** → 1,920 req/s
+  3. **Rate Limiter** → 1,920 req/s
+  4. **Load Balancer** → 1,920 req/s
+- **Status
+---
+CASE=shuffle elapsed=7.129s
+Title: Memory Status
+Throughput: 4.2 GB/s
+Latency: 38 ms
+Memory: 114 GB
+Request-flow nodes in order:
+1. Origin
+2. Snapshot
+3. Encoder
+4. Decoder
+Status: Requested
+---

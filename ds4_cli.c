@@ -1,6 +1,7 @@
 #include "ds4.h"
 #include "ds4_distributed.h"
 #include "ds4_gpu_args.h"
+#include "ds4_hf.h"
 #include "ds4_tp.h"
 #include "ds4_help.h"
 #include "linenoise.h"
@@ -92,6 +93,7 @@ typedef struct {
 
 typedef struct {
     ds4_engine_options engine;
+    ds4_hf_cli_config hf;
     ds4_dist_options *dist;
     cli_generation_options gen;
     char *prompt_owned;
@@ -1892,8 +1894,10 @@ static cli_config parse_options(int argc, char **argv) {
         fprintf(stderr, "ds4: out of memory creating distributed options\n");
         exit(1);
     }
+    ds4_hf_cli_init(&c.hf);
 
     bool directional_steering_scale_set = false;
+    bool model_explicit = false;
     for (int i = 1; i < argc; i++) {
         const char *arg = argv[i];
         if (!strcmp(arg, "-h") || !strcmp(arg, "--help")) {
@@ -1902,6 +1906,17 @@ static cli_config parse_options(int argc, char **argv) {
             usage(stdout, topic);
             exit(0);
         }
+        char hf_parse_err[256] = {0};
+        ds4_hf_cli_parse_result hf_parse =
+            ds4_hf_cli_parse_arg(&c.hf, false, &i, argc, argv,
+                                 hf_parse_err, sizeof(hf_parse_err));
+        if (hf_parse == DS4_HF_CLI_ERROR) {
+            fprintf(stderr, "ds4: %s\n",
+                    hf_parse_err[0] ? hf_parse_err :
+                        "invalid Hugging Face option");
+            exit(2);
+        }
+        if (hf_parse == DS4_HF_CLI_MATCHED) continue;
         char dist_parse_err[256] = {0};
         ds4_dist_cli_parse_result dist_parse = ds4_dist_parse_cli_arg(arg,
                                                                       &i,
@@ -1948,6 +1963,11 @@ static cli_config parse_options(int argc, char **argv) {
         } else if (!strcmp(arg, "--raw") || !strcmp(arg, "--raw-prompt")) {
             c.gen.raw_prompt = true;
         } else if (!strcmp(arg, "-m") || !strcmp(arg, "--model")) {
+            if (model_explicit) {
+                fprintf(stderr, "ds4: duplicate option: %s\n", arg);
+                exit(2);
+            }
+            model_explicit = true;
             c.engine.model_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--vision")) {
             c.engine.vision_path = need_arg(&i, argc, argv, arg);
@@ -2159,6 +2179,20 @@ static cli_config parse_options(int argc, char **argv) {
         fprintf(stderr, "ds4: --perplexity-file does not use -p/--prompt-file\n");
         exit(2);
     }
+    c.engine.mtp_path = c.hf.mtp_path;
+    c.engine.dspark = c.engine.dspark || c.hf.dspark_requested;
+    char hf_err[256];
+    if (!ds4_hf_cli_validate(&c.hf, false, model_explicit,
+                             c.engine.dspark, hf_err, sizeof(hf_err))) {
+        fprintf(stderr, "ds4: %s\n", hf_err);
+        exit(2);
+    }
+    if (c.engine.dspark && c.engine.ssd_streaming) {
+        fprintf(stderr,
+                "ds4: --dspark is not compatible with --ssd-streaming; "
+                "disable one before receiver allocation\n");
+        exit(2);
+    }
     char tp_err[256];
     if (!ds4_tp_adopt_distributed_options(&c.engine.tp, c.dist,
                                           tp_err, sizeof(tp_err))) {
@@ -2180,9 +2214,70 @@ static cli_config parse_options(int argc, char **argv) {
 
 int main(int argc, char **argv) {
     cli_config cfg = parse_options(argc, argv);
+    if (cfg.hf.list_variants || cfg.hf.dry_run) {
+        ds4_hf_diagnostics diagnostics;
+        char hf_err[1024] = {0};
+        if (!ds4_hf_diagnostics_prepare(&cfg.hf, &diagnostics,
+                                        hf_err, sizeof(hf_err))) {
+            fprintf(stderr, "ds4: %s\n",
+                    hf_err[0] ? hf_err :
+                        "Hugging Face diagnostics failed");
+            ds4_dist_options_free(cfg.dist);
+            free(cfg.prompt_owned);
+            return 2;
+        }
+        ds4_hf_diagnostics_print(stdout, &cfg.hf, &diagnostics);
+        ds4_dist_options_free(cfg.dist);
+        free(cfg.prompt_owned);
+        return 0;
+    }
+#ifdef DS4_TEST_HOOKS
+    cfg.engine.test_metadata_only_inspect = cfg.inspect;
+#endif
+    ds4_hf_runtime hf_runtime = {0};
+    if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
+        char hf_err[1024] = {0};
+        if (!ds4_hf_runtime_prepare(&cfg.hf, &hf_runtime,
+                                    hf_err, sizeof(hf_err))) {
+            fprintf(stderr, "ds4: %s\n",
+                    hf_err[0] ? hf_err :
+                        "Hugging Face receiver preparation failed");
+            ds4_dist_options_free(cfg.dist);
+            free(cfg.prompt_owned);
+            return 2;
+        }
+        cfg.engine.model_path = ds4_hf_runtime_open_path(
+            &hf_runtime, DS4_HF_ROLE_RECEIVER);
+        if (cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG) {
+            cfg.engine.mtp_path = ds4_hf_runtime_open_path(
+                &hf_runtime, DS4_HF_ROLE_DSPARK);
+            if (!cfg.engine.mtp_path) {
+                fprintf(stderr,
+                        "ds4: HF runtime handoff did not verify the selected DSpark role\n");
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                ds4_dist_options_free(cfg.dist);
+                free(cfg.prompt_owned);
+                return 2;
+            }
+        }
+        const ds4_hf_acquisition_artifact *receiver =
+            &hf_runtime.plan.artifacts[0];
+        fprintf(stderr,
+                "ds4: HF repository='%s' revision='%s' selector='%s' receiver='%s' verified_roles=%s vision=inactive dspark=%s support=%s\n",
+                hf_runtime.plan.repository, hf_runtime.plan.revision,
+                hf_runtime.plan.selector, receiver->repo_path,
+                ds4_hf_runtime_role_verified(&hf_runtime,
+                                             DS4_HF_ROLE_DSPARK) ?
+                    "[receiver,dspark]" : "[receiver]",
+                cfg.engine.dspark ? "requested" : "not-requested",
+                cfg.hf.dspark_source == DS4_HF_DSPARK_CATALOG ? "catalog" :
+                cfg.hf.dspark_source == DS4_HF_DSPARK_EXPLICIT_MTP ?
+                    "explicit-mtp" : "none");
+    }
     if (cfg.gen.dump_tokens) {
         if (cfg.gen.prompt == NULL) {
             fprintf(stderr, "ds4: --dump-tokens requires -p or --prompt-file\n");
+            ds4_hf_runtime_close_verified(&hf_runtime);
             free(cfg.prompt_owned);
             return 2;
         }
@@ -2198,6 +2293,7 @@ int main(int argc, char **argv) {
                                             cli_effective_think_mode(&cfg.gen),
                                             stdout);
         }
+        ds4_hf_runtime_close_verified(&hf_runtime);
         ds4_dist_options_free(cfg.dist);
         free(cfg.prompt_owned);
         return rc;
@@ -2216,6 +2312,7 @@ int main(int argc, char **argv) {
                                &gpu_cfg, &skip_cuda,
                                errbuf, sizeof(errbuf)) != 0) {
             fprintf(stderr, "ds4: %s\n", errbuf);
+            ds4_hf_runtime_close_verified(&hf_runtime);
             ds4_dist_options_free(cfg.dist);
             free(cfg.prompt_owned);
             return 2;
@@ -2223,6 +2320,7 @@ int main(int argc, char **argv) {
         cfg.engine.backend = skip_cuda ? DS4_BACKEND_CPU : DS4_BACKEND_CUDA;
         if (skip_cuda) {
             if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
                 ds4_dist_options_free(cfg.dist);
                 free(cfg.prompt_owned);
                 return 1;
@@ -2239,15 +2337,28 @@ int main(int argc, char **argv) {
             }
             if (ds4_engine_create_with_gpu_config(&engine, &cfg.engine,
                                                    &gpu_cfg) != 0) {
+                ds4_hf_runtime_close_verified(&hf_runtime);
                 ds4_dist_options_free(cfg.dist);
                 free(cfg.prompt_owned);
                 return 1;
             }
         }
     } else if (ds4_engine_open(&engine, &cfg.engine) != 0) {
+        ds4_hf_runtime_close_verified(&hf_runtime);
         ds4_dist_options_free(cfg.dist);
         free(cfg.prompt_owned);
         return 1;
+    }
+    const bool hf_dspark_verified =
+        ds4_hf_runtime_role_verified(&hf_runtime, DS4_HF_ROLE_DSPARK);
+    ds4_hf_runtime_close_verified(&hf_runtime);
+    if (hf_runtime.repository) {
+        fprintf(stderr,
+                "ds4: HF runtime repository='%s' revision='%s' selector='%s' verified_roles=%s vision=inactive dspark=%s\n",
+                hf_runtime.plan.repository, hf_runtime.plan.revision,
+                hf_runtime.plan.selector,
+                hf_dspark_verified ? "[receiver,dspark]" : "[receiver]",
+                ds4_engine_has_dspark(engine) ? "active" : "inactive");
     }
     cli_apply_model_sampling_defaults(engine, &cfg.gen);
     if (cfg.engine.tp.role == DS4_TP_WORKER) {

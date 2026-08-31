@@ -140,6 +140,119 @@ download distributed PRO Q4 pieces and do not update `./ds4flash.gguf`.
 Authentication is optional for public downloads, but `--token TOKEN`,
 `HF_TOKEN`, or the local Hugging Face token cache are used when present.
 
+### Hugging Face catalog resolver
+
+`ds4` and `ds4-server` can resolve a DS4 catalog repository directly. The
+llama.cpp-style aliases `-hf`, `-hfr`, `--hf-repo`, and `--hf` are equivalent:
+
+```sh
+# Text receiver using the catalog default variant.
+./ds4 -hf OWNER/CATALOG_REPO
+
+# Select a named variant or one exact repository file.
+./ds4 -hf OWNER/CATALOG_REPO:Headroom128-IQ2_XXS
+./ds4 -hf OWNER/CATALOG_REPO -hff nested/model.gguf
+
+# Resolve and verify the receiver plus its DS4 vision bundle in one command.
+# The Python executable and encoder program are trusted local inputs; catalog
+# data can select weights and configuration, but can never select a program.
+./ds4-server -hf OWNER/CATALOG_REPO:Headroom128-IQ2_XXS \
+  --vision-python /path/to/python --vision-encoder /path/to/encoder.py
+
+# Explicitly stay text-only, or override the complete catalog vision bundle.
+./ds4-server -hf OWNER/CATALOG_REPO --no-vision
+./ds4-server -hf OWNER/CATALOG_REPO \
+  --vision-python /path/to/python --vision-encoder /path/to/encoder.py \
+  --vision-tower /models/tower.safetensors \
+  --vision-adapter /models/config.json
+
+# DSpark companions are opt-in and must match the selected receiver profile.
+./ds4 -hf OWNER/CATALOG_REPO:Headroom128-IQ2_XXS --dspark
+```
+
+Before transferring large artifacts, inspect the catalog or exact plan:
+
+```sh
+./ds4 --hf OWNER/CATALOG_REPO --list-hf-variants
+./ds4-server --hf OWNER/CATALOG_REPO:Quality128-IQ2_XXS_XL \
+  --hf-dry-run --json
+```
+
+Every branch or tag is resolved to one immutable commit before artifact URLs
+are formed. Downloads are selective, resumable, size- and SHA-256-verified,
+and published to the cache only after verification. To use a private or gated
+repository, prefer `HF_TOKEN` so the token does not appear in shell history:
+
+```sh
+HF_TOKEN="$(security find-generic-password -w -s huggingface)" \
+  ./ds4 -hf OWNER/PRIVATE_CATALOG --hf-revision release-2026-08
+
+HF_ENDPOINT=https://huggingface.co ./ds4 -hf OWNER/CATALOG_REPO \
+  --hf-cache-dir /fast/cache
+./ds4 -hf OWNER/CATALOG_REPO --hf-cache-dir /fast/cache --offline
+```
+
+Offline mode performs no network access and succeeds only when the selected
+immutable snapshot and every requested role are present and verified.
+
+The catalog's `variants.json` is a bounded, data-only DS4 integrity manifest.
+It declares exact receiver, raw DS4 vision, llama.cpp mmproj, and optional
+DSpark roles with byte sizes, hashes, capabilities, and minimum runtime
+revisions. It is never executable and does not enable repository code or
+`trust_remote_code`. llama.cpp does not consume this manifest: its compatible
+layout instead depends on an ordinary primary GGUF plus lowercase `mmproj-`
+and `dspark-` siblings in the same variant directory and on compatible GGUF
+metadata.
+
+| Purpose | DS4 | llama.cpp |
+|---|---|---|
+| Repository and selector | `-hf REPO[:SELECTOR]` | `-hf REPO[:QUANT]` |
+| Exact file | `-hff FILE` | `-hff FILE` |
+| Authentication | `-hft TOKEN`, `HF_TOKEN` | token option/environment |
+| Offline/cache | `--offline`, `--hf-cache-dir DIR` | runtime-specific cache controls |
+| Disable automatic vision | `--no-vision` | `--no-mmproj` |
+| Explicit vision | trusted local tower/config/runtime options | `--mmproj FILE` |
+| DSpark | explicit `--dspark` catalog opt-in | patched-build companion behavior |
+
+The receiver is counted once in transfer and runtime totals. DS4 raw vision
+weights and the llama.cpp mmproj are alternative runtime representations and
+are reported separately; apparent duplicate LFS paths do not mean both are
+downloaded. `--hf-dry-run` reports the missing transfer bytes and selected
+runtime weight total. Peak runtime memory is backend-, placement-, and
+SSD-streaming-dependent and must be measured during the intended launch; it is
+not inferred from repository size.
+
+Common failures are intentionally distinct:
+
+- Transport or Xet/LFS redirect failures retain the immutable repository,
+  revision, selector, and role in the diagnostic without forwarding tokens to
+  another host.
+- Authentication failures should be retried with a valid `HF_TOKEN`; tokens
+  are never logged.
+- Hash or size failures leave corrupt bytes unpublished and preserve recovery
+  evidence. Remove nothing until the diagnostic has been inspected.
+- An offline miss means the exact revision or a requested role was not fully
+  verified in that cache. Run once online with the same endpoint, cache,
+  revision, selector, and runtime flags.
+- Selector errors list the catalog variants. Missing or incomplete vision
+  roles fail closed; use `--no-vision` only when text-only service is intended.
+- Wrong-sibling and unsupported schema/runtime-revision errors require a
+  corrected repository layout or newer runtime, not a filename workaround.
+
+Compatibility claims are deliberately narrow. The raw vision bundle is for
+this custom DS4 runtime. A patched apetersson llama.cpp/libmtmd build may use a
+validated `mmproj-` sibling. Upstream vanilla llama.cpp should only be claimed
+for the text receiver and features it already supports; this repository does
+not claim upstream DeepEncoderV2 or DSpark support before those patches are
+validated and merged.
+
+The deterministic, credential-free resolver suite is documented in
+[`tests/HF_RESOLVER_TESTS.md`](tests/HF_RESOLVER_TESTS.md) and runs with:
+
+```sh
+make -j4 test-hf
+```
+
 If you want to regenerate GGUF files or collect a new imatrix, see
 [gguf-tools/README.md](gguf-tools/README.md). Those tools are meant for offline
 model-building work and can take a long time on the full DeepSeek weights.

@@ -1,0 +1,5 @@
+GET /api/models/apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision -> 200
+GET /apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision/resolve/0123456789abcdef0123456789abcdef01234567/variants.json -> 200
+GET /api/models/apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision -> 200
+GET /apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision/resolve/0123456789abcdef0123456789abcdef01234567/variants.json -> 200
+No artifact request occurred. Every artifact route was configured to return 404.

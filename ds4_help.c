@@ -143,10 +143,44 @@ static const char *tool_summary(ds4_help_tool tool) {
     return "";
 }
 
+static void print_hf_selection(FILE *fp, const help_colors *c,
+                               ds4_help_tool tool) {
+    if (tool != DS4_HELP_DS4 && tool != DS4_HELP_SERVER) return;
+
+    opt(fp, c, "-hf, -hfr, --hf-repo, --hf OWNER/REPO[:SELECTOR]",
+        "Select an HF receiver variant. SELECTOR matching is case-insensitive; cannot be combined with --model.");
+    opt(fp, c, "-hff, --hf-file FILE",
+        "Select an exact repository file, overriding :SELECTOR. Requires -hf.");
+    opt(fp, c, "-hft, --hf-token TOKEN",
+        "Override HF_TOKEN for this run. Tokens are never logged; prefer HF_TOKEN to avoid shell history/process arguments.");
+    opt(fp, c, "--hf-revision REVISION",
+        "Resolve this branch, tag, or commit, then pin all requested files to one immutable commit.");
+    opt(fp, c, "--hf-cache-dir DIR",
+        "Override the Hugging Face cache directory for this run.");
+    opt(fp, c, "--offline, --hf-offline",
+        "Require a complete verified cache snapshot and perform no network access.");
+    opt(fp, c, "--list-hf-variants [--json]",
+        "Fetch/cache metadata only and list catalog roles, precision, runtime compatibility, capabilities, and llama.cpp heuristic parity.");
+    opt(fp, c, "--hf-dry-run [--json]",
+        "Resolve immutable metadata and report exact selected roles, verified cache state, transfer bytes, and runtime weight totals without model load.");
+    opt(fp, c, "--hf-json",
+        "Alias for --json with --list-hf-variants or --hf-dry-run.");
+    opt(fp, c, "HF_ENDPOINT",
+        "Environment override used for every HF metadata and artifact request.");
+    para(fp, c, "Explicit local MTP/DSpark support passed with --mtp-model takes precedence over catalog DSpark discovery.");
+
+    if (tool == DS4_HELP_SERVER) {
+        opt(fp, c, "--no-vision",
+            "Disable catalog vision discovery and downloads; serve the HF receiver as text-only.");
+        para(fp, c, "With -hf, ds4-server downloads and verifies the exact tower/projector/config roles by default. Trusted local vision runtime options activate them; --no-vision downloads no catalog vision roles, and a complete explicit local bundle overrides catalog roles.");
+    }
+}
+
 static void print_model_runtime(FILE *fp, const help_colors *c,
                                 ds4_help_tool tool, bool full) {
     title(fp, c, "Model And Runtime");
     opt(fp, c, "-m, --model FILE", "GGUF model path. Default: ds4flash.gguf");
+    print_hf_selection(fp, c, tool);
     if (tool == DS4_HELP_DS4 || tool == DS4_HELP_AGENT || tool == DS4_HELP_SERVER) {
         opt(fp, c, "--vision FILE", "GLM 5.3 vision encoder GGUF.");
     }

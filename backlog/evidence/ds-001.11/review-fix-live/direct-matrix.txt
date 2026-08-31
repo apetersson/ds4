@@ -1,0 +1,42 @@
+image=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png
+image_sha256=78a1d7b63e9e8f8ea363a16350e503845f656e598016a727b312b91ce96a2f11
+image_bytes=60178
+matrix=encoder,real,zero,shuffle
+models http=200 elapsed=0.017s
+text http=200 elapsed=2.509s
+CASE=encoder header=none http=200 elapsed=25.941s
+Title: Orion System Status
+Throughput: 42.7 toks
+Latency: 338 ms
+Memory: 114.9 GiB
+Flow: Sensor -> Encoder -> Router -> Decoder
+Snapshot: 2026-08-21 | Status: NOMINAL
+---
+CASE=real header=real http=200 elapsed=7.630s
+Title: Orion System Status
+Throughput: 42.7 toks
+Latency: 338 ms
+Memory: 114.9 GiB
+Flow: Sensor -> Encoder -> Router -> Decoder
+Snapshot: 2026-08-21 | Status: NOMINAL
+---
+CASE=zero header=zero http=200 elapsed=7.408s
+Title: System Overview
+Throughput: 1.2 TB/s
+Latency: 045 ms
+Memory: 512 GB
+Flow: node1 -> node2 -> node3 -> node4
+Snapshot: 2024-11-05
+Status: healthy
+---
+CASE=shuffle header=shuffle http=200 elapsed=7.415s
+Title: Memory Status
+Throughput: 4.2 GB/s
+Latency: 114 ms
+Memory: 38 GB
+Flow: Snapshot -> Encoder -> Memory -> Status
+Snapshot: 2026-08-01
+Status: Memory Status
+---
+negative-file-url http=400 elapsed=0.001s
+negative-public-span http=400 elapsed=0.001s
