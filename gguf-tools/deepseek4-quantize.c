@@ -1154,6 +1154,7 @@ static const name_map layer_map[] = {
     { "ffn_down_shexp.weight",            "ffn.shared_experts.w2.weight" },
     { "ffn_gate_inp.weight",              "ffn.gate.weight" },
     { "exp_probs_b.bias",                 "ffn.gate.bias" },
+    { "exp_probs_b_vl.bias",              "ffn.gate.bias_vl" },
     { "ffn_gate_tid2eid.weight",          "ffn.gate.tid2eid" },
 };
 
@@ -1964,34 +1965,60 @@ static void write_hf_metadata_kvs(FILE *fp, const hf_model_metadata *metadata) {
     }
 }
 
+static uint64_t vision_routing_bias_count(const st_db *db, uint32_t n_layers) {
+    uint64_t count = 0;
+    char name[128];
+    for (uint32_t il = 0; il < n_layers; il++) {
+        snprintf(name, sizeof(name), "layers.%u.ffn.gate.bias_vl", il);
+        if (db_has(db, name)) count++;
+    }
+    if (count != 0 && count != n_layers) {
+        die("Vision-Exp checkpoint has an incomplete per-layer bias_vl set");
+    }
+    return count;
+}
+
 static output_context build_output_context(const gguf_file *tmpl, const quant_policy *policy,
                                            const imatrix_store *im,
-                                           const hf_model_metadata *metadata) {
+                                           const hf_model_metadata *metadata,
+                                           const st_db *db) {
     output_context out = {0};
-    out.n_tensors = tmpl->n_tensors;
+    const uint64_t n_vl_bias = vision_routing_bias_count(db, tmpl->n_layers);
+    out.n_tensors = tmpl->n_tensors + n_vl_bias;
     out.n_kv_extra = 1 + extra_imatrix_kv_count(im);
     out.alignment = tmpl->alignment;
     out.tensors = xcalloc((size_t)out.n_tensors, sizeof(out.tensors[0]));
     size_t tensor_info = 0;
     size_t off = 0;
     for (uint64_t i = 0; i < out.n_tensors; i++) {
-        const tensor_meta *src = &tmpl->tensors[i];
         tensor_meta *dst = &out.tensors[i];
-        *dst = *src;
-        dst->name = src->name;
-        ds4q_type type = policy_type(policy, src->name, src);
+        const tensor_meta *src = NULL;
+        if (i < tmpl->n_tensors) {
+            src = &tmpl->tensors[i];
+            *dst = *src;
+            dst->name = src->name;
+        } else {
+            const uint32_t il = (uint32_t)(i - tmpl->n_tensors);
+            char name[128];
+            snprintf(name, sizeof(name), "blk.%u.exp_probs_b_vl.bias", il);
+            dst->name = xstrdup(name);
+            dst->n_dims = 1;
+            dst->ne[0] = tmpl->n_experts;
+            dst->type = DS4Q_TYPE_F32;
+        }
+        ds4q_type type = src ? policy_type(policy, src->name, src) : DS4Q_TYPE_F32;
         if (type == DS4Q_TYPE_COUNT) type = src->type;
         const bool preserved_mxfp4 =
-            type == DS4Q_TYPE_MXFP4 && parse_expert_tensor(src->name).is_expert;
+            type == DS4Q_TYPE_MXFP4 && parse_expert_tensor(dst->name).is_expert;
         if (type != DS4Q_TYPE_I32 && !is_quantizable_target(type) && !preserved_mxfp4) {
             die("unsupported planned tensor type");
         }
         if ((ds4q_can_quantize(type) || preserved_mxfp4) &&
-            src->ne[0] % ds4q_block_size(type) != 0) {
+            dst->ne[0] % ds4q_block_size(type) != 0) {
             die("ne[0] not divisible by block size");
         }
         dst->type = type;
-        dst->size = tensor_nbytes(type, src->ne, src->n_dims);
+        dst->size = tensor_nbytes(type, dst->ne, dst->n_dims);
         dst->new_offset = off;
         off += ds4q_pad(dst->size, tmpl->alignment);
         tensor_info += gguf_string_size(dst->name) + 4 + (size_t)dst->n_dims * 8 + 4 + 8;
@@ -2020,7 +2047,7 @@ static void write_full_gguf(st_db *db, const gguf_file *tmpl, const output_conte
     if (!fp) die_errno("open output", out_path);
     if (fwrite("GGUF", 1, 4, fp) != 4) die("write GGUF magic failed");
     write_u32(fp, tmpl->version);
-    write_u64(fp, tmpl->n_tensors);
+    write_u64(fp, out_ctx->n_tensors);
     write_u64(fp, tmpl->n_kv + out_ctx->n_kv_extra);
     if (fwrite(tmpl->kv_raw, 1, tmpl->kv_raw_len, fp) != tmpl->kv_raw_len) die("write GGUF KV failed");
     write_hf_metadata_kvs(fp, metadata);
@@ -2039,8 +2066,8 @@ static void write_full_gguf(st_db *db, const gguf_file *tmpl, const output_conte
     write_padding(fp, out_ctx->data_offset - (size_t)pos);
 
     for (uint64_t i = 0; i < out_ctx->n_tensors; i++) {
-        const tensor_meta *src = &tmpl->tensors[i];
         const tensor_meta *dst = &out_ctx->tensors[i];
+        const tensor_meta *src = i < tmpl->n_tensors ? &tmpl->tensors[i] : dst;
         fprintf(stderr, "[%4" PRIu64 "/%4" PRIu64 "] %s -> %s\n", i + 1, out_ctx->n_tensors, dst->name, ds4q_type_name(dst->type));
         byte_buf data = generate_tensor(db, dst->name, src, dst->type, n_experts, n_threads, imatrix);
         size_t expected = dst->size;
@@ -2062,8 +2089,12 @@ static void print_plan(const gguf_file *tmpl, const output_context *out_ctx) {
     size_t changed = 0;
     for (uint64_t i = 0; i < out_ctx->n_tensors; i++) {
         tensor_bytes += out_ctx->tensors[i].size;
-        const tensor_meta *src = &tmpl->tensors[i];
         const tensor_meta *dst = &out_ctx->tensors[i];
+        if (i >= tmpl->n_tensors) {
+            printf("added_tensor: %s %s\n", dst->name, ds4q_type_name(dst->type));
+            continue;
+        }
+        const tensor_meta *src = &tmpl->tensors[i];
         if (src->type != dst->type) {
             changed++;
             printf("type_change: %s %s -> %s\n", dst->name, ds4q_type_name(src->type), ds4q_type_name(dst->type));
@@ -2074,6 +2105,15 @@ static void print_plan(const gguf_file *tmpl, const output_context *out_ctx) {
     printf("tensor_bytes_unpadded: %zu\n", tensor_bytes);
     printf("approx_file_bytes: %zu\n", out_ctx->data_offset + out_ctx->tensor_bytes);
     printf("type_changes: %zu\n", changed);
+}
+
+static void free_output_context(output_context *out, uint64_t borrowed_names) {
+    if (!out) return;
+    for (uint64_t i = borrowed_names; i < out->n_tensors; i++) {
+        free(out->tensors[i].name);
+    }
+    free(out->tensors);
+    memset(out, 0, sizeof(*out));
 }
 
 /* =====
@@ -3157,10 +3197,13 @@ static void compare_all_tensors(st_db *db,
             fprintf(stderr, "error: comparison type/name mismatch for %s\n", planned->name);
             exit(1);
         }
+        const tensor_meta *source = i < tmpl->n_tensors
+            ? &tmpl->tensors[i]
+            : planned;
         byte_buf generated = generate_tensor(
             db,
             planned->name,
-            &tmpl->tensors[i],
+            source,
             planned->type,
             p->n_experts,
             p->n_threads,
@@ -3292,15 +3335,15 @@ int main(int argc, char **argv) {
     } else {
         fprintf(stderr, "using %d routed experts from --n-experts\n", p.n_experts);
     }
-    output_context out_ctx = build_output_context(&tmpl, &p.policy, &imatrix, &metadata);
+    output_context out_ctx = build_output_context(&tmpl, &p.policy, &imatrix, &metadata, &db);
     print_plan(&tmpl, &out_ctx);
     printf("compress_ratios: source=config.json count=%" PRIu64 "\n", metadata.n_compress_ratios);
     if (p.dry_run) {
         db_close(&db);
         free_hf_model_metadata(&metadata);
         imatrix_free(&imatrix);
+        free_output_context(&out_ctx, tmpl.n_tensors);
         free_gguf_file(&tmpl);
-        free(out_ctx.tensors);
         for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
         free(p.policy.overrides);
         return 0;
@@ -3311,8 +3354,8 @@ int main(int argc, char **argv) {
         db_close(&db);
         imatrix_free(&imatrix);
         free_hf_model_metadata(&metadata);
+        free_output_context(&out_ctx, tmpl.n_tensors);
         free_gguf_file(&tmpl);
-        free(out_ctx.tensors);
         for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
         free(p.policy.overrides);
         return 0;
@@ -3322,8 +3365,8 @@ int main(int argc, char **argv) {
         db_close(&db);
         imatrix_free(&imatrix);
         free_hf_model_metadata(&metadata);
+        free_output_context(&out_ctx, tmpl.n_tensors);
         free_gguf_file(&tmpl);
-        free(out_ctx.tensors);
         return 0;
     }
     write_full_gguf(&db, &tmpl, &out_ctx, p.out_gguf, p.n_experts, p.n_threads,
@@ -3333,8 +3376,8 @@ int main(int argc, char **argv) {
     db_close(&db);
     imatrix_free(&imatrix);
     free_hf_model_metadata(&metadata);
+    free_output_context(&out_ctx, tmpl.n_tensors);
     free_gguf_file(&tmpl);
-    free(out_ctx.tensors);
     for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
     free(p.policy.overrides);
     return 0;
