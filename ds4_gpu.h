@@ -203,6 +203,8 @@ int ds4_gpu_test_decode_pipeline_fast_lookup_ext(void);
 /* Strict test oracle for the generated resident-prefill MXFP4 half LUT. */
 int ds4_gpu_test_mxfp4_down_half_lut(uint16_t *legacy_bits,
                                      uint16_t *lut_bits);
+/* Strict test oracle for replacement semantics of SSD streaming span maps. */
+uint32_t ds4_gpu_test_model_view_count(void);
 enum {
     DS4_GPU_TEST_MXFP4_PAIR_TAIL_CULL = 1u << 0,
     DS4_GPU_TEST_MXFP4_PAIR_COMPACT_TILE = 1u << 1,

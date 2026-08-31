@@ -128,6 +128,45 @@ static int compare_values(const char *name, const float *actual,
     return max_abs <= tolerance;
 }
 
+static int test_streaming_single_span_replaces_views(void) {
+    const uint64_t page = (uint64_t)getpagesize();
+    const uint64_t model_size = 4u * page;
+    void *model = NULL;
+    if (posix_memalign(&model, (size_t)page, (size_t)model_size) != 0) {
+        fprintf(stderr, "Metal streaming span model allocation failed\n");
+        return 0;
+    }
+    memset(model, 0, (size_t)model_size);
+
+    int ok = ds4_gpu_init() != 0;
+    ds4_gpu_set_ssd_streaming(true);
+    const uint64_t size = page;
+    const uint64_t first = page;
+    const uint64_t second = 3u * page;
+    ok = ok && ds4_gpu_set_model_map_spans(model,
+                                           model_size,
+                                           &first,
+                                           &size,
+                                           1u,
+                                           size);
+    ok = ok && ds4_gpu_test_model_view_count() == 1u;
+    ok = ok && ds4_gpu_set_model_map_spans(model,
+                                           model_size,
+                                           &second,
+                                           &size,
+                                           1u,
+                                           size);
+    ok = ok && ds4_gpu_test_model_view_count() == 1u;
+
+    ds4_gpu_set_ssd_streaming(false);
+    ds4_gpu_cleanup();
+    free(model);
+    fprintf(stderr,
+            "Metal streaming single-span view replacement: %s\n",
+            ok ? "PASS" : "FAIL");
+    return ok;
+}
+
 static int values_have_signal(const float *values, uint64_t count) {
     for (uint64_t i = 0; i < count; i++) {
         if (fabsf(values[i]) > 1.0e-8f) return 1;
@@ -1180,7 +1219,8 @@ static int test_mixed_iq2_q2(void) {
 }
 
 int main(void) {
+    const int streaming_map_ok = test_streaming_single_span_replaces_views();
     const int all_mxfp4_ok = test_all_mxfp4() == 0;
     const int mixed_ok = test_mixed_iq2_q2();
-    return all_mxfp4_ok && mixed_ok ? 0 : 1;
+    return streaming_map_ok && all_mxfp4_ok && mixed_ok ? 0 : 1;
 }

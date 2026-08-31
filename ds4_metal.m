@@ -11360,6 +11360,23 @@ int ds4_gpu_set_model_map_spans(
     if (!g_initialized && !ds4_gpu_init()) return 0;
     if (!model_map || model_size == 0 || !offsets || !sizes || count == 0) return 0;
     if (count == 1) {
+        /*
+         * Span maps are replacement maps. SSD streaming calls this once per
+         * layer, and most layers collapse to one contiguous span. Delegating
+         * straight to the legacy range mapper used to append that layer's
+         * no-copy view to every prior layer view, eventually exposing nearly
+         * the whole model to Metal at once. Multi-span replacement already
+         * clears below; keep the single-span case equivalent.
+         */
+        if (ds4_gpu_model_views_cover_spans(model_map,
+                                            model_size,
+                                            offsets,
+                                            sizes,
+                                            count)) {
+            return 1;
+        }
+        ds4_gpu_model_residency_clear();
+        ds4_gpu_model_views_clear();
         return ds4_gpu_set_model_map_range(model_map,
                                            model_size,
                                            offsets[0],
@@ -11419,6 +11436,10 @@ int ds4_gpu_set_model_map_spans(
         }
         return 1;
     }
+}
+
+uint32_t ds4_gpu_test_model_view_count(void) {
+    return g_model_view_count;
 }
 
 int ds4_gpu_set_model_map(const void *model_map, uint64_t model_size) {
