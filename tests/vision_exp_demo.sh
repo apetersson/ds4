@@ -37,6 +37,19 @@ fi
 command -v magick >/dev/null || { printf 'ImageMagick magick is required\n' >&2; exit 2; }
 command -v jq >/dev/null || { printf 'jq is required\n' >&2; exit 2; }
 
+now() { perl -MTime::HiRes=time -e 'printf "%.6f\n", time'; }
+process_alive() {
+    local state
+    kill -0 "$1" 2>/dev/null || return 1
+    state=$(ps -o stat= -p "$1" 2>/dev/null | tr -d '[:space:]')
+    [[ -n $state && $state != Z* ]]
+}
+
+if curl -fsS --max-time 1 "http://127.0.0.1:$port/v1/models" >/dev/null 2>&1; then
+    printf 'port %s already has an OpenAI-compatible server; refusing to capture another process\n' "$port" >&2
+    exit 2
+fi
+
 mkdir -p "$output_dir"
 red_png=$output_dir/pure-red-100x100.png
 text_request=$output_dir/text-request.json
@@ -100,24 +113,23 @@ fi
     printf '\n'
 } > "$output_dir/launch-command.txt"
 
-now() { perl -MTime::HiRes=time -e 'printf "%.6f\n", time'; }
 started=$(now)
 "${server_args[@]}" > "$server_log" 2>&1 &
 server_pid=$!
 monitor_pid=
 
 cleanup() {
-    if kill -0 "$server_pid" 2>/dev/null; then
+    if process_alive "$server_pid"; then
         kill -TERM "$server_pid" 2>/dev/null || true
-        wait "$server_pid" 2>/dev/null || true
     fi
+    wait "$server_pid" 2>/dev/null || true
     if [[ -n ${monitor_pid:-} ]]; then wait "$monitor_pid" 2>/dev/null || true; fi
 }
 trap cleanup EXIT INT TERM
 
 (
     peak=0
-    while kill -0 "$server_pid" 2>/dev/null; do
+    while process_alive "$server_pid"; do
         rss=$(ps -axo pid=,ppid=,rss= | awk -v root="$server_pid" '$1 == root || $2 == root { total += $3 } END { print total + 0 }')
         if (( rss > peak )); then peak=$rss; fi
         printf '%s\n' "$peak" > "$peak_file"
@@ -127,8 +139,10 @@ trap cleanup EXIT INT TERM
 monitor_pid=$!
 
 deadline=$((SECONDS + 3600))
-until curl -fsS --max-time 2 "http://127.0.0.1:$port/v1/models" > "$output_dir/models.json" 2>/dev/null; do
-    if ! kill -0 "$server_pid" 2>/dev/null; then
+until grep -Fq "ds4-server: listening on http://127.0.0.1:$port" "$server_log" &&
+      curl -fsS --max-time 2 "http://127.0.0.1:$port/v1/models" > "$output_dir/models.json" 2>/dev/null; do
+    if ! process_alive "$server_pid"; then
+        wait "$server_pid" 2>/dev/null || true
         printf 'server exited before becoming ready; see %s\n' "$server_log" >&2
         exit 1
     fi
@@ -159,7 +173,7 @@ image_answer=$(jq -r '.choices[0].message.content // ""' "$output_dir/image-resp
 printf '%s\n' "$text_answer" > "$output_dir/text-answer.txt"
 printf '%s\n' "$image_answer" > "$output_dir/image-answer.txt"
 
-kill -TERM "$server_pid"
+if process_alive "$server_pid"; then kill -TERM "$server_pid"; fi
 wait "$server_pid" || true
 wait "$monitor_pid" || true
 monitor_pid=
