@@ -4140,6 +4140,7 @@ typedef struct {
     ds4_tensor *ffn_down;
     ds4_tensor *ffn_gate_inp;
     ds4_tensor *ffn_exp_probs_b;
+    ds4_tensor *ffn_exp_probs_b_vl;
     ds4_tensor *ffn_gate_exps;
     ds4_tensor *ffn_up_exps;
     ds4_tensor *ffn_down_exps;
@@ -5102,6 +5103,7 @@ static void weights_validate_layout(
         tensor_expect_layout(l->ffn_norm,       DS4_TENSOR_F32,  1, DS4_N_EMBD, 0, 0);
         tensor_expect_plain_layout(l->ffn_gate_inp, 2, DS4_N_EMBD, DS4_N_EXPERT, 0);
         tensor_expect_optional(l->ffn_exp_probs_b, DS4_TENSOR_F32, 1, DS4_N_EXPERT, 0, 0);
+        tensor_expect_optional(l->ffn_exp_probs_b_vl, DS4_TENSOR_F32, 1, DS4_N_EXPERT, 0, 0);
         tensor_expect_routed_expert(l->ffn_gate_exps, 3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
         tensor_expect_routed_expert(l->ffn_up_exps,   3, DS4_N_EMBD, DS4_N_FF_EXP, DS4_N_EXPERT);
         tensor_expect_routed_expert(l->ffn_down_exps, 3, DS4_N_FF_EXP, DS4_N_EMBD, DS4_N_EXPERT);
@@ -5936,6 +5938,7 @@ static void weights_bind_layer(ds4_layer_weights *l, const ds4_model *m, uint32_
     l->ffn_norm        = required_tensorf(m, "blk.%u.ffn_norm.weight", il);
     l->ffn_gate_inp    = required_tensorf(m, "blk.%u.ffn_gate_inp.weight", il);
     l->ffn_exp_probs_b = tensor_by_namef(m, "blk.%u.exp_probs_b.bias", il);
+    l->ffn_exp_probs_b_vl = tensor_by_namef(m, "blk.%u.exp_probs_b_vl.bias", il);
     l->ffn_gate_exps   = required_tensorf(m, "blk.%u.ffn_gate_exps.weight", il);
     l->ffn_up_exps     = required_tensorf(m, "blk.%u.ffn_up_exps.weight", il);
     l->ffn_down_exps   = required_tensorf(m, "blk.%u.ffn_down_exps.weight", il);
@@ -6125,6 +6128,7 @@ static void model_map_span_vec_include_layer(ds4_model_map_span_vec *spans, cons
     DS4_INCLUDE_TENSOR(l->ffn_down);
     DS4_INCLUDE_TENSOR(l->ffn_gate_inp);
     DS4_INCLUDE_TENSOR(l->ffn_exp_probs_b);
+    DS4_INCLUDE_TENSOR(l->ffn_exp_probs_b_vl);
     DS4_INCLUDE_TENSOR(l->ffn_gate_exps);
     DS4_INCLUDE_TENSOR(l->ffn_up_exps);
     DS4_INCLUDE_TENSOR(l->ffn_down_exps);
@@ -6179,6 +6183,7 @@ static void model_map_span_vec_include_layer_decode_static(ds4_model_map_span_ve
     DS4_INCLUDE_TENSOR(l->ffn_down);
     DS4_INCLUDE_TENSOR(l->ffn_gate_inp);
     DS4_INCLUDE_TENSOR(l->ffn_exp_probs_b);
+    DS4_INCLUDE_TENSOR(l->ffn_exp_probs_b_vl);
     DS4_INCLUDE_TENSOR(l->ffn_gate_shexp);
     DS4_INCLUDE_TENSOR(l->ffn_up_shexp);
     DS4_INCLUDE_TENSOR(l->ffn_down_shexp);
@@ -10748,6 +10753,15 @@ static void layer_shared_ffn_batch(
 }
 
 /* Early DS4 layers use token-id hash routing instead of top-k routing. */
+#define DS4_VISION_ROUTE_TOKEN_ID 129279
+
+static bool layer_token_uses_visual_routing(
+        const ds4_layer_weights *layer,
+        int token) {
+    return layer->ffn_exp_probs_b_vl != NULL &&
+           token == DS4_VISION_ROUTE_TOKEN_ID;
+}
+
 static void layer_hash_selected_experts(
         int                    selected[DS4_MAX_EXPERT_USED],
         const ds4_model       *model,
@@ -10832,18 +10846,20 @@ static void layer_topk_selected_experts_from_probs(
         float                  expert_weight[DS4_MAX_EXPERT_USED],
         const ds4_model       *model,
         const ds4_layer_weights *layer,
-        const float           probs[DS4_MAX_EXPERT]);
+        const float           probs[DS4_MAX_EXPERT],
+        bool                  visual);
 
 static void layer_topk_selected_experts(
         int                    selected[DS4_MAX_EXPERT_USED],
         float                  expert_weight[DS4_MAX_EXPERT_USED],
         const ds4_model       *model,
         const ds4_layer_weights *layer,
-        const float           *x) {
+        const float           *x,
+        bool                  visual) {
     float probs[DS4_MAX_EXPERT] = {0};
 
     layer_router_probs_one(probs, model, layer, x);
-    layer_topk_selected_experts_from_probs(selected, expert_weight, model, layer, probs);
+    layer_topk_selected_experts_from_probs(selected, expert_weight, model, layer, probs, visual);
 }
 
 static void layer_topk_selected_experts_from_probs(
@@ -10851,13 +10867,16 @@ static void layer_topk_selected_experts_from_probs(
         float                  expert_weight[DS4_MAX_EXPERT_USED],
         const ds4_model       *model,
         const ds4_layer_weights *layer,
-        const float           probs[DS4_MAX_EXPERT]) {
+        const float           probs[DS4_MAX_EXPERT],
+        bool                  visual) {
     float selection[DS4_MAX_EXPERT];
 
     memcpy(selection, probs, sizeof(selection));
 
-    if (layer->ffn_exp_probs_b) {
-        const float *bias = tensor_data(model, layer->ffn_exp_probs_b);
+    const ds4_tensor *bias_tensor = visual && layer->ffn_exp_probs_b_vl
+        ? layer->ffn_exp_probs_b_vl : layer->ffn_exp_probs_b;
+    if (bias_tensor) {
+        const float *bias = tensor_data(model, bias_tensor);
         for (uint32_t i = 0; i < DS4_N_EXPERT; i++) selection[i] += bias[i];
     }
 
@@ -10926,11 +10945,12 @@ static void layer_routed_moe_one(
         ds4_quantize_row_q8_K(x, xq, (int64_t)expert_in_dim);
     }
 
-    if (layer->ffn_gate_tid2eid) {
+    const bool visual = layer_token_uses_visual_routing(layer, token);
+    if (layer->ffn_gate_tid2eid && !visual) {
         layer_hash_selected_experts(selected, model, layer, token);
         layer_hash_router_weights_one(expert_weight, model, layer, x, selected);
     } else {
-        layer_topk_selected_experts(selected, expert_weight, model, layer, x);
+        layer_topk_selected_experts(selected, expert_weight, model, layer, x, visual);
     }
 
     if (routed_q8_0) {
@@ -11081,11 +11101,12 @@ static void layer_routed_moe_one_prealloc(
 
     memset(out, 0, (size_t)DS4_N_EMBD * sizeof(out[0]));
 
-    if (layer->ffn_gate_tid2eid) {
+    const bool visual = layer_token_uses_visual_routing(layer, token);
+    if (layer->ffn_gate_tid2eid && !visual) {
         layer_hash_selected_experts(selected, model, layer, token);
         layer_hash_router_weights_one(expert_weight, model, layer, x, selected);
     } else {
-        layer_topk_selected_experts(selected, expert_weight, model, layer, x);
+        layer_topk_selected_experts(selected, expert_weight, model, layer, x, visual);
     }
 
     if (routed_q8_0) {
@@ -11194,11 +11215,14 @@ static void layer_routed_moe_batch(
     for (uint32_t t = 0; t < n_tok; t++) {
         int sel[DS4_MAX_EXPERT_USED];
         float weights[DS4_MAX_EXPERT_USED];
-        if (layer->ffn_gate_tid2eid) {
+        const bool visual = layer_token_uses_visual_routing(layer, token_ids[t]);
+        if (layer->ffn_gate_tid2eid && !visual) {
             layer_hash_selected_experts(sel, model, layer, token_ids[t]);
             layer_hash_router_weights_one(weights, model, layer, norm + (uint64_t)t * expert_in_dim, sel);
         } else {
-            layer_topk_selected_experts(sel, weights, model, layer, norm + (uint64_t)t * expert_in_dim);
+            layer_topk_selected_experts(sel, weights, model, layer,
+                                        norm + (uint64_t)t * expert_in_dim,
+                                        visual);
         }
 
         for (uint32_t slot = 0; slot < DS4_N_EXPERT_USED; slot++) {
@@ -21030,11 +21054,13 @@ static bool metal_graph_decode_cpu_router(
     for (uint32_t i = 0; i < DS4_N_EXPERT; i++) {
         probs[i] = sqrtf(softplus_stable(logits[i]));
     }
-    if (layer->ffn_gate_tid2eid) {
+    const bool visual = layer_token_uses_visual_routing(layer, (int)token);
+    if (layer->ffn_gate_tid2eid && !visual) {
         layer_hash_selected_experts(selected, model, layer, (int)token);
         layer_hash_router_weights_from_probs(weights, probs, selected);
     } else {
-        layer_topk_selected_experts_from_probs(selected, weights, model, layer, probs);
+        layer_topk_selected_experts_from_probs(selected, weights, model, layer,
+                                               probs, visual);
     }
     for (uint32_t i = 0; i < DS4_N_EXPERT_USED; i++) {
         selected_i32[i] = (int32_t)selected[i];
@@ -26350,11 +26376,13 @@ static void metal_graph_trace_layer_stages(
                                   routed_q8_xscale,
                                   routed_q8_midq,
                                   routed_q8_midscale);
-    if (layer->ffn_gate_tid2eid) {
+    const bool visual = layer_token_uses_visual_routing(layer, token);
+    if (layer->ffn_gate_tid2eid && !visual) {
         layer_hash_selected_experts(selected, model, layer, token);
         layer_hash_router_weights_one(expert_weight, model, layer, cpu_ffn_norm, selected);
     } else {
-        layer_topk_selected_experts(selected, expert_weight, model, layer, cpu_ffn_norm);
+        layer_topk_selected_experts(selected, expert_weight, model, layer,
+                                    cpu_ffn_norm, visual);
     }
     for (uint32_t i = 0; i < DS4_N_EMBD; i++) cpu_ffn_out[i] = cpu_shared[i] + cpu_routed[i];
     hc_post_one(cpu_after_ffn_hc, cpu_ffn_out, cpu_after_attn_hc, ffn_post, ffn_comb, DS4_N_EMBD, DS4_N_HC);
@@ -26593,11 +26621,13 @@ static int metal_graph_decode_test(
                                   routed_q8_xscale,
                                   routed_q8_midq,
                                   routed_q8_midscale);
-    if (layer->ffn_gate_tid2eid) {
+    const bool visual = layer_token_uses_visual_routing(layer, token);
+    if (layer->ffn_gate_tid2eid && !visual) {
         layer_hash_selected_experts(selected, model, layer, token);
         layer_hash_router_weights_one(expert_weight, model, layer, cpu_ffn_norm, selected);
     } else {
-        layer_topk_selected_experts(selected, expert_weight, model, layer, cpu_ffn_norm);
+        layer_topk_selected_experts(selected, expert_weight, model, layer,
+                                    cpu_ffn_norm, visual);
     }
     for (uint32_t i = 0; i < DS4_N_EMBD; i++) cpu_ffn_out[i] = cpu_shared[i] + cpu_routed[i];
     hc_post_one(cpu_after_ffn_hc,
@@ -30165,7 +30195,28 @@ static bool metal_graph_encode_layer_ffn_batch(
                                               (uint64_t)n_tokens * sizeof(int32_t));
         ok = router_tokens != NULL;
     }
-    if (ok) ok = ds4_gpu_router_select_batch_tensor(metal_graph_batch_router_selected(g),
+    if (ok) {
+#ifdef __APPLE__
+        if (layer->ffn_exp_probs_b_vl) {
+            ok = ds4_gpu_router_select_batch_vl_tensor(
+                metal_graph_batch_router_selected(g),
+                metal_graph_batch_router_weights(g),
+                metal_graph_batch_router_probs(g),
+                model->map,
+                model->size,
+                layer->ffn_exp_probs_b ? layer->ffn_exp_probs_b->abs_offset : 0,
+                layer->ffn_exp_probs_b_vl->abs_offset,
+                layer->ffn_gate_tid2eid ? layer->ffn_gate_tid2eid->abs_offset : 0,
+                layer->ffn_gate_tid2eid ? (uint32_t)layer->ffn_gate_tid2eid->dim[1] : 0,
+                layer->ffn_exp_probs_b != NULL,
+                layer->ffn_gate_tid2eid != NULL,
+                router_tokens,
+                DS4_VISION_ROUTE_TOKEN_ID,
+                n_tokens) != 0;
+        } else
+#endif
+        {
+            ok = ds4_gpu_router_select_batch_tensor(metal_graph_batch_router_selected(g),
                                                       metal_graph_batch_router_weights(g),
                                                       metal_graph_batch_router_probs(g),
                                                       model->map,
@@ -30178,11 +30229,13 @@ static bool metal_graph_encode_layer_ffn_batch(
                                                       layer->ffn_exp_probs_b != NULL,
                                                       layer->ffn_gate_tid2eid != NULL,
                                                       metal_graph_batch_router_logits(g),
-                                                      metal_graph_prefill_tokens(g),
+                                                      router_tokens,
                                                       DS4_N_EXPERT,
                                                       DS4_N_EXPERT_USED,
                                                       DS4_EXPERT_WEIGHT_SCALE,
                                                       n_tokens) != 0;
+        }
+    }
     ds4_gpu_tensor_free(router_tokens);
     if (ok) {
         metal_graph_debug_dump_tensor("ffn_moe_logits", metal_graph_batch_router_logits(g),

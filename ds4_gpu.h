@@ -2300,6 +2300,26 @@ int ds4_gpu_router_select_batch_tensor(
         uint32_t                n_expert_used,
         float                   expert_weight_scale,
         uint32_t                n_tokens);
+#ifdef __APPLE__
+/* Vision-Exp batch prefill routes IMAGE_TOKEN_ID rows with bias_vl, including
+ * the first hash-routed layers, while ordinary text rows retain the original
+ * hash/regular-bias behavior. */
+int ds4_gpu_router_select_batch_vl_tensor(
+        ds4_gpu_tensor       *selected,
+        ds4_gpu_tensor       *weights,
+        ds4_gpu_tensor       *probs,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              bias_offset,
+        uint64_t              vl_bias_offset,
+        uint64_t              hash_offset,
+        uint32_t              hash_rows,
+        bool                  has_bias,
+        bool                  hash_mode,
+        const ds4_gpu_tensor *tokens,
+        uint32_t              visual_token_id,
+        uint32_t              n_tokens);
+#endif
 
 int ds4_gpu_glm_router_select_tensor(
         ds4_gpu_tensor       *selected,

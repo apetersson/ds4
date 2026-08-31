@@ -1055,7 +1055,7 @@ static bool load_ds4v_payload(const char *path, ds4v_payload *out,
     if (!ok || memcmp(out->header.magic, "DS4VEMB1", 8) != 0 ||
         out->header.version != 1 ||
         out->header.header_bytes != sizeof(out->header) ||
-        (count != 257 && count != 769 && count != 1281) ||
+        count == 0 || count > 1281 ||
         out->header.hidden_size != 4096 ||
         (out->header.flags & ~DS4V_FLAG_BEGIN_END) != 0) {
         if (err && errlen) snprintf(err, errlen, "invalid or unsupported DS4VEMB1 payload");

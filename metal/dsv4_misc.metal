@@ -104,6 +104,15 @@ struct ds4_metal_args_dsv4_router_select_one {
     uint32_t hash_rows;
 };
 
+struct ds4_metal_args_dsv4_router_select_vl {
+    uint32_t has_bias;
+    uint32_t hash_mode;
+    uint32_t hash_rows;
+    uint32_t visual_token_id;
+    uint32_t n_tokens;
+    float expert_weight_scale;
+};
+
 struct ds4_metal_args_glm_router_select_one {
     uint32_t n_expert;
     uint32_t n_expert_used;
@@ -4743,6 +4752,90 @@ kernel void kernel_dsv4_router_finalize_one(
         }
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
+}
+
+/* Vision-Exp prefill router. One 256-thread group owns one token row. Text
+ * rows keep the standard hash/biased-top-k behavior; every visual control or
+ * patch row is represented by visual_token_id and selects with bias_vl even
+ * in the first hash-routed layers. The selected probabilities, not biased
+ * scores, remain the mixture weights. */
+kernel void kernel_dsv4_router_select_vl_batch(
+        constant ds4_metal_args_dsv4_router_select_vl &args,
+        device const float *probs,
+        device const float *bias,
+        device const float *bias_vl,
+        device const int32_t *hash,
+        device const int32_t *tokens,
+        device int32_t *selected,
+        device float *weights,
+        threadgroup float *scratch [[threadgroup(0)]],
+        uint row [[threadgroup_position_in_grid]],
+        uint tid [[thread_position_in_threadgroup]]) {
+    if (row >= args.n_tokens || tid >= 256u) return;
+
+    const uint token = (uint)tokens[row];
+    const bool visual = token == args.visual_token_id;
+    device const float *row_probs = probs + (uint64_t)row * 256u;
+    device int32_t *row_selected = selected + (uint64_t)row * 6u;
+    device float *row_weights = weights + (uint64_t)row * 6u;
+
+    if (args.hash_mode && !visual) {
+        if (tid == 0u) {
+            const uint hash_row = min(token, args.hash_rows - 1u);
+            device const int32_t *src = hash + (uint64_t)hash_row * 6u;
+            float sum = 0.0f;
+            for (uint i = 0; i < 6u; i++) {
+                row_selected[i] = src[i];
+                row_weights[i] = row_probs[(uint)src[i]];
+                sum += row_weights[i];
+            }
+            const float scale = args.expert_weight_scale /
+                max(sum, 6.103515625e-5f);
+            for (uint i = 0; i < 6u; i++) row_weights[i] *= scale;
+        }
+        return;
+    }
+
+    threadgroup float *scores = scratch;
+    threadgroup int32_t *indices =
+        (threadgroup int32_t *)(scratch + 256u);
+    const float route_bias = visual ? bias_vl[tid]
+        : (args.has_bias ? bias[tid] : 0.0f);
+    scores[tid] = row_probs[tid] + route_bias;
+    indices[tid] = (int32_t)tid;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint k = 2u; k <= 256u; k <<= 1u) {
+        for (uint j = k >> 1u; j > 0u; j >>= 1u) {
+            const uint other = tid ^ j;
+            if (other > tid) {
+                const int32_t a = indices[tid];
+                const int32_t b = indices[other];
+                const bool descending = (tid & k) == 0u;
+                const bool swap = descending
+                    ? (scores[(uint)a] < scores[(uint)b])
+                    : (scores[(uint)a] > scores[(uint)b]);
+                if (swap) {
+                    indices[tid] = b;
+                    indices[other] = a;
+                }
+            }
+            threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+    }
+
+    if (tid < 6u) row_selected[tid] = indices[tid];
+    threadgroup_barrier(mem_flags::mem_device);
+    if (tid == 0u) {
+        float sum = 0.0f;
+        for (uint i = 0; i < 6u; i++) {
+            row_weights[i] = row_probs[(uint)row_selected[i]];
+            sum += row_weights[i];
+        }
+        const float scale = args.expert_weight_scale /
+            max(sum, 6.103515625e-5f);
+        for (uint i = 0; i < 6u; i++) row_weights[i] *= scale;
+    }
 }
 
 // M3 decode specialization for the non-hash one-token router. Scores and ids

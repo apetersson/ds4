@@ -6008,6 +6008,15 @@ typedef struct {
 } ds4_gpu_dsv4_router_select_one_args;
 
 typedef struct {
+    uint32_t has_bias;
+    uint32_t hash_mode;
+    uint32_t hash_rows;
+    uint32_t visual_token_id;
+    uint32_t n_tokens;
+    float    expert_weight_scale;
+} ds4_gpu_dsv4_router_select_vl_args;
+
+typedef struct {
     uint32_t n_expert;
     uint32_t n_expert_used;
     float    expert_weight_scale;
@@ -37727,6 +37736,96 @@ int ds4_gpu_router_select_batch_tensor(
         if (!ok) return 0;
     }
 
+    return 1;
+}
+
+int ds4_gpu_router_select_batch_vl_tensor(
+        ds4_gpu_tensor       *selected,
+        ds4_gpu_tensor       *weights,
+        ds4_gpu_tensor       *probs,
+        const void           *model_map,
+        uint64_t              model_size,
+        uint64_t              bias_offset,
+        uint64_t              vl_bias_offset,
+        uint64_t              hash_offset,
+        uint32_t              hash_rows,
+        bool                  has_bias,
+        bool                  hash_mode,
+        const ds4_gpu_tensor *tokens,
+        uint32_t              visual_token_id,
+        uint32_t              n_tokens) {
+    if (!g_initialized && !ds4_gpu_init()) return 0;
+    if (!selected || !weights || !probs || !tokens || !model_map ||
+        n_tokens == 0 || visual_token_id >= 129280u ||
+        (hash_mode && hash_rows == 0u)) return 0;
+
+    @autoreleasepool {
+        const uint64_t bias_bytes = 256u * sizeof(float);
+        const uint64_t hash_bytes = (uint64_t)hash_rows * 6u * sizeof(int32_t);
+        if (vl_bias_offset > model_size || bias_bytes > model_size - vl_bias_offset ||
+            (has_bias && (bias_offset > model_size || bias_bytes > model_size - bias_offset)) ||
+            (hash_mode && (hash_offset > model_size || hash_bytes > model_size - hash_offset))) {
+            return 0;
+        }
+
+        id<MTLBuffer> selectedbuf = ds4_gpu_tensor_buffer(selected);
+        id<MTLBuffer> weightsbuf = ds4_gpu_tensor_buffer(weights);
+        id<MTLBuffer> probsbuf = ds4_gpu_tensor_buffer(probs);
+        id<MTLBuffer> tokensbuf = ds4_gpu_tensor_buffer(tokens);
+        if (!selectedbuf || !weightsbuf || !probsbuf || !tokensbuf ||
+            ds4_gpu_tensor_bytes(selected) < (uint64_t)n_tokens * 6u * sizeof(int32_t) ||
+            ds4_gpu_tensor_bytes(weights) < (uint64_t)n_tokens * 6u * sizeof(float) ||
+            ds4_gpu_tensor_bytes(probs) < (uint64_t)n_tokens * 256u * sizeof(float) ||
+            ds4_gpu_tensor_bytes(tokens) < (uint64_t)n_tokens * sizeof(int32_t)) {
+            return 0;
+        }
+
+        uint64_t bias_inner = 0, vl_bias_inner = 0, hash_inner = 0;
+        id<MTLBuffer> biasbuf = has_bias ? ds4_gpu_wrap_model_range(
+            model_map, model_size, bias_offset, bias_bytes, &bias_inner) : nil;
+        id<MTLBuffer> vl_biasbuf = ds4_gpu_wrap_model_range(
+            model_map, model_size, vl_bias_offset, bias_bytes, &vl_bias_inner);
+        id<MTLBuffer> hashbuf = hash_mode ? ds4_gpu_wrap_model_range(
+            model_map, model_size, hash_offset, hash_bytes, &hash_inner) : nil;
+        if ((has_bias && !biasbuf) || !vl_biasbuf || (hash_mode && !hashbuf)) return 0;
+
+        id<MTLComputePipelineState> pipeline = ds4_gpu_get_pipeline(
+            "kernel_dsv4_router_select_vl_batch");
+        if (!pipeline || pipeline.maxTotalThreadsPerThreadgroup < 256u) return 0;
+        const float zero_f32 = 0.0f;
+        const int32_t zero_i32 = 0;
+        ds4_gpu_dsv4_router_select_vl_args args = {
+            .has_bias = has_bias ? 1u : 0u,
+            .hash_mode = hash_mode ? 1u : 0u,
+            .hash_rows = hash_rows,
+            .visual_token_id = visual_token_id,
+            .n_tokens = n_tokens,
+            .expert_weight_scale = 1.5f,
+        };
+
+        const bool had_batch = g_batch_cb != nil;
+        if (!had_batch && ds4_gpu_begin_commands() == 0) return 0;
+        int owned = 0;
+        id<MTLCommandBuffer> cb = ds4_gpu_command_buffer(&owned);
+        id<MTLComputeCommandEncoder> enc = cb ? ds4_gpu_compute_encoder(cb) : nil;
+        if (!enc) return 0;
+        [enc setComputePipelineState:pipeline];
+        [enc setBytes:&args length:sizeof(args) atIndex:0];
+        [enc setBuffer:probsbuf offset:ds4_gpu_tensor_offset(probs) atIndex:1];
+        if (has_bias) [enc setBuffer:biasbuf offset:(NSUInteger)bias_inner atIndex:2];
+        else [enc setBytes:&zero_f32 length:sizeof(zero_f32) atIndex:2];
+        [enc setBuffer:vl_biasbuf offset:(NSUInteger)vl_bias_inner atIndex:3];
+        if (hash_mode) [enc setBuffer:hashbuf offset:(NSUInteger)hash_inner atIndex:4];
+        else [enc setBytes:&zero_i32 length:sizeof(zero_i32) atIndex:4];
+        [enc setBuffer:tokensbuf offset:ds4_gpu_tensor_offset(tokens) atIndex:5];
+        [enc setBuffer:selectedbuf offset:ds4_gpu_tensor_offset(selected) atIndex:6];
+        [enc setBuffer:weightsbuf offset:ds4_gpu_tensor_offset(weights) atIndex:7];
+        [enc setThreadgroupMemoryLength:256u * (sizeof(float) + sizeof(int32_t)) atIndex:0];
+        [enc dispatchThreadgroups:MTLSizeMake(n_tokens, 1, 1)
+             threadsPerThreadgroup:MTLSizeMake(256, 1, 1)];
+        ds4_gpu_end_compute_encoder(cb, enc);
+        if (!had_batch && ds4_gpu_end_commands() == 0) return 0;
+    }
     return 1;
 }
 
