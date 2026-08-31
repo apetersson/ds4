@@ -3339,8 +3339,8 @@ int main(int argc, char **argv) {
         db_close(&db);
         free_hf_model_metadata(&metadata);
         imatrix_free(&imatrix);
-        free_gguf_file(&tmpl);
         free_output_context(&out_ctx, tmpl.n_tensors);
+        free_gguf_file(&tmpl);
         for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
         free(p.policy.overrides);
         return 0;
@@ -3351,8 +3351,8 @@ int main(int argc, char **argv) {
         db_close(&db);
         imatrix_free(&imatrix);
         free_hf_model_metadata(&metadata);
-        free_gguf_file(&tmpl);
         free_output_context(&out_ctx, tmpl.n_tensors);
+        free_gguf_file(&tmpl);
         for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
         free(p.policy.overrides);
         return 0;
@@ -3362,8 +3362,8 @@ int main(int argc, char **argv) {
         db_close(&db);
         imatrix_free(&imatrix);
         free_hf_model_metadata(&metadata);
-        free_gguf_file(&tmpl);
         free_output_context(&out_ctx, tmpl.n_tensors);
+        free_gguf_file(&tmpl);
         return 0;
     }
     write_full_gguf(&db, &tmpl, &out_ctx, p.out_gguf, p.n_experts, p.n_threads,
@@ -3373,8 +3373,8 @@ int main(int argc, char **argv) {
     db_close(&db);
     imatrix_free(&imatrix);
     free_hf_model_metadata(&metadata);
-    free_gguf_file(&tmpl);
     free_output_context(&out_ctx, tmpl.n_tensors);
+    free_gguf_file(&tmpl);
     for (int i = 0; i < p.policy.n_overrides; i++) free(p.policy.overrides[i].prefix);
     free(p.policy.overrides);
     return 0;
