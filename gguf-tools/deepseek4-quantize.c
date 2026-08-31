@@ -35,6 +35,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <pthread.h>
 
 #if defined(_WIN32)
@@ -1981,7 +1982,7 @@ static uint64_t vision_routing_bias_count(const st_db *db, uint32_t n_layers) {
 static output_context build_output_context(const gguf_file *tmpl, const quant_policy *policy,
                                            const imatrix_store *im,
                                            const hf_model_metadata *metadata,
-                                           const st_db *db) {
+                                           st_db *db) {
     output_context out = {0};
     const uint64_t n_vl_bias = vision_routing_bias_count(db, tmpl->n_layers);
     out.n_tensors = tmpl->n_tensors + n_vl_bias;
@@ -2008,6 +2009,17 @@ static output_context build_output_context(const gguf_file *tmpl, const quant_po
         }
         ds4q_type type = src ? policy_type(policy, src->name, src) : DS4Q_TYPE_F32;
         if (type == DS4Q_TYPE_COUNT) type = src->type;
+        if (src && type == DS4Q_TYPE_F16 && !parse_expert_tensor(src->name).is_expert) {
+            char *hf_name = hf_name_for_regular(src->name);
+            tensor_entry *source = db_tensor(db, hf_name, NULL);
+            if (strcmp(source->info.dtype, "BF16") == 0) {
+                fprintf(stderr,
+                        "promoting %s from planned F16 to exact F32 for BF16 source\n",
+                        src->name);
+                type = DS4Q_TYPE_F32;
+            }
+            free(hf_name);
+        }
         const bool preserved_mxfp4 =
             type == DS4Q_TYPE_MXFP4 && parse_expert_tensor(dst->name).is_expert;
         if (type != DS4Q_TYPE_I32 && !is_quantizable_target(type) && !preserved_mxfp4) {
@@ -2042,8 +2054,35 @@ static void write_padding(FILE *fp, size_t n) {
 static void write_full_gguf(st_db *db, const gguf_file *tmpl, const output_context *out_ctx,
                             const char *out_path, int n_experts, int n_threads,
                             const imatrix_store *imatrix,
-                            const hf_model_metadata *metadata) {
-    FILE *fp = fopen(out_path, "wb");
+                            const hf_model_metadata *metadata,
+                            bool resume) {
+    size_t resume_size = 0;
+    uint64_t first_tensor = 0;
+    if (resume) {
+        struct stat st;
+        if (stat(out_path, &st) != 0) die_errno("stat resume output", out_path);
+        if (st.st_size < 0) die("negative resume output size");
+        resume_size = (size_t)st.st_size;
+        bool at_boundary = false;
+        for (uint64_t i = 0; i <= out_ctx->n_tensors; i++) {
+            const size_t offset = out_ctx->data_offset +
+                (i == out_ctx->n_tensors ? out_ctx->tensor_bytes :
+                 out_ctx->tensors[i].new_offset);
+            if (offset == resume_size) {
+                first_tensor = i;
+                at_boundary = true;
+                break;
+            }
+        }
+        if (!at_boundary) {
+            fprintf(stderr,
+                    "error: resume output size %zu is not an output tensor boundary\n",
+                    resume_size);
+            exit(1);
+        }
+    }
+
+    FILE *fp = fopen(out_path, resume ? "r+b" : "wb");
     if (!fp) die_errno("open output", out_path);
     if (fwrite("GGUF", 1, 4, fp) != 4) die("write GGUF magic failed");
     write_u32(fp, tmpl->version);
@@ -2065,7 +2104,16 @@ static void write_full_gguf(st_db *db, const gguf_file *tmpl, const output_conte
     if ((size_t)pos > out_ctx->data_offset) die("GGUF metadata larger than planned");
     write_padding(fp, out_ctx->data_offset - (size_t)pos);
 
-    for (uint64_t i = 0; i < out_ctx->n_tensors; i++) {
+    if (resume) {
+        if (fseek(fp, (long)resume_size, SEEK_SET) != 0) {
+            die_errno("seek resume output", out_path);
+        }
+        fprintf(stderr,
+                "resuming %s at tensor %" PRIu64 "/%" PRIu64 " (byte %zu)\n",
+                out_path, first_tensor + 1, out_ctx->n_tensors, resume_size);
+    }
+
+    for (uint64_t i = first_tensor; i < out_ctx->n_tensors; i++) {
         const tensor_meta *dst = &out_ctx->tensors[i];
         const tensor_meta *src = i < tmpl->n_tensors ? &tmpl->tensors[i] : dst;
         fprintf(stderr, "[%4" PRIu64 "/%4" PRIu64 "] %s -> %s\n", i + 1, out_ctx->n_tensors, dst->name, ds4q_type_name(dst->type));
@@ -2157,6 +2205,7 @@ typedef struct {
     int n_threads;
     bool dry_run;
     bool overwrite;
+    bool resume;
     bool imatrix_strict;
     bool native_preserving;
     bool dspark_manifest;
@@ -2923,6 +2972,7 @@ static void usage(const char *argv0) {
     printf("  --compare-all-gguf FILE regenerate and byte-compare every planned tensor, then exit\n");
     printf("  --overwrite            replace --out if it already exists\n");
     printf("  --dry-run              print output plan; DSpark support mode reads shard headers only\n");
+    printf("  --resume               continue an existing output ending at an exact tensor boundary\n");
     printf("  --dspark-manifest      print DSpark HF->GGUF tensor-name manifest and exit\n");
     printf("  --dspark-support       write a standalone DSpark support GGUF from mtp.* tensors\n");
     printf("  --dspark-block-size N  DSpark draft block size metadata, default 5\n");
@@ -3028,6 +3078,8 @@ static params parse_args(int argc, char **argv) {
             p.compare_all_gguf = need_value(argc, argv, &i, arg);
         } else if (strcmp(arg, "--overwrite") == 0) {
             p.overwrite = true;
+        } else if (strcmp(arg, "--resume") == 0) {
+            p.resume = true;
         } else if (strcmp(arg, "--dry-run") == 0) {
             p.dry_run = true;
         } else if (strcmp(arg, "--dspark-manifest") == 0) {
@@ -3086,6 +3138,8 @@ static params parse_args(int argc, char **argv) {
         }
     }
     if (!p.hf_dir) die("--hf is required");
+    if (p.resume && p.overwrite) die("--resume and --overwrite are mutually exclusive");
+    if (p.resume && p.dry_run) die("--resume and --dry-run are mutually exclusive");
     if (p.compare_tensor && p.compare_all_gguf) {
         die("--compare-tensor and --compare-all-gguf are mutually exclusive");
     }
@@ -3118,7 +3172,12 @@ static params parse_args(int argc, char **argv) {
         die("--out is required unless a dry-run or comparison mode is used");
     }
     if (p.compare_tensor && !p.compare_gguf) p.compare_gguf = p.template_gguf;
-    if (p.out_gguf && file_exists(p.out_gguf) && !p.overwrite) die("output exists; use --overwrite");
+    if (p.out_gguf && file_exists(p.out_gguf) && !p.overwrite && !p.resume) {
+        die("output exists; use --overwrite or --resume");
+    }
+    if (p.resume && (!p.out_gguf || !file_exists(p.out_gguf))) {
+        die("--resume requires an existing --out file");
+    }
     return p;
 }
 
@@ -3370,7 +3429,7 @@ int main(int argc, char **argv) {
         return 0;
     }
     write_full_gguf(&db, &tmpl, &out_ctx, p.out_gguf, p.n_experts, p.n_threads,
-                    &imatrix, &metadata);
+                    &imatrix, &metadata, p.resume);
     fprintf(stderr, "wrote %s\n", p.out_gguf);
 
     db_close(&db);
