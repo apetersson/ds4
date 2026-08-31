@@ -205,7 +205,9 @@ The cache filesystem must support atomic hard links so verified artifacts can
 be published without overwriting an existing immutable entry. APFS and ext4
 are suitable; ExFAT is not. Unlike the degraded copy mode used by general HF
 clients on filesystems without symlinks, DS4 fails closed rather than weakening
-the cache integrity contract. Select a compatible disk with `--hf-cache-dir`.
+the cache integrity contract. Select a compatible disk with `--hf-cache-dir`,
+or set the standard `HF_HOME` root; DS4 uses `$HF_HOME/ds4` alongside the
+ordinary Hugging Face Hub cache at `$HF_HOME/hub`.
 
 Offline mode performs no network access and succeeds only when the selected
 immutable snapshot and every requested role are present and verified.
