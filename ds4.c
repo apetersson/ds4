@@ -5683,6 +5683,18 @@ static void config_validate_deepseek4_model(const ds4_model *m) {
                                    n_hc,
                                    n_hc_sinkhorn_iter);
 
+    /* Vision-Exp kept the Flash tensor shape but changed the transformer RMS
+     * epsilon from 1e-6 to 1e-20. Early GGUF conversions inherited the older
+     * Flash metadata header, while their native visual-router tensors are an
+     * unambiguous checkpoint discriminator. Honor the actual Vision-Exp
+     * architecture without forcing a 153 GiB receiver rewrite. */
+    const bool vision_exp =
+        model_find_tensor(m, "blk.0.exp_probs_b_vl.bias") != NULL;
+    if (vision_exp) {
+        g_ds4_shape.name = "DeepSeek V4 Flash Vision-Exp";
+        g_ds4_shape.rms_eps = 1.0e-20f;
+    }
+
     config_expect_u32("embedding_length",            n_embd,         DS4_N_EMBD);
     config_expect_u32("vocab_size",                  n_vocab,        DS4_N_VOCAB);
     config_expect_u32("attention.head_count",        n_head,         DS4_N_HEAD);
@@ -5737,7 +5749,15 @@ static void config_validate_deepseek4_model(const ds4_model *m) {
     const float expert_weight_scale = required_f32(m, "deepseek4.expert_weights_scale");
     config_expect_f32("expert_weights_scale", expert_weight_scale, DS4_EXPERT_WEIGHT_SCALE);
     const float rms_eps = required_f32(m, "deepseek4.attention.layer_norm_rms_epsilon");
-    config_expect_f32("attention.layer_norm_rms_epsilon", rms_eps, DS4_RMS_EPS);
+    if (!vision_exp) {
+        config_expect_f32("attention.layer_norm_rms_epsilon", rms_eps, DS4_RMS_EPS);
+    } else if (fabsf(rms_eps - DS4_RMS_EPS) > 1.0e-24f) {
+        fprintf(stderr,
+                "ds4: Vision-Exp receiver metadata reports RMS epsilon %.9g; "
+                "using checkpoint value %.9g\n",
+                (double)rms_eps,
+                (double)DS4_RMS_EPS);
+    }
     const float hc_eps = required_f32(m, "deepseek4.hyper_connection.epsilon");
     config_expect_f32("hyper_connection.epsilon", hc_eps, DS4_HC_EPS);
     const bool expert_weight_norm = required_bool(m, "deepseek4.expert_weights_norm");
@@ -60411,7 +60431,33 @@ int ds4_session_sync_embedding_span(ds4_session *s,
         }
         return 1;
     }
+#if !defined(__APPLE__)
+    if (err && errlen) {
+        snprintf(err, errlen,
+                 "embedding-span image visibility currently requires Metal");
+    }
+    return 1;
+#else
+    /* Official Vision-Exp attention is bidirectional inside the image block.
+     * The full block must be materialized in the first layer-major chunk so
+     * future visual keys exist when its early queries are evaluated. */
+    if (span->visual_count != 0 &&
+        (span->visual_start > UINT32_MAX - span->visual_count ||
+         span->visual_start + span->visual_count > s->graph.prefill_cap)) {
+        if (err && errlen) {
+            snprintf(err, errlen,
+                     "embedding span must fit the first Metal prefill chunk (%u tokens)",
+                     s->graph.prefill_cap);
+        }
+        return 1;
+    }
+    if (!ds4_gpu_set_prefill_visual_span(span->visual_start,
+                                         span->visual_count)) {
+        if (err && errlen) snprintf(err, errlen, "Metal image-span mask setup failed");
+        return 1;
+    }
     if (!metal_graph_reset_prefill_state(&s->graph)) {
+        (void)ds4_gpu_set_prefill_visual_span(0, 0);
         if (err && errlen) {
             snprintf(err, errlen, "%s prefill state reset failed",
                      ds4_backend_name(s->engine->backend));
@@ -60437,6 +60483,7 @@ int ds4_session_sync_embedding_span(ds4_session *s,
         s,
         &cancelled,
         span);
+    (void)ds4_gpu_set_prefill_visual_span(0, 0);
     if (cancelled) {
         if (err && errlen) snprintf(err, errlen, "interrupted");
         s->checkpoint_valid = false;
@@ -60457,6 +60504,7 @@ int ds4_session_sync_embedding_span(ds4_session *s,
     s->graph.mtp_n_raw = 0;
     session_greedy_splitkv_reset(s);
     return 0;
+#endif
 #endif
 }
 

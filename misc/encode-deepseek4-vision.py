@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import math
+import os
 import struct
 import time
 from functools import lru_cache
@@ -319,7 +320,11 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--tower", required=True, type=Path)
     parser.add_argument("--adapter", required=True, type=Path, help="Vision-Exp config.json")
-    parser.add_argument("--start-pos", type=int, default=0)
+    parser.add_argument(
+        "--start-pos",
+        type=int,
+        default=int(os.environ.get("DS4_VISION_START_POS", "0")),
+    )
     parser.add_argument("--device", choices=("auto", "mps", "cpu"), default="auto")
     args = parser.parse_args()
 

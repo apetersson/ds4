@@ -1129,10 +1129,21 @@ Vision-Exp reference receiver. In particular, the native Hugging Face shard
 directory is source material for conversion and is not directly loadable by
 DS4; the receiver passed to `--model` must be a DS4-compatible GGUF.
 
-This is an experimental compatibility path. The receiver currently uses DS4's
-causal local-attention prefill rather than the reference runtime's additional
-bidirectional visibility inside the image span, so validate task-specific
-vision quality before treating it as reference-equivalent.
+The server first renders a single image placeholder to determine its exact
+token position, then passes that position to the sidecar so the N-layout's
+compressor padding matches the official Python preprocessing path. OpenAI
+content blocks are separated by the same blank lines as the official encoder.
+
+This is an experimental compatibility path. On Metal, an image span that fits
+entirely in the first prefill chunk gets the reference runtime's bidirectional
+raw-key visibility inside its native start/end subspan; text and compressed-key
+visibility remain unchanged. The server rejects a span that crosses the first
+chunk instead of silently using causal-only image attention. Other GPU
+backends do not yet support embedding-span image visibility.
+
+Vision-Exp receivers are identified by their native visual-router tensors and
+use the checkpoint's `1e-20` transformer RMS epsilon. This intentionally
+overrides the older Flash value that may remain in converted GGUF metadata.
 
 `tests/vision_exp_demo.sh` captures a reproducible localhost-only smoke run. It
 creates and verifies a 100x100 pure-red RGB PNG, saves the exact OpenAI request

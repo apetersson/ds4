@@ -47,6 +47,7 @@ static volatile sig_atomic_t g_listen_fd = -1;
 #define DS4_SERVER_SEND_STALL_TIMEOUT_MS 2000
 #define DS4_IMAGE_MARKER "\x1d" "DS4_IMAGE" "\x1d"
 #define DS4_IMAGE_TOKEN  "<｜image｜>"
+#define DS4_IMAGE_TOKEN_ID 129279
 
 #if defined(__GNUC__) || defined(__clang__)
 #define DS4_SERVER_MAYBE_UNUSED __attribute__((unused))
@@ -646,17 +647,31 @@ static bool json_message_content(const char **p, char **out,
     buf b = {0};
     json_ws(p);
     while (**p && **p != ']') {
+        buf part = {0};
         if (**p == '"') {
             char *s = NULL;
-            if (!json_string(p, &s)) goto fail;
-            buf_puts(&b, s);
+            if (!json_string(p, &s)) {
+                buf_free(&part);
+                goto fail;
+            }
+            buf_puts(&part, s);
             free(s);
         } else if (**p == '{') {
-            if (!json_message_content_object(p, &b, image_url, image_count))
+            if (!json_message_content_object(p, &part, image_url, image_count)) {
+                buf_free(&part);
                 goto fail;
+            }
         } else if (!json_skip_value(p)) {
+            buf_free(&part);
             goto fail;
         }
+        /* DeepSeek-V4's official content-block renderer separates adjacent
+         * blocks with a blank line, including an image followed by text. */
+        if (part.len != 0) {
+            if (b.len != 0) buf_puts(&b, "\n\n");
+            buf_append(&b, part.ptr, part.len);
+        }
+        buf_free(&part);
         json_ws(p);
         if (**p == ',') (*p)++;
         json_ws(p);
@@ -1133,7 +1148,8 @@ static bool vision_config_complete(const server_vision_config *vision) {
 }
 
 static bool run_vision_encoder(const server_vision_config *vision,
-                               const char *image_url, char **output,
+                               const char *image_url, uint32_t start_pos,
+                               char **output,
                                char *err, size_t errlen) {
     if (!vision_config_complete(vision)) {
         snprintf(err, errlen,
@@ -1166,6 +1182,9 @@ static bool run_vision_encoder(const server_vision_config *vision,
     if (vision->mu) pthread_mutex_lock(vision->mu);
     pid_t pid = fork();
     if (pid == 0) {
+        char start_pos_text[32];
+        snprintf(start_pos_text, sizeof(start_pos_text), "%u", start_pos);
+        if (setenv("DS4_VISION_START_POS", start_pos_text, 1) != 0) _exit(126);
         long max_fd = sysconf(_SC_OPEN_MAX);
         if (max_fd < 0) max_fd = 1024;
         for (int fd = 3; fd < max_fd; fd++) close(fd);
@@ -1240,17 +1259,43 @@ static bool replace_image_marker(char **text, const char *replacement) {
     return true;
 }
 
-static bool prepare_openai_image(ds4_engine *engine,
-                                 const server_vision_config *vision,
-                                 request *r, chat_msgs *msgs,
-                                 char *err, size_t errlen) {
+static bool stage_openai_image(request *r, chat_msgs *msgs,
+                               char *err, size_t errlen) {
     if (!r->image_url) return true;
     if (r->embedding_span_path) {
         snprintf(err, errlen,
                  "image_url and ds4_embedding_span_path cannot be combined");
         return false;
     }
-    if (!run_vision_encoder(vision, r->image_url,
+    int replacements = 0;
+    for (int i = 0; i < msgs->len; i++) {
+        if (replace_image_marker(&msgs->v[i].content, DS4_IMAGE_TOKEN))
+            replacements++;
+    }
+    if (replacements != 1) {
+        snprintf(err, errlen, "image marker is missing or duplicated");
+        return false;
+    }
+    return true;
+}
+
+static int find_unique_image_token(const ds4_tokens *prompt) {
+    int found = -1;
+    if (!prompt) return -1;
+    for (int i = 0; i < prompt->len; i++) {
+        if (prompt->v[i] != DS4_IMAGE_TOKEN_ID) continue;
+        if (found >= 0) return -1;
+        found = i;
+    }
+    return found;
+}
+
+static bool encode_openai_image(ds4_engine *engine,
+                                const server_vision_config *vision,
+                                request *r, chat_msgs *msgs,
+                                uint32_t start_pos,
+                                char *err, size_t errlen) {
+    if (!run_vision_encoder(vision, r->image_url, start_pos,
                             &r->embedding_span_path, err, errlen))
         return false;
     r->embedding_span_owned = true;
@@ -1269,7 +1314,21 @@ static bool prepare_openai_image(ds4_engine *engine,
     }
     int replacements = 0;
     for (int i = 0; i < msgs->len; i++) {
-        if (replace_image_marker(&msgs->v[i].content, tokens)) replacements++;
+        char *content = msgs->v[i].content;
+        char *mark = content ? strstr(content, DS4_IMAGE_TOKEN) : NULL;
+        if (!mark || strstr(mark + strlen(DS4_IMAGE_TOKEN), DS4_IMAGE_TOKEN))
+            continue;
+        const size_t before = (size_t)(mark - content);
+        const size_t after = strlen(mark + strlen(DS4_IMAGE_TOKEN));
+        const size_t token_bytes = strlen(tokens);
+        char *expanded = xmalloc(before + token_bytes + after + 1);
+        memcpy(expanded, content, before);
+        memcpy(expanded + before, tokens, token_bytes);
+        memcpy(expanded + before + token_bytes,
+               mark + strlen(DS4_IMAGE_TOKEN), after + 1);
+        free(msgs->v[i].content);
+        msgs->v[i].content = expanded;
+        replacements++;
     }
     free(tokens);
     if (replacements != 1) {
@@ -3595,7 +3654,7 @@ static bool parse_chat_request(ds4_engine *e, server *s,
         request_free(r);
         return false;
     }
-    if (!prepare_openai_image(e, vision, r, &msgs, err, errlen)) {
+    if (!stage_openai_image(r, &msgs, err, errlen)) {
         chat_msgs_free(&msgs);
         free(tool_schemas);
         request_free(r);
@@ -3615,6 +3674,30 @@ static bool parse_chat_request(ds4_engine *e, server *s,
         r->model_syntax, &msgs, active_tool_schemas,
         &r->tool_orders, r->think_mode);
     ds4_tokenize_rendered_chat(e, r->prompt_text, &r->prompt);
+    if (r->image_url) {
+        const int start = find_unique_image_token(&r->prompt);
+        if (start < 0) {
+            snprintf(err, errlen,
+                     "rendered prompt must contain exactly one image token");
+            chat_msgs_free(&msgs);
+            free(tool_schemas);
+            request_free(r);
+            return false;
+        }
+        if (!encode_openai_image(e, vision, r, &msgs, (uint32_t)start,
+                                 err, errlen)) {
+            chat_msgs_free(&msgs);
+            free(tool_schemas);
+            request_free(r);
+            return false;
+        }
+        ds4_tokens_free(&r->prompt);
+        free(r->prompt_text);
+        r->prompt_text = render_chat_prompt_text_for_syntax(
+            r->model_syntax, &msgs, active_tool_schemas,
+            &r->tool_orders, r->think_mode);
+        ds4_tokenize_rendered_chat(e, r->prompt_text, &r->prompt);
+    }
     if (r->embedding_span_path) {
         if (!r->embedding_payload.rows &&
             !load_ds4v_payload(r->embedding_span_path, &r->embedding_payload,
@@ -3638,6 +3721,19 @@ static bool parse_chat_request(ds4_engine *e, server *s,
         r->embedding_span.start = (uint32_t)start;
         r->embedding_span.count = r->embedding_payload.header.token_count;
         r->embedding_span.width = r->embedding_payload.header.hidden_size;
+        if ((r->embedding_payload.header.flags & DS4V_FLAG_VISUAL_ROUTING) != 0) {
+            const uint32_t compress_pad = 3u - (uint32_t)start % 4u;
+            if (compress_pad >= r->embedding_span.count) {
+                snprintf(err, errlen,
+                         "Vision-Exp image block is shorter than its alignment padding");
+                chat_msgs_free(&msgs);
+                free(tool_schemas);
+                request_free(r);
+                return false;
+            }
+            r->embedding_span.visual_start = (uint32_t)start + compress_pad;
+            r->embedding_span.visual_count = r->embedding_span.count - compress_pad;
+        }
     }
     chat_msgs_free(&msgs);
     free(tool_schemas);
@@ -17304,7 +17400,9 @@ static void test_openai_image_content_preserves_order(void) {
 
     buf expected = {0};
     buf_puts(&expected, "before ");
+    buf_puts(&expected, "\n\n");
     buf_puts(&expected, DS4_IMAGE_MARKER);
+    buf_puts(&expected, "\n\n");
     buf_puts(&expected, " after");
     TEST_ASSERT(msgs.len == 1 && msgs.v[0].content != NULL &&
                 !strcmp(msgs.v[0].content, expected.ptr));
@@ -17314,8 +17412,10 @@ static void test_openai_image_content_preserves_order(void) {
     TEST_ASSERT(replace_image_marker(&msgs.v[0].content, route_tokens));
     buf replaced = {0};
     buf_puts(&replaced, "before ");
+    buf_puts(&replaced, "\n\n");
     buf_puts(&replaced, DS4_IMAGE_TOKEN);
     buf_puts(&replaced, DS4_IMAGE_TOKEN);
+    buf_puts(&replaced, "\n\n");
     buf_puts(&replaced, " after");
     TEST_ASSERT(!strcmp(msgs.v[0].content, replaced.ptr));
     TEST_ASSERT(!replace_image_marker(&msgs.v[0].content, route_tokens));
@@ -17325,6 +17425,37 @@ static void test_openai_image_content_preserves_order(void) {
     buf_free(&expected);
     buf_free(&replaced);
     chat_msgs_free(&msgs);
+}
+
+static void test_openai_image_staging_finds_rendered_start(void) {
+    request r;
+    request_init(&r, REQ_CHAT, 16);
+    r.image_url = xstrdup("data:image/png;base64,AA==");
+    chat_msgs msgs = {0};
+    chat_msg user = {0};
+    user.role = xstrdup("user");
+    buf content = {0};
+    buf_puts(&content, "before ");
+    buf_puts(&content, DS4_IMAGE_MARKER);
+    buf_puts(&content, " after");
+    user.content = buf_take(&content);
+    chat_msgs_push(&msgs, user);
+    char err[128] = {0};
+
+    TEST_ASSERT(stage_openai_image(&r, &msgs, err, sizeof(err)));
+    TEST_ASSERT(!strcmp(msgs.v[0].content,
+                        "before " DS4_IMAGE_TOKEN " after"));
+
+    r.prompt.v = xmalloc(5 * sizeof(r.prompt.v[0]));
+    r.prompt.len = r.prompt.cap = 5;
+    const int tokens[] = {1, 2, DS4_IMAGE_TOKEN_ID, 3, 4};
+    memcpy(r.prompt.v, tokens, sizeof(tokens));
+    TEST_ASSERT(find_unique_image_token(&r.prompt) == 2);
+    r.prompt.v[4] = DS4_IMAGE_TOKEN_ID;
+    TEST_ASSERT(find_unique_image_token(&r.prompt) == -1);
+
+    chat_msgs_free(&msgs);
+    request_free(&r);
 }
 
 static void test_ds4v_payload_marks_native_visual_routing(void) {
@@ -19061,6 +19192,7 @@ static void ds4_server_unit_tests_run(void) {
     test_json_skip_has_nesting_limit();
     test_request_parsers_reject_malformed_duplicate_owned_fields();
     test_openai_image_content_preserves_order();
+    test_openai_image_staging_finds_rendered_start();
     test_ds4v_payload_marks_native_visual_routing();
     test_json_parser_handles_tool_heavy_requests();
     test_json_string_handles_surrogates();

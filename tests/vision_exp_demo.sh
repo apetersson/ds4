@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     printf 'usage: %s reference|resident MODEL VISION_DIR OUTPUT_DIR\n' "$0" >&2
-    printf 'env: DS4_SERVER, VISION_PYTHON, VISION_ENCODER, PORT, EXPERT_CACHE\n' >&2
+    printf 'env: DS4_SERVER, VISION_PYTHON, VISION_ENCODER, PORT, EXPERT_CACHE, TEXT_MAX_TOKENS, IMAGE_MAX_TOKENS\n' >&2
     exit 2
 }
 
@@ -26,6 +26,11 @@ vision_tower=$vision_dir/DeepSeek-V4-Flash-Vision-Exp-Abliterated-Native.safeten
 vision_config=$vision_dir/config.json
 port=${PORT:-18080}
 expert_cache=${EXPERT_CACHE:-48GB}
+text_max_tokens=${TEXT_MAX_TOKENS:-4}
+image_max_tokens=${IMAGE_MAX_TOKENS:-16}
+
+[[ $text_max_tokens =~ ^[1-9][0-9]*$ ]] || { printf 'invalid TEXT_MAX_TOKENS: %s\n' "$text_max_tokens" >&2; exit 2; }
+[[ $image_max_tokens =~ ^[1-9][0-9]*$ ]] || { printf 'invalid IMAGE_MAX_TOKENS: %s\n' "$image_max_tokens" >&2; exit 2; }
 
 for path in "$server" "$model" "$vision_encoder" "$vision_tower" "$vision_config"; do
     [[ -e "$path" ]] || { printf 'missing required path: %s\n' "$path" >&2; exit 2; }
@@ -67,16 +72,16 @@ pixel_stats=$(magick identify -format '%w %h %[fx:minima.r] %[fx:maxima.r] %[fx:
 printf '%s\n' "$pixel_stats" > "$output_dir/pure-red-100x100.verify.txt"
 shasum -a 256 "$red_png" > "$output_dir/pure-red-100x100.sha256"
 
-jq -n '{
+jq -n --argjson max_tokens "$text_max_tokens" '{
   model: "deepseek-chat",
   messages: [{role: "user", content: "just answer OK"}],
-  max_tokens: 4,
+  max_tokens: $max_tokens,
   temperature: 0,
   stream: false
 }' > "$text_request"
 
 image_b64=$(base64 < "$red_png" | tr -d '\n')
-jq -n --arg url "data:image/png;base64,$image_b64" '{
+jq -n --arg url "data:image/png;base64,$image_b64" --argjson max_tokens "$image_max_tokens" '{
   model: "deepseek-chat",
   messages: [{
     role: "user",
@@ -85,7 +90,7 @@ jq -n --arg url "data:image/png;base64,$image_b64" '{
       {type: "text", text: "what color is that image"}
     ]
   }],
-  max_tokens: 16,
+  max_tokens: $max_tokens,
   temperature: 0,
   stream: false
 }' > "$image_request"
@@ -195,7 +200,9 @@ jq -n \
     '{mode:$mode, model:$model, load_seconds:($load_seconds|tonumber),
       peak_process_tree_rss_kib:($peak_rss_kib|tonumber),
       text_http_metrics:$text_http, image_http_metrics:$image_http,
-      text_answer:$text_answer, image_answer:$image_answer}' \
+      text_answer:$text_answer, image_answer:$image_answer,
+      text_semantic_pass:($text_answer == "OK"),
+      image_semantic_pass:($image_answer | test("(^|[^A-Za-z])red([^A-Za-z]|$)"; "i"))}' \
     > "$output_dir/summary.json"
 
 printf 'captured demo in %s\n' "$output_dir"

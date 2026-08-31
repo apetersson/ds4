@@ -6407,6 +6407,14 @@ static void test_dspark_verify_depth(void) {
 #endif
 
 static void test_server_unit_group(void) {
+    /* Text retains causal SWA semantics; only two rows inside the same visual
+     * span gain future-key visibility. */
+    TEST_ASSERT(ds4_gpu_prefill_raw_key_visible(3, 3, 128, 2, 4));
+    TEST_ASSERT(ds4_gpu_prefill_raw_key_visible(3, 5, 128, 2, 4));
+    TEST_ASSERT(!ds4_gpu_prefill_raw_key_visible(1, 2, 128, 2, 4));
+    TEST_ASSERT(!ds4_gpu_prefill_raw_key_visible(3, 6, 128, 2, 4));
+    TEST_ASSERT(!ds4_gpu_prefill_raw_key_visible(200, 70, 128, 2, 4));
+    TEST_ASSERT(ds4_gpu_prefill_raw_key_visible(200, 73, 128, 2, 4));
     ds4_server_unit_tests_run();
 }
 

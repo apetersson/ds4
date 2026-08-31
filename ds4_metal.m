@@ -54,6 +54,11 @@ static id<MTLCommandBuffer> g_batch_cb;
 static id<MTLComputeCommandEncoder> g_batch_enc;
 static BOOL g_batch_encoder_concurrent;
 static BOOL g_batch_has_work;
+/* The server serializes prefill workspace use. Keep the active Vision-Exp
+ * span beside that process-global Metal workspace so the host-built masks can
+ * apply the same image visibility rule in every layer. */
+static uint32_t g_prefill_visual_start;
+static uint32_t g_prefill_visual_count;
 static void ds4_gpu_parallel_ffn_reset_state(BOOL close_encoder);
 static NSMutableArray<id<MTLCommandBuffer>> *g_pending_cbs;
 static id<MTLSharedEvent> g_selected_readback_event;
@@ -6354,6 +6359,13 @@ typedef struct {
  * session uses. Shape-dependent kernels with function constants are built
  * lazily by the small ds4_gpu_get_* caches, so startup stays predictable
  * while long-context prefill and decode can still pick specialized variants. */
+int ds4_gpu_set_prefill_visual_span(uint32_t start, uint32_t count) {
+    if (count != 0 && start > UINT32_MAX - count) return 0;
+    g_prefill_visual_start = count != 0 ? start : 0u;
+    g_prefill_visual_count = count;
+    return 1;
+}
+
 int ds4_gpu_init(void) {
     if (g_initialized) return 1;
 
@@ -26157,9 +26169,11 @@ static void ds4_gpu_fill_raw_prefill_mask(
         const uint32_t qpos = q_row0 + q;
         uint16_t *row = mask + (uint64_t)q * n_kv;
         for (uint32_t k = 0; k < n_kv; k++) {
-            const bool causal = k <= qpos;
-            const bool in_window = window == 0 || qpos - k < window;
-            row[k] = causal && in_window ? 0u : neg_inf_half;
+            row[k] = ds4_gpu_prefill_raw_key_visible(
+                         qpos, k, window,
+                         g_prefill_visual_start,
+                         g_prefill_visual_count)
+                ? 0u : neg_inf_half;
         }
     }
 }
@@ -26287,9 +26301,11 @@ static void ds4_gpu_fill_static_mixed_prefill_mask(
         const uint32_t qpos = q_row0 + q;
         uint16_t *row = mask + (uint64_t)q * n_keys;
         for (uint32_t k = 0; k < n_tokens; k++) {
-            const bool causal = k <= qpos;
-            const bool in_window = window == 0 || qpos - k < window;
-            row[k] = causal && in_window ? 0u : neg_inf_half;
+            row[k] = ds4_gpu_prefill_raw_key_visible(
+                         qpos, k, window,
+                         g_prefill_visual_start,
+                         g_prefill_visual_count)
+                ? 0u : neg_inf_half;
         }
 
         const uint32_t n_visible = (qpos + 1u) / ratio;
@@ -26371,6 +26387,7 @@ static int ds4_gpu_encode_flash_attention_prefill_static_mixed_heads_nonvec_long
         : (ratio == 128u ? DS4_GPU_PREFILL_MASK_CACHE_RATIO128 : 0u);
     bool mask_cache_created = false;
     ds4_gpu_zero_prefix_prefill_mask_cache_entry *mask_cache =
+        g_prefill_visual_count == 0u &&
         use_comp_mask == 0u && mask_cache_kind != 0u &&
         q_row0 == 0u && n_q == n_tokens
             ? ds4_gpu_get_zero_prefix_prefill_mask_cache(mask_cache_kind,
@@ -27008,7 +27025,7 @@ static int ds4_gpu_encode_flash_attention_prefill_raw_heads_nonvec(
 
     bool mask_cache_created = false;
     ds4_gpu_zero_prefix_prefill_mask_cache_entry *mask_cache =
-        q_row0 == 0u && n_q == n_kv
+        g_prefill_visual_count == 0u && q_row0 == 0u && n_q == n_kv
             ? ds4_gpu_get_zero_prefix_prefill_mask_cache(
                   DS4_GPU_PREFILL_MASK_CACHE_RAW,
                   n_kv,

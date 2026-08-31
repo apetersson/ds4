@@ -68,6 +68,8 @@ typedef struct {
     uint32_t start;             /* absolute token position in prompt */
     uint32_t count;
     uint32_t width;
+    uint32_t visual_start;      /* absolute bidirectional-attention start */
+    uint32_t visual_count;      /* zero for vision-neutral adapters */
 } ds4_embedding_span;
 
 typedef void (*ds4_session_progress_fn)(void *ud, const char *event, int current, int total);

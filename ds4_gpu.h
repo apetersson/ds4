@@ -22,6 +22,27 @@ extern "C" {
 typedef struct ds4_gpu_tensor ds4_gpu_tensor;
 #endif
 
+/* Vision-Exp makes the raw image-token block bidirectionally visible during
+ * prompt prefill. Text rows retain the ordinary causal sliding window. */
+static inline bool ds4_gpu_prefill_raw_key_visible(
+        uint32_t qpos,
+        uint32_t kpos,
+        uint32_t window,
+        uint32_t visual_start,
+        uint32_t visual_count) {
+    const bool visual_pair = visual_count != 0 &&
+        qpos >= visual_start && qpos - visual_start < visual_count &&
+        kpos >= visual_start && kpos - visual_start < visual_count;
+    const bool causal = kpos <= qpos;
+    const bool in_window = causal &&
+        (window == 0 || qpos - kpos < window);
+    return visual_pair || in_window;
+}
+
+/* Set an absolute prompt span for the next serialized prefill, or clear it
+ * with count == 0. Backends without image-span mask support return zero. */
+int ds4_gpu_set_prefill_visual_span(uint32_t start, uint32_t count);
+
 #ifndef DS4_GPU_ATTENTION_DECODE_ROW_DEFINED
 #define DS4_GPU_ATTENTION_DECODE_ROW_DEFINED
 #define DS4_GPU_ATTENTION_DECODE_BATCH_MAX 32u
