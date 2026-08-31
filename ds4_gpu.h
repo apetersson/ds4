@@ -185,6 +185,10 @@ int ds4_gpu_preload_q4_expert_tables(const void *model_map, uint64_t model_size,
                                      uint32_t n_total_expert);
 int ds4_gpu_should_use_managed_kv_cache(uint64_t kv_cache_bytes, uint64_t context_bytes);
 void ds4_gpu_set_quality(bool quality);
+/* Calibration needs token-major F32 routed intermediates.  This disables
+ * compact/fused MoE paths that are correct for inference but do not promise
+ * that their transient gate/up/mid buffers remain collector-readable. */
+void ds4_gpu_set_imatrix_capture(bool enabled);
 void ds4_gpu_set_glm_model(bool enabled);
 void ds4_gpu_set_ssd_streaming(bool enabled);
 void ds4_gpu_set_glm_streaming_prefill_full_layer(bool enabled);

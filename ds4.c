@@ -57044,6 +57044,12 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
         return 1;
     }
 
+    /* Full-model MXFP4 prefill normally uses compact MM_ID/fused kernels.
+     * Their inference output is correct, but their temporary mid layout is
+     * not part of the public contract.  Calibration explicitly requests the
+     * token-major F32 path that imatrix_collect_tensor_batch consumes. */
+    ds4_gpu_set_imatrix_capture(true);
+
     fprintf(stderr,
             "ds4: collecting routed-MoE imatrix from %s (model=%s, layers=%u, experts=%u, ctx=%d, chunk=%u)\n",
             dataset_path, DS4_MODEL_SHAPE_NAME, DS4_N_LAYER, DS4_N_EXPERT, ctx_size, prefill_cap);
@@ -57158,6 +57164,7 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
 
     imatrix_collector_free(&collector);
     metal_graph_free(&g);
+    ds4_gpu_set_imatrix_capture(false);
     free(dataset);
     return ok ? 0 : 1;
 #endif

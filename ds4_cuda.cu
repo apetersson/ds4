@@ -4648,6 +4648,12 @@ extern "C" void ds4_gpu_set_quality(bool quality) {
     }
 }
 
+/* Imatrix collection is currently Metal-only.  Keep the cross-backend API
+ * link-compatible so callers do not need backend conditionals. */
+extern "C" void ds4_gpu_set_imatrix_capture(bool enabled) {
+    (void)enabled;
+}
+
 __global__ static void embed_token_hc_kernel(float *out, const unsigned short *w, uint32_t token, uint32_t n_embd, uint32_t n_hc) {
     uint32_t i = blockIdx.x * blockDim.x + threadIdx.x;
     uint32_t n = n_embd * n_hc;

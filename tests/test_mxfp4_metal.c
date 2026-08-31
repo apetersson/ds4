@@ -509,6 +509,59 @@ static int test_all_mxfp4(void) {
         experts_batch_tensor, 0, experts_batch_baseline,
         batch_out_count * N_EXPERT * sizeof(float));
 
+    /* The imatrix collector must receive a stable token-major F32 midpoint,
+     * even though production large-prefill inference prefers compact/F16
+     * fused intermediates.  Exercise that mode with the same 48-token batch
+     * and require both a visible midpoint and the scalar-reference result. */
+    ds4_gpu_set_imatrix_capture(true);
+    mid_is_f16 = true;
+    ok = ok && ds4_gpu_tensor_write(
+        mid_batch_tensor, 0, batch_poison,
+        batch_pairs * sizeof(float));
+    ok = ok && ds4_gpu_tensor_write(
+        experts_batch_tensor, 0, batch_poison,
+        batch_out_count * N_EXPERT * sizeof(float));
+    ok = ok && ds4_gpu_tensor_write(
+        out_batch_tensor, 0, batch_poison,
+        batch_out_count * sizeof(float));
+    ok = ok && ds4_gpu_routed_moe_batch_tensor(
+        out_batch_tensor, gate_batch_tensor, up_batch_tensor,
+        mid_batch_tensor, experts_batch_tensor,
+        model, model_size, gate_offset, up_offset, down_offset,
+        MXFP4_TYPE, MXFP4_TYPE, expert_bytes, row_bytes,
+        expert_bytes, row_bytes, DIM, DIM, DIM,
+        selected_batch_tensor, weights_batch_tensor,
+        N_TOTAL_EXPERT, N_EXPERT, 7.0f, x_batch_tensor,
+        0u, BATCH_TOKENS, &mid_is_f16, true);
+    ok = ok && !mid_is_f16;
+    ok = ok && ds4_gpu_tensor_read(
+        mid_batch_tensor, 0, mid_batch_actual,
+        batch_pairs * sizeof(float));
+    ok = ok && ds4_gpu_tensor_read(
+        out_batch_tensor, 0, out_batch_actual,
+        batch_out_count * sizeof(float));
+    ds4_gpu_set_imatrix_capture(false);
+    for (uint32_t token = 0; token < BATCH_TOKENS; token++) {
+        memcpy(mid_batch_expected + (uint64_t)token * pair_count,
+               mid_ref, pair_count * sizeof(float));
+        memcpy(out_batch_expected + (uint64_t)token * DIM,
+               out_ref, DIM * sizeof(float));
+    }
+    ok = ok && compare_values("imatrix-mid", mid_batch_actual,
+                              mid_batch_expected, batch_pairs, 2.0e-5f);
+    ok = ok && compare_values("imatrix-out", out_batch_actual,
+                              out_batch_expected, batch_out_count, 2.0e-4f);
+    if (ok) {
+        fprintf(stderr,
+                "MXFP4 Metal imatrix F32 midpoint capture: PASS\n");
+    }
+    for (uint32_t token = 0; token < BATCH_TOKENS; token++) {
+        memcpy(mid_batch_expected + (uint64_t)token * pair_count,
+               mid_half_ref, sizeof(mid_half_ref));
+        memcpy(out_batch_expected + (uint64_t)token * DIM,
+               out_half_ref, sizeof(out_half_ref));
+    }
+
     /* Force the exact half-result dequantization table only for the resident
      * MXFP4/F16-mid/single-rank down projection. Poison every writable output
      * and run twice in this process; the FP16 mid, expert-major F32 down

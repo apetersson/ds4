@@ -563,6 +563,7 @@ static NSUInteger g_moe_q4_down_slots_bytes;
 static NSUInteger g_attn_out_group_ids_bytes;
 static int g_initialized;
 static int g_quality_mode;
+static int g_imatrix_capture_mode;
 static int g_mpp_invalid_env_reported;
 #define DS4_METAL_MAX_ROUTED_EXPERT_USED 8
 static int32_t g_routed_moe_selected_override[DS4_METAL_MAX_ROUTED_EXPERT_USED];
@@ -4205,6 +4206,10 @@ void ds4_gpu_print_memory_report(const char *label) {
 
 void ds4_gpu_set_quality(bool quality) {
     g_quality_mode = quality ? 1 : 0;
+}
+
+void ds4_gpu_set_imatrix_capture(bool enabled) {
+    g_imatrix_capture_mode = enabled ? 1 : 0;
 }
 
 void ds4_gpu_set_glm_model(bool enabled) {
@@ -41044,6 +41049,7 @@ int ds4_gpu_routed_moe_batch_tensor(
         g_moe_mul_mv_addr_q4_k_pair_swiglu_pipeline != nil &&
         g_moe_mul_mv_addr_q4_k_sum6_pipeline != nil;
     const bool use_single_token_q4_one_tensor =
+        !g_imatrix_capture_mode &&
         gate_type == DS4_METAL_TENSOR_Q4_K &&
         down_type == DS4_METAL_TENSOR_Q4_K &&
         n_tokens == 1 &&
@@ -41064,6 +41070,7 @@ int ds4_gpu_routed_moe_batch_tensor(
          can_single_token_q4_expert_table ||
          can_single_token_q4_selected_slots);
     const bool use_single_token_mxfp4_one_tensor =
+        !g_imatrix_capture_mode &&
         gate_type == DS4_METAL_TENSOR_MXFP4 &&
         down_type == DS4_METAL_TENSOR_MXFP4 &&
         n_tokens == 1 &&
@@ -41172,6 +41179,7 @@ int ds4_gpu_routed_moe_batch_tensor(
             return 0;
         }
         const bool use_iq2_batch_selected_addr =
+            !g_imatrix_capture_mode &&
             ds4_gpu_stream_prefill_batch_selected_addr_enabled(n_tokens,
                                                                n_total_expert,
                                                                n_expert,
@@ -41213,6 +41221,7 @@ int ds4_gpu_routed_moe_batch_tensor(
             getenv("DS4_METAL_ENABLE_Q4_EXPERT_TABLE") != NULL ||
             q4_batch_expert_table_auto;
         const bool use_q4_batch_expert_table =
+            !g_imatrix_capture_mode &&
             gate_type == DS4_METAL_TENSOR_Q4_K &&
             down_type == DS4_METAL_TENSOR_Q4_K &&
             n_expert == 6 &&
@@ -41236,6 +41245,7 @@ int ds4_gpu_routed_moe_batch_tensor(
              q4_batch_table_queue_residency ||
              ds4_gpu_q4_table_model_residency_enabled());
         const bool use_mm_id =
+            !g_imatrix_capture_mode &&
             !use_q4_batch_expert_table &&
             !use_iq2_batch_selected_addr &&
             n_tokens >= 32u &&
@@ -41252,6 +41262,7 @@ int ds4_gpu_routed_moe_batch_tensor(
          * grouped matmul path.
          */
         const bool use_tiny_pair_mv =
+            !g_imatrix_capture_mode &&
             !g_quality_mode &&
             n_tokens <= 5u &&
             !use_q4_batch_expert_table &&
@@ -41286,6 +41297,7 @@ int ds4_gpu_routed_moe_batch_tensor(
          * write/read. --quality keeps the older F32 intermediate.
          */
         const bool request_mid_f16 =
+            !g_imatrix_capture_mode &&
             !g_quality_mode &&
             !use_q4_batch_expert_table &&
             !use_iq2_batch_selected_addr;
@@ -41976,7 +41988,10 @@ int ds4_gpu_routed_moe_batch_tensor(
                                                   gate_rows_per_group_is_nr0);
         }
         DS4_METAL_PROFILE_MOE_STAGE("gate_up");
-        const bool use_fused_activation = !g_quality_mode && !use_q4_batch_expert_table;
+        const bool use_fused_activation =
+            !g_imatrix_capture_mode &&
+            !g_quality_mode &&
+            !use_q4_batch_expert_table;
         const bool use_mid_f16 =
             use_mm_id &&
             use_fused_activation &&
