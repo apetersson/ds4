@@ -1121,10 +1121,39 @@ hash-routed layers; mixture weights remain based on the unbiased probabilities.
 The sidecar reproduces the official variable, at-most-384-token N-layout and
 keeps the ViT, aligner, and image control vectors in their source dtypes.
 
+Native Vision-Exp payloads mark that they require the checkpoint's complete
+visual-routing bias set. If such a sidecar is attached to an older compatible
+receiver, the server logs an explicit compatibility-fallback warning. The
+request remains runnable for diagnostics, but that pairing is not a native
+Vision-Exp reference receiver. In particular, the native Hugging Face shard
+directory is source material for conversion and is not directly loadable by
+DS4; the receiver passed to `--model` must be a DS4-compatible GGUF.
+
 This is an experimental compatibility path. The receiver currently uses DS4's
 causal local-attention prefill rather than the reference runtime's additional
 bidirectional visibility inside the image span, so validate task-specific
 vision quality before treating it as reference-equivalent.
+
+`tests/vision_exp_demo.sh` captures a reproducible localhost-only smoke run. It
+creates and verifies a 100x100 pure-red RGB PNG, saves the exact OpenAI request
+JSON and responses, records server/trace logs and HTTP timing, and samples peak
+RSS for the server plus its encoder child. `reference` mode requires the GGUF
+to have been copied under `/Users/andreas/fast_models` and enables SSD expert
+streaming; `resident` mode intentionally omits streaming:
+
+```sh
+VISION_PYTHON=/path/to/torch-venv/bin/python \
+  tests/vision_exp_demo.sh reference \
+  /Users/andreas/fast_models/Vision-Exp-NativePreserved.gguf \
+  /Users/andreas/fast_models/Vision-Exp-Sidecar \
+  /tmp/vision-exp-reference
+
+VISION_PYTHON=/path/to/torch-venv/bin/python \
+  tests/vision_exp_demo.sh resident \
+  /path/to/Headroom128-IQ2_XXS/Vision-Exp-Headroom128.gguf \
+  /path/to/Headroom128-IQ2_XXS \
+  /tmp/vision-exp-headroom128
+```
 
 `/v1/chat/completions` accepts the usual OpenAI-style `messages`,
 `max_tokens`/`max_completion_tokens`, `temperature`, `top_p`, `top_k`, `min_p`,
