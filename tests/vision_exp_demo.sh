@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
     printf 'usage: %s reference|resident MODEL VISION_DIR OUTPUT_DIR\n' "$0" >&2
-    printf 'env: DS4_SERVER, VISION_PYTHON, VISION_ENCODER, PORT, EXPERT_CACHE, TEXT_MAX_TOKENS, IMAGE_MAX_TOKENS, QUALITY\n' >&2
+    printf 'env: DS4_SERVER, VISION_PYTHON, VISION_ENCODER, PORT, EXPERT_CACHE, TEXT_MAX_TOKENS, IMAGE_MAX_TOKENS\n' >&2
     exit 2
 }
 
@@ -28,11 +28,9 @@ port=${PORT:-18080}
 expert_cache=${EXPERT_CACHE:-48GB}
 text_max_tokens=${TEXT_MAX_TOKENS:-4}
 image_max_tokens=${IMAGE_MAX_TOKENS:-16}
-quality=${QUALITY:-0}
 
 [[ $text_max_tokens =~ ^[1-9][0-9]*$ ]] || { printf 'invalid TEXT_MAX_TOKENS: %s\n' "$text_max_tokens" >&2; exit 2; }
 [[ $image_max_tokens =~ ^[1-9][0-9]*$ ]] || { printf 'invalid IMAGE_MAX_TOKENS: %s\n' "$image_max_tokens" >&2; exit 2; }
-[[ $quality == 0 || $quality == 1 ]] || { printf 'invalid QUALITY: %s\n' "$quality" >&2; exit 2; }
 
 for path in "$server" "$model" "$vision_encoder" "$vision_tower" "$vision_config"; do
     [[ -e "$path" ]] || { printf 'missing required path: %s\n' "$path" >&2; exit 2; }
@@ -113,9 +111,6 @@ server_args=(
 )
 if [[ $mode == reference ]]; then
     server_args+=(--ssd-streaming --ssd-streaming-cache-experts "$expert_cache")
-fi
-if [[ $quality == 1 ]]; then
-    server_args+=(--quality)
 fi
 
 {
