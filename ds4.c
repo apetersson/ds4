@@ -34949,10 +34949,74 @@ static void imatrix_write_entry(
     free(tmp);
 }
 
+static bool imatrix_collector_validate_signal(
+        const ds4_imatrix_collector *c,
+        const ds4_weights           *weights) {
+    uint64_t observed_values = 0;
+    uint64_t nonzero_values = 0;
+    uint32_t observed_layers = 0;
+    for (uint32_t il = 0; il < DS4_N_LAYER; il++) {
+        const ds4_layer_weights *layer = &weights->layer[il];
+        if (!layer->ffn_gate_exps || !layer->ffn_up_exps ||
+            !layer->ffn_down_exps) continue;
+
+        bool layer_observed = false;
+        bool layer_has_signal = false;
+        for (uint32_t expert = 0; expert < DS4_N_EXPERT; expert++) {
+            if (c->down_count[il][expert] == 0) continue;
+            layer_observed = true;
+            const float *down = c->down_sum2 +
+                ((size_t)il * DS4_N_EXPERT + expert) * DS4_N_FF_EXP;
+            for (uint32_t col = 0; col < DS4_N_FF_EXP; col++) {
+                const float value = down[col];
+                uint32_t bits = 0;
+                memcpy(&bits, &value, sizeof(bits));
+                const uint32_t magnitude = bits & UINT32_C(0x7fffffff);
+                observed_values++;
+                if ((magnitude & UINT32_C(0x7f800000)) ==
+                        UINT32_C(0x7f800000) ||
+                    ((bits & UINT32_C(0x80000000)) != 0 && magnitude != 0)) {
+                    fprintf(stderr,
+                            "ds4: imatrix down signal is invalid at layer=%u "
+                            "expert=%u column=%u value=%g\n",
+                            il, expert, col, value);
+                    return false;
+                }
+                if (magnitude != 0) {
+                    nonzero_values++;
+                    layer_has_signal = true;
+                }
+            }
+        }
+        if (!layer_observed) continue;
+        observed_layers++;
+        if (!layer_has_signal) {
+            fprintf(stderr,
+                    "ds4: refusing to write imatrix: observed layer %u has "
+                    "all-zero down-projection activation statistics\n",
+                    il);
+            return false;
+        }
+    }
+    if (observed_layers == 0 || observed_values == 0 || nonzero_values == 0) {
+        fprintf(stderr,
+                "ds4: refusing to write imatrix: no routed down-projection "
+                "activation signal was captured\n");
+        return false;
+    }
+    fprintf(stderr,
+            "ds4: imatrix down signal nonzero=%llu/%llu across %u observed layers\n",
+            (unsigned long long)nonzero_values,
+            (unsigned long long)observed_values,
+            observed_layers);
+    return true;
+}
+
 static bool imatrix_collector_save(
         const ds4_imatrix_collector *c,
         const ds4_weights           *weights,
         const char                  *path) {
+    if (!imatrix_collector_validate_signal(c, weights)) return false;
     FILE *fp = fopen(path, "wb");
     if (!fp) {
         fprintf(stderr, "ds4: failed to open imatrix output %s: %s\n", path, strerror(errno));
