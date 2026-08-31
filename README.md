@@ -154,8 +154,8 @@ llama.cpp-style aliases `-hf`, `-hfr`, `--hf-repo`, and `--hf` are equivalent:
 ./ds4 -hf OWNER/CATALOG_REPO -hff nested/model.gguf
 
 # Resolve and verify the receiver plus its DS4 vision bundle in one command.
-# The Python executable and encoder program are trusted local inputs; catalog
-# data can select weights and configuration, but can never select a program.
+# Explicit Python and encoder paths support non-native vision contracts;
+# catalog data can select weights and configuration, but never a program.
 ./ds4-server -hf OWNER/CATALOG_REPO:Headroom128-IQ2_XXS \
   --vision-python /path/to/python --vision-encoder /path/to/encoder.py
 
@@ -163,8 +163,6 @@ llama.cpp-style aliases `-hf`, `-hfr`, `--hf-repo`, and `--hf` are equivalent:
 # are selected, downloaded, and verified from one immutable repository commit.
 ./ds4-server \
   -hf apetersson/DeepSeek-V4-Flash-Vision-Exp-Abliterated:Reference-Native-GGUF \
-  --vision-python /path/to/torch-venv/bin/python \
-  --vision-encoder ./misc/encode-deepseek4-vision.py \
   --metal --ctx 2048 \
   --ssd-streaming --ssd-streaming-cache-experts 48GB
 
@@ -178,6 +176,11 @@ llama.cpp-style aliases `-hf`, `-hfr`, `--hf-repo`, and `--hf` are equivalent:
 # DSpark companions are opt-in and must match the selected receiver profile.
 ./ds4 -hf OWNER/CATALOG_REPO:Headroom128-IQ2_XXS --dspark
 ```
+
+After `make vision-exp-setup`, native Vision-Exp catalogs automatically use
+the setup-created `.venv-vision` interpreter and DS4's bundled encoder beside
+the server executable. Use `--vision-python` and `--vision-encoder` only to
+override those trusted local defaults or to run another vision contract.
 
 Before transferring large artifacts, inspect the catalog or exact plan:
 

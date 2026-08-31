@@ -511,7 +511,10 @@ class RuntimeWiringTests(unittest.TestCase):
             encoder_dir = root / "encoder-dir"
             encoder_dir.mkdir()
             cases = (
-                ("missing-python", [], "vision role python is missing"),
+                ("missing-python",
+                 ["--vision-python", str(root / "missing-python"),
+                  "--vision-encoder", str(encoder)],
+                 "vision role python is not a trusted executable regular file"),
                 ("non-executable-python",
                  ["--vision-python", str(python),
                   "--vision-encoder", str(encoder)],

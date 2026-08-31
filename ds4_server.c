@@ -41,6 +41,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+
 static volatile sig_atomic_t g_stop_requested = 0;
 static volatile sig_atomic_t g_listen_fd = -1;
 
@@ -14863,6 +14867,45 @@ static int hf_runtime_role_fd(const ds4_hf_runtime *runtime,
     return -1;
 }
 
+static bool server_executable_directory(char directory[PATH_MAX]) {
+    char executable[PATH_MAX];
+#ifdef __APPLE__
+    uint32_t size = (uint32_t)sizeof(executable);
+    if (_NSGetExecutablePath(executable, &size) != 0) return false;
+#elif defined(__linux__)
+    ssize_t length = readlink("/proc/self/exe", executable,
+                              sizeof(executable) - 1);
+    if (length <= 0 || (size_t)length >= sizeof(executable)) return false;
+    executable[length] = '\0';
+#else
+    return false;
+#endif
+    char resolved[PATH_MAX];
+    if (!realpath(executable, resolved)) return false;
+    char *slash = strrchr(resolved, '/');
+    if (!slash || slash == resolved) return false;
+    *slash = '\0';
+    int written = snprintf(directory, PATH_MAX, "%s", resolved);
+    return written > 0 && written < PATH_MAX;
+}
+
+static bool native_vision_program_defaults(char python[PATH_MAX],
+                                           char encoder[PATH_MAX]) {
+    char directory[PATH_MAX];
+    if (!server_executable_directory(directory)) return false;
+    int python_written = snprintf(python, PATH_MAX,
+                                  "%s/.venv-vision/bin/python", directory);
+    int encoder_written = snprintf(
+        encoder, PATH_MAX, "%s/misc/encode-deepseek4-vision.py", directory);
+    if (python_written <= 0 || python_written >= PATH_MAX ||
+        encoder_written <= 0 || encoder_written >= PATH_MAX) return false;
+    struct stat python_st, encoder_st;
+    return stat(python, &python_st) == 0 && S_ISREG(python_st.st_mode) &&
+           access(python, X_OK) == 0 &&
+           stat(encoder, &encoder_st) == 0 && S_ISREG(encoder_st.st_mode) &&
+           access(encoder, R_OK) == 0;
+}
+
 int main(int argc, char **argv) {
     signal(SIGPIPE, SIG_IGN);
     struct sigaction sa;
@@ -14889,6 +14932,19 @@ int main(int argc, char **argv) {
     const bool vision_requested =
         cfg.hf.vision_source == DS4_HF_VISION_CATALOG ||
         cfg.hf.vision_source == DS4_HF_VISION_EXPLICIT;
+    char automatic_vision_python[PATH_MAX] = {0};
+    char automatic_vision_encoder[PATH_MAX] = {0};
+    bool automatic_vision_programs = false;
+    if (cfg.hf.vision_source == DS4_HF_VISION_CATALOG &&
+        !cfg.vision.python && !cfg.vision.encoder &&
+        native_vision_program_defaults(automatic_vision_python,
+                                       automatic_vision_encoder)) {
+        cfg.vision.python = automatic_vision_python;
+        cfg.vision.encoder = automatic_vision_encoder;
+        automatic_vision_programs = true;
+        server_log(DS4_LOG_DEFAULT,
+                   "ds4-server: using setup-created native vision runtime beside the server executable");
+    }
     ds4_hf_runtime hf_runtime = {0};
     if (cfg.hf.receiver_source == DS4_HF_RECEIVER_REPOSITORY) {
         char hf_err[1024] = {0};
@@ -14913,6 +14969,13 @@ int main(int argc, char **argv) {
             const bool native_vision =
                 hf_runtime.vision_metadata.contract ==
                     DS4_HF_VISION_CONTRACT_DEEPSEEK4_NATIVE;
+            if (automatic_vision_programs && !native_vision) {
+                server_log(
+                    DS4_LOG_DEFAULT,
+                    "ds4-server: automatic vision runtime supports only the native DeepSeek-V4 Vision-Exp contract; pass --vision-python and --vision-encoder for this catalog");
+                ds4_hf_runtime_close_verified(&hf_runtime);
+                return 2;
+            }
             cfg.vision.adapter = ds4_hf_runtime_open_path(
                 &hf_runtime, native_vision ? DS4_HF_ROLE_VISION_CONFIG :
                                              DS4_HF_ROLE_VISION_PROJECTOR);

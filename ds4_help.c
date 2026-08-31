@@ -172,7 +172,7 @@ static void print_hf_selection(FILE *fp, const help_colors *c,
     if (tool == DS4_HELP_SERVER) {
         opt(fp, c, "--no-vision",
             "Disable catalog vision discovery and downloads; serve the HF receiver as text-only.");
-        para(fp, c, "With -hf, ds4-server downloads and verifies the exact tower/projector/config roles by default. Trusted local vision runtime options activate them; --no-vision downloads no catalog vision roles, and a complete explicit local bundle overrides catalog roles.");
+        para(fp, c, "With -hf, ds4-server downloads and verifies the exact tower/projector/config roles by default. Native Vision-Exp uses the trusted local runtime created by make vision-exp-setup; explicit runtime options handle other contracts or overrides. --no-vision downloads no catalog vision roles, and a complete explicit local bundle overrides catalog roles.");
     }
 }
 
@@ -201,8 +201,8 @@ static void print_model_runtime(FILE *fp, const help_colors *c,
     }
     if (tool == DS4_HELP_SERVER) {
         opt(fp, c, "-n, --tokens N", "Default max output tokens when clients omit a limit.");
-        opt(fp, c, "--vision-python FILE", "Python interpreter for standard OpenAI image_url encoding.");
-        opt(fp, c, "--vision-encoder FILE", "DeepEncoderV2 DS4VEMB1 encoder script.");
+        opt(fp, c, "--vision-python FILE", "Override the Python interpreter used for standard OpenAI image_url encoding.");
+        opt(fp, c, "--vision-encoder FILE", "Override the local DS4VEMB1 encoder script. Native Vision-Exp catalogs automatically use the runtime installed by make vision-exp-setup when both overrides are omitted.");
         opt(fp, c, "--vision-tower FILE", "BF16 DeepEncoderV2 tower weights.");
         opt(fp, c, "--vision-adapter FILE", "BF16 receiver projector weights.");
     }
