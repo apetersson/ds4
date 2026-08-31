@@ -1098,6 +1098,34 @@ failures. A true single-process implementation requires a native DS4 backend
 for the complete vision tower and projector; embedding Python would keep a
 second runtime and allocator resident in the server.
 
+DeepSeek-V4-Flash-Vision-Exp uses its own native ViT/aligner rather than the
+DeepEncoderV2 retrofit. Keep those tensors lossless and quantize only the
+language receiver:
+
+```sh
+python gguf-tools/extract-deepseek4-vision.py \
+  --hf /path/to/DeepSeek-V4-Flash-Vision-Exp \
+  --out /path/to/Vision-Exp-Native.safetensors
+
+./ds4-server --model /path/to/Vision-Exp-Headroom128.gguf --metal \
+  --vision-python /path/to/torch-venv/bin/python \
+  --vision-encoder ./misc/encode-deepseek4-vision.py \
+  --vision-tower /path/to/Vision-Exp-Native.safetensors \
+  --vision-adapter /path/to/config.json
+```
+
+The quantizer detects the checkpoint's complete `layers.*.ffn.gate.bias_vl`
+set and appends it as `blk.*.exp_probs_b_vl.bias`. During Metal prefill every
+`<｜image｜>` route row uses that visual top-k bias, including the first three
+hash-routed layers; mixture weights remain based on the unbiased probabilities.
+The sidecar reproduces the official variable, at-most-384-token N-layout and
+keeps the ViT, aligner, and image control vectors in their source dtypes.
+
+This is an experimental compatibility path. The receiver currently uses DS4's
+causal local-attention prefill rather than the reference runtime's additional
+bidirectional visibility inside the image span, so validate task-specific
+vision quality before treating it as reference-equivalent.
+
 `/v1/chat/completions` accepts the usual OpenAI-style `messages`,
 `max_tokens`/`max_completion_tokens`, `temperature`, `top_p`, `top_k`, `min_p`,
 `seed`, `stream`, `stream_options.include_usage`, `tools`, and `tool_choice`.
