@@ -35728,6 +35728,8 @@ static bool metal_graph_prefill_layer_major_with_embedding_span(
     const uint32_t layer_prepare_ahead =
         layer_prepare && layer_prepare_overlap ?
         metal_graph_stream_prefill_layer_prepare_ahead() : 1u;
+    const bool imatrix_streaming_progress = imatrix && g->ssd_streaming;
+    uint64_t imatrix_logical_bytes_done = 0;
     const bool batch_selected_addr =
         metal_graph_stream_prefill_batch_selected_addr_enabled(g, weights, n_tokens) ||
         metal_graph_cuda_stream_prefill_batch_selected_addr_enabled(g, weights, n_tokens);
@@ -36118,6 +36120,39 @@ static bool metal_graph_prefill_layer_major_with_embedding_span(
             }
             return false;
         }
+        if (imatrix_streaming_progress) {
+            ds4_model_map_span_vec logical_spans;
+            ds4_model_map_span_vec active_spans;
+            uint64_t logical_bytes = 0;
+            uint64_t active_bytes = 0;
+            if (weights_model_map_spans(weights, il, il, false,
+                                        &logical_spans)) {
+                logical_bytes = model_map_span_vec_total_bytes(&logical_spans);
+                free(logical_spans.v);
+            }
+            const bool active_ok = layer_selected_addr ?
+                weights_model_map_decode_layer_spans(weights, il,
+                                                     &active_spans) :
+                weights_model_map_spans(weights, il, il, false,
+                                        &active_spans);
+            if (active_ok) {
+                active_bytes = model_map_span_vec_total_bytes(&active_spans);
+                free(active_spans.v);
+            }
+            if (imatrix_logical_bytes_done > UINT64_MAX - logical_bytes) {
+                imatrix_logical_bytes_done = UINT64_MAX;
+            } else {
+                imatrix_logical_bytes_done += logical_bytes;
+            }
+            fprintf(stderr,
+                    "ds4: imatrix SSD progress %.2f GiB logical, "
+                    "layer %u/%u (active map %.2f GiB)\r",
+                    (double)imatrix_logical_bytes_done / 1073741824.0,
+                    il + 1u,
+                    (uint32_t)DS4_N_LAYER,
+                    (double)active_bytes / 1073741824.0);
+            fflush(stderr);
+        }
         graph_power_note_prefill_layer(g, il, layer_elapsed);
         gpu_graph_report_prefill_display_progress(display_progress,
                                                   display_progress_ud,
@@ -36150,7 +36185,7 @@ static bool metal_graph_prefill_layer_major_with_embedding_span(
      * replay/decode chunks so the prefill win does not add residency pressure. */
     ds4_gpu_release_zero_prefix_prefill_mask_cache();
 #endif
-    if (show_progress) fputc('\n', stderr);
+    if (show_progress || imatrix_streaming_progress) fputc('\n', stderr);
     metal_graph_stream_prefill_selected_profile_summary(g);
 #ifdef DS4_ROCM_BUILD
     /*
