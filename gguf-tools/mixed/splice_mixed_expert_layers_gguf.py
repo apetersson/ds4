@@ -383,22 +383,36 @@ def main() -> int:
     parser.add_argument("--out", required=True, type=Path, help="output mixed GGUF")
     parser.add_argument("--q4-layers", help="comma-separated routed-expert layer IDs/ranges to take from donor, e.g. 37-42")
     parser.add_argument("--tensor", action="append", default=[], help="exact tensor name to take from donor; repeat as needed")
+    parser.add_argument("--tensor-regex", action="append", default=[], help="full-match regular expression for donor tensor names; repeat as needed")
     parser.add_argument("--dry-run", action="store_true", help="print the plan without writing the output")
     parser.add_argument("--force", action="store_true", help="overwrite --out if it already exists")
     args = parser.parse_args()
 
     q4_layers = parse_layer_set(args.q4_layers)
     tensor_names = set(args.tensor)
-    if not q4_layers and not tensor_names:
-        parser.error("select at least one --q4-layers range or --tensor name")
-    print("q4 layers:", ",".join(str(x) for x in sorted(q4_layers)) or "none")
-    print("exact tensors:", ",".join(sorted(tensor_names)) or "none")
+    if not q4_layers and not tensor_names and not args.tensor_regex:
+        parser.error("select at least one --q4-layers range, --tensor name, or --tensor-regex")
+    try:
+        tensor_patterns = [re.compile(pattern) for pattern in args.tensor_regex]
+    except re.error as exc:
+        parser.error(f"invalid --tensor-regex: {exc}")
 
     base = parse_gguf(args.base)
     donor = parse_gguf(args.donor)
     unknown_tensors = tensor_names - base.tensor_by_name.keys()
     if unknown_tensors:
         raise ValueError("base is missing selected tensor(s): " + ", ".join(sorted(unknown_tensors)))
+    regex_tensor_names = {
+        name for name in base.tensor_by_name
+        if any(pattern.fullmatch(name) for pattern in tensor_patterns)
+    }
+    if tensor_patterns and not regex_tensor_names:
+        raise ValueError("--tensor-regex matched no base tensors")
+    tensor_names.update(regex_tensor_names)
+    print("q4 layers:", ",".join(str(x) for x in sorted(q4_layers)) or "none")
+    print("exact tensor arguments:", ",".join(sorted(args.tensor)) or "none")
+    print("tensor regexes:", ",".join(args.tensor_regex) or "none")
+    print("matched exact/regex tensors:", len(tensor_names))
     plan = build_plan(base, donor, q4_layers, tensor_names)
     summarize(base, donor, plan)
 
