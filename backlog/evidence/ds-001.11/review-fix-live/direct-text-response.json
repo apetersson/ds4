@@ -1,0 +1,25 @@
+{
+  "id": "chatcmpl-1",
+  "object": "chat.completion",
+  "created": 1787732388,
+  "model": "deepseek-chat",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "DS4 VISION TEXT OK"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 14,
+    "completion_tokens": 6,
+    "total_tokens": 20,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "cache_write_tokens": 14
+    }
+  }
+}

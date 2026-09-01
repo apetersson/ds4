@@ -1,0 +1,2 @@
+timestamp_utc=2026-08-26T07:22:36Z
+path=/private/tmp/ds00111-flock-semantics.lock inode=173365172 size=0 mtime=2026-08-26T08:57:41Z

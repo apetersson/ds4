@@ -1,0 +1,199 @@
+{
+  "schema_version": 2,
+  "repository": "apetersson/DeepSeek-V4-Flash-0731-Abliterated-Vision",
+  "default_selector": "Headroom128-IQ2_XXS",
+  "pipeline_tag": "image-text-to-text",
+  "shared_vision": {
+    "image_token": "<｜image｜>",
+    "image_token_id": 129279,
+    "image_size": 1024,
+    "encoder_dim": 896,
+    "receiver_dim": 4096,
+    "tokens_per_view": 256,
+    "separator_tokens": 1,
+    "minimum_views": 1,
+    "maximum_views": 5,
+    "token_formula": "views*256+1",
+    "preprocessing": {
+      "tile_limit": 4,
+      "tile_threshold_pixels": 1536,
+      "global_view_first": true,
+      "color_space": "RGB",
+      "crop_boundaries": "floor-proportional-v1",
+      "crop_order": "row-major",
+      "crop_count_rule": "zero-or-2-through-4",
+      "grid_selection": "closest-aspect-ratio",
+      "grid_tie_break": "more-tiles",
+      "resize": "1024x1024-bicubic",
+      "separator_placement": "last",
+      "mean": [0.5, 0.5, 0.5],
+      "std": [0.5, 0.5, 0.5]
+    }
+  },
+  "variants": [
+    {
+      "selector": "Headroom128-IQ2_XXS",
+      "directory": "Headroom128-IQ2_XXS",
+      "default": true,
+      "receiver": {
+        "path": "Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf",
+        "bytes": 143327232000,
+        "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+        "precision": "IQ2_XXS",
+        "profile": "Headroom128",
+        "capabilities": {"required": ["deepseek4", "text-generation"], "optional": ["ssd-streaming"]},
+        "runtime": {
+          "ds4": {"minimum_revision": "52bba7525122fe8a6cac57c1d0bf45a409bed5b1"},
+          "llama_cpp": {"minimum_revision": "deepseek4-main-v1"}
+        },
+        "gguf_metadata": {"architecture": "deepseek4"}
+      },
+      "ds4_vision": {
+        "tower": {
+          "path": "Headroom128-IQ2_XXS/DeepEncoderV2-BF16.safetensors",
+          "bytes": 1328000000,
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "precision": "BF16",
+          "profile": "DeepEncoderV2",
+          "capabilities": {"required": ["ds4-vision"], "optional": ["future-optional-capability"]},
+          "runtime": {"ds4": {"minimum_revision": "ds4-vision-v1"}}
+        },
+        "projector": {
+          "path": "Headroom128-IQ2_XXS/DeepSeek-V4-0731-Projector-BF16.safetensors",
+          "bytes": 85196800,
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "precision": "BF16",
+          "profile": "896-to-4096",
+          "capabilities": {"required": ["ds4-vision"], "optional": []},
+          "runtime": {"ds4": {"minimum_revision": "ds4-vision-v1"}}
+        },
+        "config": {
+          "path": "Headroom128-IQ2_XXS/upstream-config.json",
+          "bytes": 8192,
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "precision": "JSON",
+          "profile": "DeepEncoderV2",
+          "capabilities": {"required": ["ds4-vision"], "optional": []},
+          "runtime": {"ds4": {"minimum_revision": "ds4-vision-v1"}}
+        }
+      },
+      "llama_cpp_mmproj": {
+        "path": "Headroom128-IQ2_XXS/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf",
+        "bytes": 1415000000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "precision": "BF16",
+        "profile": "DeepEncoderV2",
+        "capabilities": {"required": ["llama-cpp-mmproj", "route-token-id"], "optional": []},
+        "runtime": {"llama_cpp": {"minimum_revision": "deepencoder-v2-dsv4-route-token-v1"}},
+        "gguf_metadata": {"architecture": "clip", "projector_type": "deepencoder_v2_dsv4"}
+      },
+      "bf16_tensor_identity": {
+        "canonicalization": "named-tensor-name-shape-bf16le-v1",
+        "source": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "llama_cpp_mmproj": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "dspark": {
+        "path": "Headroom128-IQ2_XXS/dspark-DeepSeek-V4-Flash-0731-Headroom128-Q8_0.gguf",
+        "bytes": 5700000000,
+        "sha256": "6666666666666666666666666666666666666666666666666666666666666666",
+        "precision": "Q8_0",
+        "profile": "Headroom128",
+        "capabilities": {"required": ["dspark"], "optional": ["ssd-streaming"]},
+        "runtime": {
+          "ds4": {"minimum_revision": "dspark-v1"},
+          "llama_cpp": {"minimum_revision": "dspark-companion-v1"}
+        },
+        "gguf_metadata": {"architecture": "deepseek4"}
+      },
+      "future_catalog_note": {"ignored": true}
+    },
+    {
+      "selector": "Quality128-IQ2_XXS_XL",
+      "directory": "Quality128-IQ2_XXS_XL",
+      "default": false,
+      "receiver": {
+        "path": "Quality128-IQ2_XXS_XL/DeepSeek-V4-Flash-0731-Abliterated-Vision-Quality128-IQ2_XXS_XL.gguf",
+        "bytes": 151934992384,
+        "sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+        "precision": "IQ2_XXS_XL",
+        "profile": "Quality128",
+        "capabilities": {"required": ["deepseek4", "text-generation"], "optional": ["ssd-streaming"]},
+        "runtime": {
+          "ds4": {"minimum_revision": "52bba7525122fe8a6cac57c1d0bf45a409bed5b1"},
+          "llama_cpp": {"minimum_revision": "deepseek4-main-v1"}
+        },
+        "gguf_metadata": {"architecture": "deepseek4"}
+      },
+      "ds4_vision": {
+        "tower": {
+          "path": "Quality128-IQ2_XXS_XL/DeepEncoderV2-BF16.safetensors",
+          "bytes": 1328000000,
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "precision": "BF16",
+          "profile": "DeepEncoderV2",
+          "capabilities": {"required": ["ds4-vision"], "optional": []},
+          "runtime": {"ds4": {"minimum_revision": "ds4-vision-v1"}}
+        },
+        "projector": {
+          "path": "Quality128-IQ2_XXS_XL/DeepSeek-V4-0731-Projector-BF16.safetensors",
+          "bytes": 85196800,
+          "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
+          "precision": "BF16",
+          "profile": "896-to-4096",
+          "capabilities": {"required": ["ds4-vision"], "optional": []},
+          "runtime": {"ds4": {"minimum_revision": "ds4-vision-v1"}}
+        },
+        "config": {
+          "path": "Quality128-IQ2_XXS_XL/upstream-config.json",
+          "bytes": 8192,
+          "sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+          "precision": "JSON",
+          "profile": "DeepEncoderV2",
+          "capabilities": {"required": ["ds4-vision"], "optional": []},
+          "runtime": {"ds4": {"minimum_revision": "ds4-vision-v1"}}
+        }
+      },
+      "llama_cpp_mmproj": {
+        "path": "Quality128-IQ2_XXS_XL/mmproj-DeepSeek-V4-Flash-0731-DeepEncoderV2-BF16.gguf",
+        "bytes": 1415000000,
+        "sha256": "5555555555555555555555555555555555555555555555555555555555555555",
+        "precision": "BF16",
+        "profile": "DeepEncoderV2",
+        "capabilities": {"required": ["llama-cpp-mmproj", "route-token-id"], "optional": []},
+        "runtime": {"llama_cpp": {"minimum_revision": "deepencoder-v2-dsv4-route-token-v1"}},
+        "gguf_metadata": {"architecture": "clip", "projector_type": "deepencoder_v2_dsv4"}
+      },
+      "bf16_tensor_identity": {
+        "canonicalization": "named-tensor-name-shape-bf16le-v1",
+        "source": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "llama_cpp_mmproj": {
+          "tower_sha256": "9999999999999999999999999999999999999999999999999999999999999999",
+          "projector_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      },
+      "dspark": {
+        "path": "Quality128-IQ2_XXS_XL/dspark-DeepSeek-V4-Flash-0731-Quality128-Q8_0.gguf",
+        "bytes": 5700000000,
+        "sha256": "8888888888888888888888888888888888888888888888888888888888888888",
+        "precision": "Q8_0",
+        "profile": "Quality128",
+        "capabilities": {"required": ["dspark"], "optional": ["ssd-streaming"]},
+        "runtime": {
+          "ds4": {"minimum_revision": "dspark-v1"},
+          "llama_cpp": {"minimum_revision": "dspark-companion-v1"}
+        },
+        "gguf_metadata": {"architecture": "deepseek4"}
+      }
+    }
+  ],
+  "future_optional_top_level": [1, {"nested": "ignored"}]
+}

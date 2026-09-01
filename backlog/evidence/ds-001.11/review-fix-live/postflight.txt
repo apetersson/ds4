@@ -1,0 +1,108 @@
+timestamp_utc=2026-08-26T08:25:13Z
+branch=worker/DS-001.11-hf-vision
+head=182c3c3e68c8f639436934e9faa5b9aeeea1d4dd
+base=1f6f19a1a9d8861246f4096c322908eb7341fb48
+worktree_status_begin
+ M backlog/evidence/ds-001.11/pi-models.json
+worktree_status_end
+lock_absent=/tmp/ds4-model-test.lock
+lock_absent=/private/tmp/ds4-model-test.lock
+lock_absent=/tmp/ds4.lock
+lock_absent=/private/tmp/ds4.lock
+lock_absent=/private/tmp/ds00111-server.lock
+model_support_test_processes=false
+port_18081_free=true
+port_18082_free=true
+exact_model_or_support_handles=false
+The system has 137438953472 (8388608 pages with a page size of 16384).
+
+Stats: 
+Pages free: 503484 
+Pages purgeable: 13083 
+Pages purged: 34614937 
+
+Swap I/O:
+Swapins: 23644049 
+Swapouts: 30095313 
+
+Page Q counts:
+Pages active: 423653 
+Pages inactive: 6341011 
+Pages speculative: 21957 
+Pages throttled: 0 
+Pages wired down: 409498 
+
+Compressor Stats:
+Pages used by compressor: 634016 
+Pages decompressed: 375416902 
+Pages compressed: 378871250 
+
+File I/O:
+Pageins: 944260988 
+Pageouts: 621411 
+
+System-wide memory free percentage: 87%
+vm.swapusage: total = 17408.00M  used = 16438.88M  free = 969.12M  (encrypted)
+Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                   503575.
+Pages active:                                 423607.
+Pages inactive:                              6341013.
+Pages speculative:                             21964.
+Pages throttled:                                   0.
+Pages wired down:                             409498.
+Pages purgeable:                               13083.
+"Translation faults":                    19790432553.
+Pages copy-on-write:                      2583623000.
+Pages zero filled:                       11769347757.
+Pages reactivated:                         567076834.
+Pages purged:                               34614937.
+File-backed pages:                           5625392.
+Anonymous pages:                             1161192.
+Pages stored in compressor:                  3343378.
+Pages occupied by compressor:                 634016.
+Decompressions:                            375416902.
+Compressions:                              378871250.
+Pageins:                                   944260993.
+Pageouts:                                     621411.
+Swapins:                                    23644049.
+Swapouts:                                   30095313.
+acknowledged_unrelated_omlx 18292 95788 /bin/zsh -c set -eu\012set -o pipefail\012out=/private/tmp/ds00111-review-fix-live/postflight.txt\012cache=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS\012receiver=$cache/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf\012tower=$cache/DeepEncoderV2-BF16.safetensors\012projector=$cache/DeepSeek-V4-0731-Projector-BF16.safetensors\012config=$cache/upstream-config.json\012python=/private/tmp/dsv4-vision-venv/bin/python\012encoder=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/encode_flycockpit.py\012image=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png\012real=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v\012zero=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v\012shuffle=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v\012mmproj=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/.ds00604-sam.J4boBc/mmproj-DeepEncoderV2-BF16.gguf\012{\012date -u '+timestamp_utc=%Y-%m-%dT%H:%M:%SZ'\012echo branch=$(git branch --show-current)\012echo head=$(git rev-parse HEAD)\012echo base=$(git merge-base HEAD 1f6f19a1a9d8861246f4096c322908eb7341fb48)\012echo worktree_status_begin\012git status --short\012echo worktree_status_end\012for lock in /tmp/ds4-model-test.lock /private/tmp/ds4-model-test.lock /tmp/ds4.lock /private/tmp/ds4.lock /private/tmp/ds00111-server.lock; do test ! -e "$lock"; echo lock_absent=$lock; done\012! pgrep -x test-mtmd-impl >/dev/null 2>&1\012! pgrep -x ds4-server >/dev/null 2>&1\012! pgrep -f '[g]enerate_qwen_goldens' >/dev/null 2>&1\012! pgrep -f '[e]ncode_flycockpit.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-lane-supervisor.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-fake-hub.py' >/dev/null 2>&1\012echo model_support_test_processes=false\012! lsof -nP -iTCP:18081 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18081_free=true\012! lsof -nP -iTCP:18082 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18082_free=true\012if lsof -- "$receiver" "$tower" "$projector" "$config" "$python" "$encoder" "$image" "$real" "$zero" "$shuffle" "$mmproj"; then echo exact_model_or_support_handles=true; exit 72; fi\012echo exact_model_or_support_handles=false\012memory_pressure\012sysctl vm.swapusage\012vm_stat\012ps -axo pid=,ppid=,command= | awk 'tolower($0) ~ /omlx/ { print "acknowledged_unrelated_omlx " $0 }'\012ps -axo pid=,ppid=,comm=,command= | awk '$3 == "pi" || tolower($0) ~ /pi-coding-agent/ { print "pi_process " $0 }'\012echo lane_released=true\012echo postflight=PASS\012} 2>&1 | tee "$out"
+acknowledged_unrelated_omlx 18293 18292 /bin/zsh -c set -eu\012set -o pipefail\012out=/private/tmp/ds00111-review-fix-live/postflight.txt\012cache=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS\012receiver=$cache/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf\012tower=$cache/DeepEncoderV2-BF16.safetensors\012projector=$cache/DeepSeek-V4-0731-Projector-BF16.safetensors\012config=$cache/upstream-config.json\012python=/private/tmp/dsv4-vision-venv/bin/python\012encoder=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/encode_flycockpit.py\012image=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png\012real=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v\012zero=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v\012shuffle=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v\012mmproj=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/.ds00604-sam.J4boBc/mmproj-DeepEncoderV2-BF16.gguf\012{\012date -u '+timestamp_utc=%Y-%m-%dT%H:%M:%SZ'\012echo branch=$(git branch --show-current)\012echo head=$(git rev-parse HEAD)\012echo base=$(git merge-base HEAD 1f6f19a1a9d8861246f4096c322908eb7341fb48)\012echo worktree_status_begin\012git status --short\012echo worktree_status_end\012for lock in /tmp/ds4-model-test.lock /private/tmp/ds4-model-test.lock /tmp/ds4.lock /private/tmp/ds4.lock /private/tmp/ds00111-server.lock; do test ! -e "$lock"; echo lock_absent=$lock; done\012! pgrep -x test-mtmd-impl >/dev/null 2>&1\012! pgrep -x ds4-server >/dev/null 2>&1\012! pgrep -f '[g]enerate_qwen_goldens' >/dev/null 2>&1\012! pgrep -f '[e]ncode_flycockpit.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-lane-supervisor.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-fake-hub.py' >/dev/null 2>&1\012echo model_support_test_processes=false\012! lsof -nP -iTCP:18081 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18081_free=true\012! lsof -nP -iTCP:18082 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18082_free=true\012if lsof -- "$receiver" "$tower" "$projector" "$config" "$python" "$encoder" "$image" "$real" "$zero" "$shuffle" "$mmproj"; then echo exact_model_or_support_handles=true; exit 72; fi\012echo exact_model_or_support_handles=false\012memory_pressure\012sysctl vm.swapusage\012vm_stat\012ps -axo pid=,ppid=,command= | awk 'tolower($0) ~ /omlx/ { print "acknowledged_unrelated_omlx " $0 }'\012ps -axo pid=,ppid=,comm=,command= | awk '$3 == "pi" || tolower($0) ~ /pi-coding-agent/ { print "pi_process " $0 }'\012echo lane_released=true\012echo postflight=PASS\012} 2>&1 | tee "$out"
+acknowledged_unrelated_omlx 18382 18293 awk tolower($0) ~ /omlx/ { print "acknowledged_unrelated_omlx " $0 }
+acknowledged_unrelated_omlx 91423 68974 uv run omlx serve
+acknowledged_unrelated_omlx 91425 91423 omlx-server  
+pi_process 18292 95788 /bin/zsh         /bin/zsh -c set -eu\012set -o pipefail\012out=/private/tmp/ds00111-review-fix-live/postflight.txt\012cache=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS\012receiver=$cache/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf\012tower=$cache/DeepEncoderV2-BF16.safetensors\012projector=$cache/DeepSeek-V4-0731-Projector-BF16.safetensors\012config=$cache/upstream-config.json\012python=/private/tmp/dsv4-vision-venv/bin/python\012encoder=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/encode_flycockpit.py\012image=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png\012real=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v\012zero=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v\012shuffle=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v\012mmproj=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/.ds00604-sam.J4boBc/mmproj-DeepEncoderV2-BF16.gguf\012{\012date -u '+timestamp_utc=%Y-%m-%dT%H:%M:%SZ'\012echo branch=$(git branch --show-current)\012echo head=$(git rev-parse HEAD)\012echo base=$(git merge-base HEAD 1f6f19a1a9d8861246f4096c322908eb7341fb48)\012echo worktree_status_begin\012git status --short\012echo worktree_status_end\012for lock in /tmp/ds4-model-test.lock /private/tmp/ds4-model-test.lock /tmp/ds4.lock /private/tmp/ds4.lock /private/tmp/ds00111-server.lock; do test ! -e "$lock"; echo lock_absent=$lock; done\012! pgrep -x test-mtmd-impl >/dev/null 2>&1\012! pgrep -x ds4-server >/dev/null 2>&1\012! pgrep -f '[g]enerate_qwen_goldens' >/dev/null 2>&1\012! pgrep -f '[e]ncode_flycockpit.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-lane-supervisor.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-fake-hub.py' >/dev/null 2>&1\012echo model_support_test_processes=false\012! lsof -nP -iTCP:18081 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18081_free=true\012! lsof -nP -iTCP:18082 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18082_free=true\012if lsof -- "$receiver" "$tower" "$projector" "$config" "$python" "$encoder" "$image" "$real" "$zero" "$shuffle" "$mmproj"; then echo exact_model_or_support_handles=true; exit 72; fi\012echo exact_model_or_support_handles=false\012memory_pressure\012sysctl vm.swapusage\012vm_stat\012ps -axo pid=,ppid=,command= | awk 'tolower($0) ~ /omlx/ { print "acknowledged_unrelated_omlx " $0 }'\012ps -axo pid=,ppid=,comm=,command= | awk '$3 == "pi" || tolower($0) ~ /pi-coding-agent/ { print "pi_process " $0 }'\012echo lane_released=true\012echo postflight=PASS\012} 2>&1 | tee "$out"
+pi_process 18293 18292 /bin/zsh         /bin/zsh -c set -eu\012set -o pipefail\012out=/private/tmp/ds00111-review-fix-live/postflight.txt\012cache=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS\012receiver=$cache/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf\012tower=$cache/DeepEncoderV2-BF16.safetensors\012projector=$cache/DeepSeek-V4-0731-Projector-BF16.safetensors\012config=$cache/upstream-config.json\012python=/private/tmp/dsv4-vision-venv/bin/python\012encoder=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/encode_flycockpit.py\012image=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png\012real=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v\012zero=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v\012shuffle=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v\012mmproj=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/.ds00604-sam.J4boBc/mmproj-DeepEncoderV2-BF16.gguf\012{\012date -u '+timestamp_utc=%Y-%m-%dT%H:%M:%SZ'\012echo branch=$(git branch --show-current)\012echo head=$(git rev-parse HEAD)\012echo base=$(git merge-base HEAD 1f6f19a1a9d8861246f4096c322908eb7341fb48)\012echo worktree_status_begin\012git status --short\012echo worktree_status_end\012for lock in /tmp/ds4-model-test.lock /private/tmp/ds4-model-test.lock /tmp/ds4.lock /private/tmp/ds4.lock /private/tmp/ds00111-server.lock; do test ! -e "$lock"; echo lock_absent=$lock; done\012! pgrep -x test-mtmd-impl >/dev/null 2>&1\012! pgrep -x ds4-server >/dev/null 2>&1\012! pgrep -f '[g]enerate_qwen_goldens' >/dev/null 2>&1\012! pgrep -f '[e]ncode_flycockpit.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-lane-supervisor.py' >/dev/null 2>&1\012! pgrep -f '[l]ive-fake-hub.py' >/dev/null 2>&1\012echo model_support_test_processes=false\012! lsof -nP -iTCP:18081 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18081_free=true\012! lsof -nP -iTCP:18082 -sTCP:LISTEN >/dev/null 2>&1\012echo port_18082_free=true\012if lsof -- "$receiver" "$tower" "$projector" "$config" "$python" "$encoder" "$image" "$real" "$zero" "$shuffle" "$mmproj"; then echo exact_model_or_support_handles=true; exit 72; fi\012echo exact_model_or_support_handles=false\012memory_pressure\012sysctl vm.swapusage\012vm_stat\012ps -axo pid=,ppid=,command= | awk 'tolower($0) ~ /omlx/ { print "acknowledged_unrelated_omlx " $0 }'\012ps -axo pid=,ppid=,comm=,command= | awk '$3 == "pi" || tolower($0) ~ /pi-coding-agent/ { print "pi_process " $0 }'\012echo lane_released=true\012echo postflight=PASS\012} 2>&1 | tee "$out"
+pi_process 18384 18293 awk              awk $3 == "pi" || tolower($0) ~ /pi-coding-agent/ { print "pi_process " $0 }
+pi_process 78478 71925 pi               pi 
+pi_process 69530 69009 pi               pi 
+pi_process 78049 77235 pi               pi 
+pi_process 58763 58250 pi               pi 
+pi_process 67321 66097 pi               pi     
+pi_process 68696 72052 pi               pi 
+pi_process 84187 79652 pi               pi 
+pi_process 64841 64119 pi               pi 
+pi_process 54168 53588 pi               pi 
+pi_process 49646 42711 pi               pi 
+pi_process 45873 42964 pi               pi   
+pi_process 45775 43076 pi               pi   
+pi_process 45882 43230 pi               pi   
+pi_process 45967 43756 pi               pi   
+pi_process 40332 39335 pi               pi 
+pi_process 26350 25661 pi               pi 
+pi_process  2251 99984 pi               pi 
+pi_process 67919 66112 pi               pi     
+pi_process 35661 35055 pi               pi     
+pi_process 21764 20892 pi               pi     
+pi_process 41424 40824 pi               pi     
+pi_process 92157 91406 pi               pi     
+pi_process 70902 70149 pi               pi     
+pi_process 13330 12726 pi               pi     
+pi_process 36534 35594 pi               pi 
+pi_process 87452 86776 pi               pi 
+pi_process 70666 71537 pi               pi 
+pi_process 95891 64256 pi               pi   
+pi_process  3073 35146 pi               pi 
+pi_process 28098  3016 pi               pi         
+lane_released=true
+postflight=PASS

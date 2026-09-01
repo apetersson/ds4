@@ -1,0 +1,30 @@
+timestamp_utc=2026-08-26T08:03:04Z
+branch=worker/DS-001.11-hf-vision
+head=182c3c3e68c8f639436934e9faa5b9aeeea1d4dd
+base=1f6f19a1a9d8861246f4096c322908eb7341fb48
+worktree_clean=true
+lock_absent=/tmp/ds4-model-test.lock
+lock_absent=/private/tmp/ds4-model-test.lock
+lock_absent=/tmp/ds4.lock
+lock_absent=/private/tmp/ds4.lock
+lock_absent=/private/tmp/ds00111-server.lock
+model_process_conflict=false
+COMMAND   PID    USER   FD   TYPE             DEVICE SIZE/OFF NODE NAME
+Python  71568 andreas    3u  IPv4 0x819fb38d79be17ae      0t0  TCP 127.0.0.1:18081 (LISTEN)
+port_18081=exact_metadata_only_fake_hub
+port_18082_free=true
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/DeepSeek-V4-Flash-0731-Abliterated-Vision-Headroom128-IQ2_XXS.gguf size=86720111776 mode=-r-------- inode=21
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/DeepEncoderV2-BF16.safetensors size=906533408 mode=-r-------- inode=30
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/DeepSeek-V4-0731-Projector-BF16.safetensors size=40919752 mode=-r-------- inode=37
+path=/Volumes/DS00111HF/repos/apetersson%2FDeepSeek-V4-Flash-0731-Abliterated-Vision/snapshots/0123456789abcdef0123456789abcdef01234567/Headroom128-IQ2_XXS/upstream-config.json size=658 mode=-r-------- inode=44
+path=/private/tmp/dsv4-vision-venv/bin/python size=44 mode=lrwxr-xr-x inode=172317739
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/tools/encode_flycockpit.py size=11423 mode=-rwx------ inode=8319637
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/fixtures/orion_dashboard.png size=60178 mode=-rwx------ inode=3983531
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.fly.ds4v size=12602444 mode=-rwx------ inode=3983533
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.zero.ds4v size=12602444 mode=-rwx------ inode=3983585
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/eval/orion_dashboard.shuffle.ds4v size=12602444 mode=-rwx------ inode=3983635
+path=/Volumes/Samsung_4TB/models/DeepSeek-V4-Flash-0731-Abliterated-Vision/.ds00604-sam.J4boBc/mmproj-DeepEncoderV2-BF16.gguf size=947420512 mode=-rwx------ inode=8320208
+exact_model_or_support_handles=false
+Traceback (most recent call last):
+  File "<stdin>", line 8, in <module>
+ValueError: not enough values to unpack (expected 10, got 9)

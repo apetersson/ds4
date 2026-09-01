@@ -40494,6 +40494,10 @@ static double glm_graph_bytes_to_gib(uint64_t bytes) {
     return (double)bytes / (1024.0 * 1024.0 * 1024.0);
 }
 
+#ifdef DS4_ROCM_BUILD
+static uint64_t g_glm_rocm_guard_available_baseline;
+#endif
+
 static bool glm_graph_memory_guard_disabled(void) {
     const char *env = getenv("DS4_GLM_MEMORY_GUARD");
     if (!env || !env[0]) return false;
@@ -40515,11 +40519,12 @@ static double glm_graph_memory_guard_default_reserve_gib(
         return 24.0;
     }
     if (glm53 &&
-        base_gib >= 120.0 &&
+        base_gib >= 108.0 &&
         base_gib <= 160.0 &&
         model_gib >= 70.0) {
-        /* Preserve the proven 110 GiB resident-Q2 budget on 128 GiB hosts
-         * without imposing that reference-machine limit on larger Macs. */
+        /* A nominal 128 GB host reports less than 120 GiB, and ROCm further
+         * limits this base to currently available memory. Preserve the proven
+         * resident-Q2 budget without imposing it on larger machines. */
         return 18.0;
     }
     return 32.0;
@@ -41028,8 +41033,17 @@ static bool glm_graph_memory_guard_budget(
         budget_base = ds4_gpu_recommended_working_set_size();
     }
 #ifdef DS4_ROCM_BUILD
-    const uint64_t host_available =
+    uint64_t host_available =
         glm_graph_host_available_memory_bytes();
+    if (!ssd_streaming && host_available != 0) {
+        /* The resident model is charged in model_bytes below. Keep the
+         * pre-upload availability baseline so later session guards do not
+         * charge the same ROCm allocation once through MemAvailable too. */
+        if (host_available > g_glm_rocm_guard_available_baseline) {
+            g_glm_rocm_guard_available_baseline = host_available;
+        }
+        host_available = g_glm_rocm_guard_available_baseline;
+    }
     if (host_available != 0 && host_available < budget_base) {
         budget_base = host_available;
     }
@@ -55543,6 +55557,23 @@ bool ds4_engine_has_mtp(ds4_engine *e) {
            e->mtp_ready;
 }
 
+bool ds4_engine_has_dspark(ds4_engine *e) {
+    return e && e->backend != DS4_BACKEND_CPU &&
+           e->metal_ready &&
+           e->distributed.role == DS4_DISTRIBUTED_NONE &&
+           e->support_kind == DS4_SUPPORT_DSPARK &&
+           e->dspark && !e->quality && !e->dspark_strict &&
+           e->dspark_weights.n_stages != 0 &&
+           e->dspark_weights.block_size > 1 &&
+           e->dspark_weights.missing_tensors == 0 &&
+           e->dspark_weights.invalid_tensors == 0 &&
+           e->dspark_weights.metadata_errors == 0;
+}
+
+int ds4_engine_image_token_id(ds4_engine *e) {
+    return e ? e->vocab.image_id : -1;
+}
+
 int ds4_engine_mtp_draft_tokens(ds4_engine *e) {
     if (e && DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
         return e->glm_mtp && DS4_N_NEXTN_PREDICT != 0 ? 2 : 0;
@@ -62224,10 +62255,28 @@ int ds4_engine_create_with_gpu_config(ds4_engine **out,
     return ds4_engine_open_internal(out, opt, gpu_cfg);
 }
 
+static void engine_open_inspect_support(ds4_engine *e,
+                                        const ds4_engine_options *opt) {
+    if (!opt->mtp_path || !opt->mtp_path[0] ||
+        opt->distributed.role != DS4_DISTRIBUTED_NONE) return;
+    model_open(&e->mtp_model, opt->mtp_path, false, false);
+    ds4_dspark_summary dspark = {0};
+    e->support_kind =
+        support_model_detect(&e->mtp_model, &e->support_stages, &dspark);
+    if (e->support_kind == DS4_SUPPORT_DSPARK) {
+        dspark_weights_bind_optional(&e->dspark_weights,
+                                     &e->mtp_model, &dspark);
+    }
+}
+
 static int ds4_engine_open_internal(ds4_engine **out,
                                      const ds4_engine_options *opt,
                                      const ds4_gpu_config *gpu_cfg) {
     ds4_engine *e = xcalloc(1, sizeof(*e));
+#ifdef DS4_ROCM_BUILD
+    g_glm_rocm_guard_available_baseline =
+        glm_graph_host_available_memory_bytes();
+#endif
     e->model.fd = -1;
     e->mtp_model.fd = -1;
     e->vision_model.fd = -1;
@@ -62426,6 +62475,13 @@ static int ds4_engine_open_internal(ds4_engine **out,
                     ds4_backend_name(e->backend));
         }
     }
+#ifdef DS4_TEST_HOOKS
+    if (opt->inspect_only && opt->test_metadata_only_inspect) {
+        engine_open_inspect_support(e, opt);
+        *out = e;
+        return 0;
+    }
+#endif
     weights_bind(&e->weights,
                  &e->model,
                  load_slice,
@@ -62519,7 +62575,8 @@ static int ds4_engine_open_internal(ds4_engine **out,
         const bool rocm_full_model_requires_streaming =
             e->backend == DS4_BACKEND_CUDA &&
             !e->ssd_streaming &&
-            !load_slice;
+            !load_slice &&
+            !ds4_model_is_glm53();
         if (rocm_full_model_requires_streaming) {
             glm_backend_supported = false;
         }
@@ -62528,7 +62585,7 @@ static int ds4_engine_open_internal(ds4_engine **out,
 #ifdef DS4_ROCM_BUILD
             if (rocm_full_model_requires_streaming) {
                 fprintf(stderr,
-                        "ds4: full-model GLM 5.2 ROCm inference requires "
+                        "ds4: full-model GLM DSA ROCm inference requires "
                         "--ssd-streaming; distributed layer slices can run "
                         "fully resident\n");
             } else {
@@ -62605,18 +62662,7 @@ static int ds4_engine_open_internal(ds4_engine **out,
         }
     }
     if (opt->inspect_only) {
-        if (opt->mtp_path && opt->mtp_path[0] &&
-            opt->distributed.role == DS4_DISTRIBUTED_NONE) {
-            model_open(&e->mtp_model, opt->mtp_path, false, false);
-            ds4_dspark_summary dspark = {0};
-            e->support_kind =
-                support_model_detect(&e->mtp_model, &e->support_stages, &dspark);
-            if (e->support_kind == DS4_SUPPORT_DSPARK) {
-                dspark_weights_bind_optional(&e->dspark_weights,
-                                             &e->mtp_model,
-                                             &dspark);
-            }
-        }
+        engine_open_inspect_support(e, opt);
         *out = e;
         return 0;
     }
