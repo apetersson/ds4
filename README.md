@@ -192,8 +192,11 @@ Before transferring large artifacts, inspect the catalog or exact plan:
 
 Every branch or tag is resolved to one immutable commit before artifact URLs
 are formed. Downloads are selective, resumable, size- and SHA-256-verified,
-and published to the cache only after verification. To use a private or gated
-repository, prefer `HF_TOKEN` so the token does not appear in shell history:
+and published to the cache only after verification. Interactive downloads show
+per-role percentage, transferred bytes, throughput, and ETA by default, then
+report SHA-256 verification and cache publication. Non-interactive logs receive
+the same progress at a throttled interval. To use a private or gated repository,
+prefer `HF_TOKEN` so the token does not appear in shell history:
 
 ```sh
 HF_TOKEN="$(security find-generic-password -w -s huggingface)" \

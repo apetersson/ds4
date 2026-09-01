@@ -196,6 +196,18 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("status=ok", result.stdout)
 
+    def test_download_progress_reports_role_rate_eta_and_verification(self):
+        with tempfile.TemporaryDirectory() as cache:
+            result = self.run_probe(cache)
+            self.assert_ok(result)
+            self.assertIn("HF download [1/1] receiver:", result.stderr)
+            self.assertIn("100.0%", result.stderr)
+            self.assertIn("/s, ETA", result.stderr)
+            self.assertIn("HF verify [1/1] receiver: checking SHA-256",
+                          result.stderr)
+            self.assertIn("HF cached [1/1] receiver: verified and ready",
+                          result.stderr)
+
     def test_runtime_role_selection_is_exact_and_mmproj_stays_metadata_only(self):
         cases = (
             ("text", {"H-receiver.gguf"}),
@@ -341,6 +353,7 @@ class CacheTests(unittest.TestCase):
 
             second = self.run_probe(cache)
             self.assert_ok(second)
+            self.assertIn("resuming at 9 B", second.stderr)
             self.assertEqual(destination.read_bytes(), payload_for(repo_path))
             self.assertFalse(partial.exists())
             self.assertTrue(any(value == "bytes=9-" for _, value, _

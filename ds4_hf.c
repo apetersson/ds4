@@ -15,6 +15,7 @@
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 enum {
@@ -3198,6 +3199,103 @@ typedef struct {
     uint64_t remaining;
 } hf_artifact_writer;
 
+typedef struct {
+    const ds4_hf_acquisition_artifact *artifact;
+    uint64_t offset;
+    size_t ordinal;
+    size_t count;
+    double started_at;
+    double last_output_at;
+    bool terminal;
+    bool active_line;
+} hf_download_progress;
+
+static double monotonic_seconds(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0.0;
+    return (double)now.tv_sec + (double)now.tv_nsec / 1000000000.0;
+}
+
+static void format_binary_bytes(double bytes, char output[32]) {
+    static const char *units[] = {"B", "KiB", "MiB", "GiB", "TiB"};
+    size_t unit = 0;
+    while (bytes >= 1024.0 && unit + 1 < sizeof(units) / sizeof(units[0])) {
+        bytes /= 1024.0;
+        unit++;
+    }
+    if (unit == 0) snprintf(output, 32, "%.0f %s", bytes, units[unit]);
+    else snprintf(output, 32, "%.1f %s", bytes, units[unit]);
+}
+
+static void format_eta(double seconds, char output[32]) {
+    if (!isfinite(seconds) || seconds < 0.0) {
+        snprintf(output, 32, "--");
+        return;
+    }
+    uint64_t rounded = (uint64_t)(seconds + 0.5);
+    uint64_t hours = rounded / 3600;
+    uint64_t minutes = (rounded % 3600) / 60;
+    uint64_t secs = rounded % 60;
+    if (hours > 999) snprintf(output, 32, ">999h");
+    else if (hours) snprintf(output, 32, "%" PRIu64 "h%02" PRIu64 "m", hours, minutes);
+    else snprintf(output, 32, "%" PRIu64 "m%02" PRIu64 "s", minutes, secs);
+}
+
+static void hf_progress_render(hf_download_progress *progress,
+                               uint64_t received, bool force) {
+    double now = monotonic_seconds();
+    double interval = progress->terminal ? 0.5 : 10.0;
+    if (!force && now > 0.0 && progress->last_output_at > 0.0 &&
+        now - progress->last_output_at < interval) return;
+    uint64_t total = progress->artifact->bytes;
+    uint64_t complete = progress->offset > total - received ? total :
+                        progress->offset + received;
+    double elapsed = now > progress->started_at ? now - progress->started_at : 0.0;
+    double speed = elapsed > 0.0 ? (double)received / elapsed : 0.0;
+    double remaining = (double)(total - complete);
+    char complete_text[32], total_text[32], speed_text[32], eta_text[32];
+    format_binary_bytes((double)complete, complete_text);
+    format_binary_bytes((double)total, total_text);
+    format_binary_bytes(speed, speed_text);
+    format_eta(speed > 0.0 ? remaining / speed : -1.0, eta_text);
+    double percent = total ? 100.0 * (double)complete / (double)total : 100.0;
+    fprintf(stderr,
+            "%sHF download [%zu/%zu] %s: %s / %s (%.1f%%, %s/s, ETA %s)%s",
+            progress->terminal ? "\r" : "",
+            progress->ordinal, progress->count,
+            ds4_hf_artifact_role_name(progress->artifact->role),
+            complete_text, total_text, percent, speed_text, eta_text,
+            progress->terminal ? "\033[K" : "\n");
+    fflush(stderr);
+    progress->last_output_at = now;
+    progress->active_line = progress->terminal;
+}
+
+static int artifact_progress_cb(void *userdata, curl_off_t download_total,
+                                curl_off_t downloaded,
+                                curl_off_t upload_total,
+                                curl_off_t uploaded) {
+    (void)download_total;
+    (void)upload_total;
+    (void)uploaded;
+    hf_download_progress *progress = userdata;
+    uint64_t received = downloaded > 0 ? (uint64_t)downloaded : 0;
+    if (received > progress->artifact->bytes - progress->offset)
+        received = progress->artifact->bytes - progress->offset;
+    hf_progress_render(progress, received, false);
+    return 0;
+}
+
+static void hf_progress_finish(hf_download_progress *progress,
+                               uint64_t received, bool success) {
+    if (success) hf_progress_render(progress, received, true);
+    if (progress->active_line) {
+        fputc('\n', stderr);
+        fflush(stderr);
+        progress->active_line = false;
+    }
+}
+
 static size_t artifact_write_cb(char *data, size_t size, size_t count,
                                 void *userdata) {
     hf_artifact_writer *writer = userdata;
@@ -3213,7 +3311,8 @@ static CURLcode artifact_download_once(
     const ds4_hf_acquisition_plan *plan,
     const ds4_hf_acquisition_artifact *artifact, int parent_fd,
     const char *part_leaf,
-    const char *token, uint64_t offset, long timeout_ms, long *http_status) {
+    const char *token, uint64_t offset, long timeout_ms, long *http_status,
+    size_t ordinal, size_t count) {
     int flags = O_WRONLY | O_CREAT | (offset ? O_APPEND : O_TRUNC);
     int fd = regular_entry_open(parent_fd, part_leaf, flags, 0600);
     if (fd < 0) return CURLE_WRITE_ERROR;
@@ -3262,6 +3361,23 @@ static CURLcode artifact_download_once(
         }
     }
     hf_artifact_writer writer = {file, artifact->bytes - offset};
+    hf_download_progress progress = {
+        .artifact = artifact,
+        .offset = offset,
+        .ordinal = ordinal,
+        .count = count,
+        .started_at = monotonic_seconds(),
+        .terminal = isatty(STDERR_FILENO),
+    };
+    progress.last_output_at = progress.started_at;
+    char total_text[32], offset_text[32];
+    format_binary_bytes((double)artifact->bytes, total_text);
+    format_binary_bytes((double)offset, offset_text);
+    fprintf(stderr, "HF download [%zu/%zu] %s: %s (%s%s%s)\n",
+            ordinal, count, ds4_hf_artifact_role_name(artifact->role),
+            artifact->repo_path, total_text,
+            offset ? ", resuming at " : "", offset ? offset_text : "");
+    fflush(stderr);
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, artifact_write_cb);
@@ -3278,9 +3394,15 @@ static CURLcode artifact_download_once(
     curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS,
                      (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
     curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, artifact_progress_cb);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress);
     if (offset) curl_easy_setopt(curl, CURLOPT_RESUME_FROM_LARGE,
                                  (curl_off_t)offset);
     CURLcode status = curl_easy_perform(curl);
+    uint64_t received = artifact->bytes - offset - writer.remaining;
+    hf_progress_finish(&progress, received,
+                       status == CURLE_OK && writer.remaining == 0);
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, http_status);
     if (fflush(file) || fsync(fd)) status = CURLE_WRITE_ERROR;
     if (fclose(file) && status == CURLE_OK) status = CURLE_WRITE_ERROR;
@@ -3360,7 +3482,8 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
                         ds4_hf_acquisition_plan *plan,
                         ds4_hf_acquisition_artifact *artifact,
                         const char *token, long timeout_ms,
-                        char *err, size_t errlen) {
+                        char *err, size_t errlen,
+                        size_t ordinal, size_t count) {
     char leaf[DS4_HF_PATH_MAX], lock_leaf[DS4_HF_PATH_MAX];
     char part_leaf[DS4_HF_PATH_MAX], metadata_leaf[DS4_HF_PATH_MAX];
     char metadata_tmp_leaf[DS4_HF_PATH_MAX];
@@ -3476,13 +3599,15 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
     if (offset < artifact->bytes) {
         curl_status = artifact_download_once(plan, artifact, parent_fd,
                                              part_leaf, token, offset,
-                                             timeout_ms, &http_status);
+                                             timeout_ms, &http_status,
+                                             ordinal, count);
         if (offset && (http_status == 200 ||
                        curl_status == CURLE_RANGE_ERROR)) {
             http_status = 0;
             curl_status = artifact_download_once(plan, artifact, parent_fd,
                                                  part_leaf, token, 0,
-                                                 timeout_ms, &http_status);
+                                                 timeout_ms, &http_status,
+                                                 ordinal, count);
         }
     }
     struct stat downloaded_stat;
@@ -3499,6 +3624,10 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
             curl_easy_strerror(curl_status), http_status, downloaded);
         goto done;
     }
+
+    fprintf(stderr, "HF verify [%zu/%zu] %s: checking SHA-256\n",
+            ordinal, count, ds4_hf_artifact_role_name(artifact->role));
+    fflush(stderr);
 
     int part_fd = regular_entry_open(parent_fd, part_leaf, O_RDONLY, 0);
     char actual_sha256[DS4_HF_SHA256_HEX_SIZE] = {0};
@@ -3612,6 +3741,9 @@ static bool acquire_one(const ds4_hf_cli_config *cfg,
     }
     close(cached_fd);
     artifact->cache_hit = false;
+    fprintf(stderr, "HF cached [%zu/%zu] %s: verified and ready\n",
+            ordinal, count, ds4_hf_artifact_role_name(artifact->role));
+    fflush(stderr);
     ok = true;
 
 done:
@@ -3661,10 +3793,11 @@ bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
                     "HF acquisition rejected an invalid or manifest-mutated sealed plan");
     }
     ds4_hf_acquisition_artifact *first = NULL;
+    size_t requested_count = 0;
     for (size_t i = 0; i < plan->artifact_count; i++) {
         if (plan->artifacts[i].requested) {
-            first = &plan->artifacts[i];
-            break;
+            if (!first) first = &plan->artifacts[i];
+            requested_count++;
         }
     }
     if (!first) return true;
@@ -3684,11 +3817,13 @@ bool ds4_hf_acquisition_execute(const ds4_hf_cli_config *cfg,
     }
 
     bool ok = true;
+    size_t ordinal = 0;
     for (size_t i = 0; i < plan->artifact_count; i++) {
         if (!plan->artifacts[i].requested) continue;
+        ordinal++;
         if (!acquire_one(cfg, plan, &plan->artifacts[i],
                          have_token ? token : NULL, timeout_ms,
-                         err, errlen)) {
+                         err, errlen, ordinal, requested_count)) {
             ok = false;
             break;
         }
