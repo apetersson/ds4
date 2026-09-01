@@ -568,21 +568,6 @@ directly comparable with the table above.
 ![M5 Max t/s](speed-bench/m5_max_ts.svg)
 ![PRO model M3 Ultra t/s](speed-bench/pro_model_m3_ultra_ts.svg)
 
-### M1 Ultra Vision-Exp runtime expectations
-
-For the 101.42 GiB Vision-Exp `Headroom128-IQ2_XXS` GGUF resident in unified
-memory, without SSD streaming, a 128 GB M1 Ultra should deliver approximately:
-
-- 150--160 t/s sustained PP for prompts over 1K tokens with a 2048-token chunk;
-  expect roughly 110--120 t/s for the cold first chunk.
-- 19 t/s TG. A 79-token test at `--ctx 100000` averaged 19.04 t/s and streamed
-  the response incrementally.
-- 102.35 GiB planned at `--ctx 100000 --prefill-chunk 512`.
-
-These figures assume little competing GPU or memory load. The 100K setup is
-close to the M1 Ultra working-set limit; use a smaller context or prefill chunk
-if Metal reports `kIOGPUCommandBufferCallbackErrorOutOfMemory`.
-
 ## Running models larger than RAM
 
 The normal Metal path tries to make the model resident in GPU-addressable
