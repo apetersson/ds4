@@ -24814,6 +24814,134 @@ int ds4_gpu_attention_output_q8_batch_f16_tensor(
     return 0;
 }
 
+int ds4_gpu_attention_output_f16_batch_tensor(
+        ds4_gpu_tensor       *out,
+        ds4_gpu_tensor       *low,
+        const void             *model_map,
+        uint64_t                model_size,
+        uint64_t                out_a_offset,
+        uint64_t                out_b_offset,
+        uint64_t                group_dim,
+        uint64_t                rank,
+        uint32_t                n_groups,
+        uint64_t                out_dim,
+        const ds4_gpu_tensor *heads,
+        uint32_t                n_tokens) {
+    if (!g_initialized && !ds4_gpu_init()) return 0;
+    if (!out || !low || !heads || !model_map ||
+        group_dim == 0 || rank == 0 || n_groups == 0 || out_dim == 0 ||
+        n_tokens < 32u || group_dim > UINT32_MAX || rank > UINT32_MAX ||
+        out_dim > UINT32_MAX) {
+        return 0;
+    }
+
+    @autoreleasepool {
+        const uint64_t low_dim = (uint64_t)n_groups * rank;
+        if ((group_dim % 32u) != 0 || (rank % 64u) != 0 ||
+            (low_dim % 32u) != 0 || low_dim > UINT32_MAX) {
+            return 0;
+        }
+        const uint64_t row_a_bytes = group_dim * sizeof(uint16_t);
+        const uint64_t out_a_bytes = (uint64_t)n_groups * rank * row_a_bytes;
+        const uint64_t out_b_bytes = out_dim * low_dim * sizeof(uint16_t);
+        if (out_a_offset > model_size || out_a_bytes > model_size - out_a_offset ||
+            out_b_offset > model_size || out_b_bytes > model_size - out_b_offset) {
+            fprintf(stderr, "ds4: Metal F16 attention output weights are outside the mapped model\n");
+            return 0;
+        }
+
+        const uint64_t heads_bytes =
+            (uint64_t)n_tokens * n_groups * group_dim * sizeof(float);
+        const uint64_t low_bytes = (uint64_t)n_tokens * low_dim * sizeof(float);
+        const uint64_t out_bytes = (uint64_t)n_tokens * out_dim * sizeof(float);
+        if (ds4_gpu_tensor_bytes(heads) < heads_bytes ||
+            ds4_gpu_tensor_bytes(low) < low_bytes ||
+            ds4_gpu_tensor_bytes(out) < out_bytes) {
+            fprintf(stderr, "ds4: Metal F16 attention output batch received undersized buffers\n");
+            return 0;
+        }
+
+        const NSUInteger ids_bytes =
+            (NSUInteger)n_tokens * (NSUInteger)n_groups * sizeof(int32_t);
+        if (!ds4_gpu_ensure_scratch_buffer(&g_attn_out_group_ids_buffer,
+                                           &g_attn_out_group_ids_bytes,
+                                           ids_bytes,
+                                           "ds4_attention_output_group_ids")) {
+            return 0;
+        }
+        int32_t *ids = (int32_t *)[g_attn_out_group_ids_buffer contents];
+        for (uint32_t t = 0; t < n_tokens; t++) {
+            for (uint32_t group = 0; group < n_groups; group++) {
+                ids[(uint64_t)t * n_groups + group] = (int32_t)group;
+            }
+        }
+
+        uint64_t out_a_inner = 0;
+        id<MTLBuffer> out_a_buf =
+            ds4_gpu_wrap_model_range(model_map,
+                                     model_size,
+                                     out_a_offset,
+                                     out_a_bytes,
+                                     &out_a_inner);
+        if (!out_a_buf) return 0;
+
+        id<MTLComputePipelineState> map_pipeline =
+            ds4_gpu_get_pipeline(ds4_gpu_mul_mm_id_map0_name(n_groups));
+        id<MTLComputePipelineState> mm_pipeline =
+            ds4_gpu_get_mul_mm_id_pipeline("kernel_mul_mm_id_f16_f32", false);
+        if (!map_pipeline || !mm_pipeline) return 0;
+
+        ds4_gpu_mul_mm_id_map_args map_args =
+            ds4_gpu_make_mul_mm_id_map_args((uint32_t)group_dim,
+                                            n_groups,
+                                            n_groups,
+                                            n_groups,
+                                            n_tokens);
+        ds4_gpu_mul_mm_id_args mm_args =
+            ds4_gpu_make_mul_mm_id_args((uint32_t)group_dim,
+                                        (uint32_t)rank,
+                                        n_groups,
+                                        row_a_bytes,
+                                        rank * row_a_bytes,
+                                        n_groups,
+                                        n_groups,
+                                        n_tokens);
+
+        const bool had_batch = g_batch_cb != nil;
+        if (!had_batch && ds4_gpu_begin_commands() == 0) return 0;
+        int owned = 0;
+        id<MTLCommandBuffer> cb = ds4_gpu_command_buffer(&owned);
+        bool ok = cb && !owned &&
+            ds4_gpu_encode_mul_mm_id(cb,
+                                     map_pipeline,
+                                     mm_pipeline,
+                                     &map_args,
+                                     &mm_args,
+                                     out_a_buf,
+                                     (NSUInteger)out_a_inner,
+                                     ds4_gpu_tensor_buffer(heads),
+                                     ds4_gpu_tensor_offset(heads),
+                                     ds4_gpu_tensor_buffer(low),
+                                     ds4_gpu_tensor_offset(low),
+                                     g_attn_out_group_ids_buffer,
+                                     0) != 0;
+        if (ok) {
+            ok = ds4_gpu_matmul_f16_tensor(out,
+                                           model_map,
+                                           model_size,
+                                           out_b_offset,
+                                           low_dim,
+                                           out_dim,
+                                           low,
+                                           n_tokens) != 0;
+        }
+        if (!had_batch) {
+            ok = ds4_gpu_end_commands() != 0 && ok;
+        }
+        return ok ? 1 : 0;
+    }
+}
+
 int ds4_gpu_matmul_q8_0_kslice_tensor(
         ds4_gpu_tensor       *out,
         const void             *model_map,

@@ -644,6 +644,178 @@ static void test_metal_f16_prefill_matmul(void) {
     free(weights_raw);
 }
 
+#if defined(__APPLE__)
+static void test_metal_f16_attention_output_batch_case(uint32_t n_tokens) {
+    const uint32_t group_dim = 64;
+    const uint32_t rank = 64;
+    const uint32_t n_groups = 4;
+    const uint32_t low_dim = n_groups * rank;
+    const uint32_t out_dim = 128;
+    const uint64_t page = (uint64_t)getpagesize();
+    const uint64_t out_a_bytes =
+        (uint64_t)n_groups * rank * group_dim * sizeof(uint16_t);
+    const uint64_t out_b_offset = test_round_up_u64(out_a_bytes, page);
+    const uint64_t out_b_bytes =
+        (uint64_t)out_dim * low_dim * sizeof(uint16_t);
+    const uint64_t model_bytes =
+        test_round_up_u64(out_b_offset + out_b_bytes, page);
+    const uint64_t heads_count =
+        (uint64_t)n_tokens * n_groups * group_dim;
+    const uint64_t low_count = (uint64_t)n_tokens * low_dim;
+    const uint64_t out_count = (uint64_t)n_tokens * out_dim;
+
+    void *model_raw = NULL;
+    TEST_ASSERT(posix_memalign(&model_raw, (size_t)page,
+                               (size_t)model_bytes) == 0);
+    if (!model_raw) return;
+    memset(model_raw, 0, (size_t)model_bytes);
+    uint16_t *out_a_weights = model_raw;
+    uint16_t *out_b_weights =
+        (uint16_t *)((uint8_t *)model_raw + out_b_offset);
+
+    for (uint32_t g = 0; g < n_groups; g++) {
+        for (uint32_t r = 0; r < rank; r++) {
+            for (uint32_t i = 0; i < group_dim; i++) {
+                const int v =
+                    (int)((g * 19u + r * 11u + i * 7u + (r ^ i)) % 47u) - 23;
+                out_a_weights[((uint64_t)g * rank + r) * group_dim + i] =
+                    test_float_to_f16((float)v / 128.0f);
+            }
+        }
+    }
+    for (uint32_t o = 0; o < out_dim; o++) {
+        for (uint32_t i = 0; i < low_dim; i++) {
+            const int v =
+                (int)((o * 13u + i * 17u + (o ^ i) * 3u) % 53u) - 26;
+            out_b_weights[(uint64_t)o * low_dim + i] =
+                test_float_to_f16((float)v / 192.0f);
+        }
+    }
+
+    ds4_gpu_tensor *heads =
+        ds4_gpu_tensor_alloc(heads_count * sizeof(float));
+    ds4_gpu_tensor *low = ds4_gpu_tensor_alloc(low_count * sizeof(float));
+    ds4_gpu_tensor *out = ds4_gpu_tensor_alloc(out_count * sizeof(float));
+    float *heads_host = malloc((size_t)heads_count * sizeof(float));
+    float *low_host = malloc((size_t)low_count * sizeof(float));
+    float *out_host = malloc((size_t)out_count * sizeof(float));
+    float *low_ref = malloc((size_t)low_count * sizeof(float));
+    float *out_ref = malloc((size_t)out_count * sizeof(float));
+    TEST_ASSERT(heads != NULL);
+    TEST_ASSERT(low != NULL);
+    TEST_ASSERT(out != NULL);
+    TEST_ASSERT(heads_host != NULL);
+    TEST_ASSERT(low_host != NULL);
+    TEST_ASSERT(out_host != NULL);
+    TEST_ASSERT(low_ref != NULL);
+    TEST_ASSERT(out_ref != NULL);
+    if (!heads || !low || !out || !heads_host || !low_host || !out_host ||
+        !low_ref || !out_ref) {
+        goto cleanup;
+    }
+
+    for (uint64_t i = 0; i < heads_count; i++) {
+        const int v = (int)((i * 29u + (i >> 3u) * 5u) % 67u) - 33;
+        heads_host[i] = (float)v / 96.0f;
+    }
+    for (uint64_t i = 0; i < low_count; i++) low_host[i] = 12345.0f;
+    for (uint64_t i = 0; i < out_count; i++) out_host[i] = 12345.0f;
+
+    TEST_ASSERT(ds4_gpu_tensor_write(heads, 0, heads_host,
+                                      heads_count * sizeof(float)) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_write(low, 0, low_host,
+                                      low_count * sizeof(float)) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_write(out, 0, out_host,
+                                      out_count * sizeof(float)) != 0);
+    TEST_ASSERT(ds4_gpu_set_model_map(model_raw, model_bytes) != 0);
+    ds4_gpu_set_quality(false);
+    TEST_ASSERT(ds4_gpu_attention_output_f16_batch_tensor(out,
+                                                          low,
+                                                          model_raw,
+                                                          model_bytes,
+                                                          0,
+                                                          out_b_offset,
+                                                          group_dim,
+                                                          rank,
+                                                          n_groups,
+                                                          out_dim,
+                                                          heads,
+                                                          n_tokens) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_read(low, 0, low_host,
+                                     low_count * sizeof(float)) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_read(out, 0, out_host,
+                                     out_count * sizeof(float)) != 0);
+
+    for (uint32_t t = 0; t < n_tokens; t++) {
+        for (uint32_t g = 0; g < n_groups; g++) {
+            for (uint32_t r = 0; r < rank; r++) {
+                float sum = 0.0f;
+                for (uint32_t i = 0; i < group_dim; i++) {
+                    const float w = test_f16_to_f32(
+                        out_a_weights[((uint64_t)g * rank + r) * group_dim + i]);
+                    const float x = heads_host[
+                        ((uint64_t)t * n_groups + g) * group_dim + i];
+                    sum += w * x;
+                }
+                low_ref[(uint64_t)t * low_dim + (uint64_t)g * rank + r] = sum;
+            }
+        }
+        for (uint32_t o = 0; o < out_dim; o++) {
+            float sum = 0.0f;
+            for (uint32_t i = 0; i < low_dim; i++) {
+                const float w = test_f16_to_f32(
+                    out_b_weights[(uint64_t)o * low_dim + i]);
+                sum += w * low_ref[(uint64_t)t * low_dim + i];
+            }
+            out_ref[(uint64_t)t * out_dim + o] = sum;
+        }
+    }
+
+    float low_rms = 0.0f;
+    float out_rms = 0.0f;
+    float low_max = 0.0f;
+    float out_max = 0.0f;
+    for (uint64_t i = 0; i < low_count; i++) {
+        TEST_ASSERT(isfinite(low_host[i]));
+        const float err = fabsf(low_host[i] - low_ref[i]);
+        if (err > low_max) low_max = err;
+        low_rms += err * err;
+    }
+    for (uint64_t i = 0; i < out_count; i++) {
+        TEST_ASSERT(isfinite(out_host[i]));
+        const float err = fabsf(out_host[i] - out_ref[i]);
+        if (err > out_max) out_max = err;
+        out_rms += err * err;
+    }
+    low_rms = sqrtf(low_rms / (float)low_count);
+    out_rms = sqrtf(out_rms / (float)out_count);
+    fprintf(stderr,
+            "ds4-test: F16 attention output batch n=%u "
+            "low max=%.7g rms=%.7g out max=%.7g rms=%.7g\n",
+            n_tokens, low_max, low_rms, out_max, out_rms);
+    TEST_ASSERT(low_max < 0.025f);
+    TEST_ASSERT(low_rms < 0.006f);
+    TEST_ASSERT(out_max < 0.06f);
+    TEST_ASSERT(out_rms < 0.015f);
+
+cleanup:
+    free(heads_host);
+    free(low_host);
+    free(out_host);
+    free(low_ref);
+    free(out_ref);
+    ds4_gpu_tensor_free(heads);
+    ds4_gpu_tensor_free(low);
+    ds4_gpu_tensor_free(out);
+    free(model_raw);
+}
+
+static void test_metal_f16_attention_output_batch(void) {
+    test_metal_f16_attention_output_batch_case(32);
+    test_metal_f16_attention_output_batch_case(37);
+}
+#endif
+
 static void test_metal_q8_0_prefill_matmul(void) {
     const uint32_t in_dim = 128;
     const uint32_t out_dim = 64;
@@ -4730,6 +4902,7 @@ static void test_metal_kernel_group(void) {
     test_dspark_cache_window_crop();
     test_metal_q8_0_decode_pair_exact();
 #if defined(__APPLE__)
+    test_metal_f16_attention_output_batch();
     test_metal_f16_compressor_pair_state_store_exact();
     test_metal_compressor_ape_add_exact();
     test_metal_compressor_ratio4_pack_exact();
