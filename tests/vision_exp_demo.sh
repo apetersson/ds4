@@ -27,7 +27,7 @@ vision_config=$vision_dir/config.json
 port=${PORT:-18080}
 expert_cache=${EXPERT_CACHE:-48GB}
 text_max_tokens=${TEXT_MAX_TOKENS:-4}
-image_max_tokens=${IMAGE_MAX_TOKENS:-16}
+image_max_tokens=${IMAGE_MAX_TOKENS:-64}
 
 [[ $text_max_tokens =~ ^[1-9][0-9]*$ ]] || { printf 'invalid TEXT_MAX_TOKENS: %s\n' "$text_max_tokens" >&2; exit 2; }
 [[ $image_max_tokens =~ ^[1-9][0-9]*$ ]] || { printf 'invalid IMAGE_MAX_TOKENS: %s\n' "$image_max_tokens" >&2; exit 2; }
