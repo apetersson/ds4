@@ -645,6 +645,110 @@ static void test_metal_f16_prefill_matmul(void) {
 }
 
 #if defined(__APPLE__)
+static void test_metal_mps_f16_narrow_prefill(void) {
+    const uint32_t in_dim = 4096;
+    const uint32_t out_dim = 256;
+    const uint32_t n_tok = 32;
+    const uint64_t weight_bytes =
+        (uint64_t)out_dim * in_dim * sizeof(uint16_t);
+    const uint64_t weight_alloc =
+        test_round_up_u64(weight_bytes, (uint64_t)getpagesize());
+    const uint64_t x_bytes =
+        (uint64_t)n_tok * in_dim * sizeof(float);
+    const uint64_t out_bytes =
+        (uint64_t)n_tok * out_dim * sizeof(float);
+    const char *enable_env =
+        "DS4_METAL_ENABLE_MPS_F16_NARROW_PREFILL";
+    const char *disable_env =
+        "DS4_METAL_DISABLE_MPS_F16_NARROW_PREFILL";
+
+    void *weights_raw = NULL;
+    TEST_ASSERT(posix_memalign(&weights_raw, (size_t)getpagesize(),
+                               (size_t)weight_alloc) == 0);
+    if (!weights_raw) return;
+    memset(weights_raw, 0, (size_t)weight_alloc);
+    uint16_t *weights = weights_raw;
+    for (uint32_t o = 0; o < out_dim; o++) {
+        for (uint32_t i = 0; i < in_dim; i++) {
+            const int v =
+                (int)((o * 11u + i * 13u + (o ^ i) * 5u) % 61u) - 30;
+            weights[(uint64_t)o * in_dim + i] =
+                test_float_to_f16((float)v / 512.0f);
+        }
+    }
+
+    ds4_gpu_tensor *x = ds4_gpu_tensor_alloc(x_bytes);
+    ds4_gpu_tensor *out = ds4_gpu_tensor_alloc(out_bytes);
+    float *x_host = malloc((size_t)x_bytes);
+    float *legacy_host = malloc((size_t)out_bytes);
+    float *mps_host = malloc((size_t)out_bytes);
+    TEST_ASSERT(x != NULL);
+    TEST_ASSERT(out != NULL);
+    TEST_ASSERT(x_host != NULL);
+    TEST_ASSERT(legacy_host != NULL);
+    TEST_ASSERT(mps_host != NULL);
+    if (!x || !out || !x_host || !legacy_host || !mps_host) {
+        free(x_host);
+        free(legacy_host);
+        free(mps_host);
+        ds4_gpu_tensor_free(x);
+        ds4_gpu_tensor_free(out);
+        free(weights_raw);
+        return;
+    }
+
+    for (uint32_t t = 0; t < n_tok; t++) {
+        for (uint32_t i = 0; i < in_dim; i++) {
+            const int v =
+                (int)((t * 7u + i * 17u + (t ^ i) * 3u) % 73u) - 36;
+            x_host[(uint64_t)t * in_dim + i] = (float)v / 128.0f;
+        }
+    }
+
+    char *saved_enable = test_save_env(enable_env);
+    char *saved_disable = test_save_env(disable_env);
+    TEST_ASSERT(ds4_gpu_tensor_write(x, 0, x_host, x_bytes) != 0);
+    TEST_ASSERT(ds4_gpu_set_model_map(weights_raw, weight_alloc) != 0);
+    ds4_gpu_set_quality(false);
+
+    unsetenv(enable_env);
+    setenv(disable_env, "1", 1);
+    TEST_ASSERT(ds4_gpu_matmul_f16_tensor(out, weights_raw, weight_alloc, 0,
+                                          in_dim, out_dim, x, n_tok) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_read(out, 0, legacy_host, out_bytes) != 0);
+
+    unsetenv(disable_env);
+    setenv(enable_env, "1", 1);
+    TEST_ASSERT(ds4_gpu_matmul_f16_tensor(out, weights_raw, weight_alloc, 0,
+                                          in_dim, out_dim, x, n_tok) != 0);
+    TEST_ASSERT(ds4_gpu_tensor_read(out, 0, mps_host, out_bytes) != 0);
+    test_restore_env(enable_env, saved_enable);
+    test_restore_env(disable_env, saved_disable);
+
+    float max_abs = 0.0f;
+    float rms = 0.0f;
+    for (uint64_t i = 0; i < (uint64_t)n_tok * out_dim; i++) {
+        TEST_ASSERT(isfinite(mps_host[i]));
+        const float err = fabsf(mps_host[i] - legacy_host[i]);
+        if (err > max_abs) max_abs = err;
+        rms += err * err;
+    }
+    rms = sqrtf(rms / (float)((uint64_t)n_tok * out_dim));
+    fprintf(stderr,
+            "ds4-test: MPS F16 narrow prefill legacy delta "
+            "max=%.6f rms=%.6f\n",
+            max_abs, rms);
+    TEST_ASSERT(max_abs < 0.04f);
+    TEST_ASSERT(rms < 0.005f);
+
+    free(x_host);
+    free(legacy_host);
+    free(mps_host);
+    ds4_gpu_tensor_free(x);
+    ds4_gpu_tensor_free(out);
+    free(weights_raw);
+}
+
 static void test_metal_f16_attention_output_batch_case(uint32_t n_tokens) {
     const uint32_t group_dim = 64;
     const uint32_t rank = 64;
@@ -4902,6 +5006,7 @@ static void test_metal_kernel_group(void) {
     test_dspark_cache_window_crop();
     test_metal_q8_0_decode_pair_exact();
 #if defined(__APPLE__)
+    test_metal_mps_f16_narrow_prefill();
     test_metal_f16_attention_output_batch();
     test_metal_f16_compressor_pair_state_store_exact();
     test_metal_compressor_ape_add_exact();
