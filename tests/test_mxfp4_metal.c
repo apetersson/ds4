@@ -1096,7 +1096,7 @@ static int test_mixed_iq2_q2(void) {
          ok && case_i < sizeof(token_cases) / sizeof(token_cases[0]);
          case_i++) {
         const uint32_t n_tokens = token_cases[case_i];
-        const bool expect_mid_f16 = false;
+        const bool expect_mid_f16 = n_tokens >= 32u;
         const uint64_t pair_rows = (uint64_t)n_tokens * N_EXPERT;
         const uint64_t pair_values = pair_rows * DIM;
         const uint64_t out_values = (uint64_t)n_tokens * DIM;
@@ -1116,15 +1116,26 @@ static int test_mixed_iq2_q2(void) {
 
         for (uint32_t token = 0; ok && token < n_tokens; token++) {
             const float *token_x = x + (uint64_t)token * DIM;
+            float token_x_mm[DIM];
+            const float *reference_x = token_x;
+            if (expect_mid_f16) {
+                /* MM_ID stages the dense RHS through half before SIMD-group
+                 * MMA. Match that contract instead of comparing against an
+                 * unattainable all-F32 dot product. */
+                for (uint32_t i = 0; i < DIM; i++) {
+                    token_x_mm[i] = (float)(_Float16)token_x[i];
+                }
+                reference_x = token_x_mm;
+            }
             for (uint32_t slot = 0; slot < N_EXPERT; slot++) {
                 const uint64_t pair = (uint64_t)token * N_EXPERT + slot;
                 const uint32_t expert = (uint32_t)selected[pair];
                 for (uint32_t row = 0; row < DIM; row++) {
                     const uint64_t value = pair * DIM + row;
                     gate_ref[value] = dot_iq2(
-                        gate_matrix + (uint64_t)expert * DIM + row, token_x);
+                        gate_matrix + (uint64_t)expert * DIM + row, reference_x);
                     up_ref[value] = dot_iq2(
-                        up_matrix + (uint64_t)expert * DIM + row, token_x);
+                        up_matrix + (uint64_t)expert * DIM + row, reference_x);
                     const float gate = fminf(gate_ref[value], 7.0f);
                     const float up = fmaxf(-7.0f, fminf(up_ref[value], 7.0f));
                     mid_ref[value] = gate / (1.0f + expf(-gate)) * up * weights[pair];
@@ -1204,14 +1215,22 @@ static int test_mixed_iq2_q2(void) {
             out_tensor, 0, out_gpu, out_values * sizeof(float));
         if (ok) {
             char name[24];
-            snprintf(name, sizeof(name), "mixed%u-gate", n_tokens);
-            ok = compare_values(name, gate_gpu, gate_ref, pair_values, 2.0e-4f);
-            snprintf(name, sizeof(name), "mixed%u-up", n_tokens);
-            ok = ok && compare_values(name, up_gpu, up_ref, pair_values, 2.0e-4f);
+            /* The fused MM_ID pair kernel writes weighted SwiGLU directly to
+             * mid; gate/up are intentionally not materialized on that path. */
+            if (!expect_mid_f16) {
+                snprintf(name, sizeof(name), "mixed%u-gate", n_tokens);
+                ok = compare_values(name, gate_gpu, gate_ref, pair_values, 2.0e-4f);
+                snprintf(name, sizeof(name), "mixed%u-up", n_tokens);
+                ok = ok && compare_values(name, up_gpu, up_ref, pair_values, 2.0e-4f);
+            }
             snprintf(name, sizeof(name), "mixed%u-mid", n_tokens);
-            ok = ok && compare_values(name, mid_gpu, mid_ref, pair_values, 1.0e-3f);
+            /* One FP16 output step plus the resulting bounded Q2_K reduction
+             * drift is expected from the fused large-batch path. */
+            ok = ok && compare_values(name, mid_gpu, mid_ref, pair_values,
+                                      expect_mid_f16 ? 1.0e-2f : 1.0e-3f);
             snprintf(name, sizeof(name), "mixed%u-out", n_tokens);
-            ok = ok && compare_values(name, out_gpu, out_ref, out_values, 4.0e-2f);
+            ok = ok && compare_values(name, out_gpu, out_ref, out_values,
+                                      expect_mid_f16 ? 1.25e-1f : 4.0e-2f);
         }
 
         ds4_gpu_tensor_free(out_tensor);
