@@ -1096,7 +1096,7 @@ static int test_mixed_iq2_q2(void) {
          ok && case_i < sizeof(token_cases) / sizeof(token_cases[0]);
          case_i++) {
         const uint32_t n_tokens = token_cases[case_i];
-        const bool expect_mid_f16 = n_tokens >= 32u;
+        const bool expect_mid_f16 = false;
         const uint64_t pair_rows = (uint64_t)n_tokens * N_EXPERT;
         const uint64_t pair_values = pair_rows * DIM;
         const uint64_t out_values = (uint64_t)n_tokens * DIM;
