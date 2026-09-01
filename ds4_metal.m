@@ -41269,6 +41269,12 @@ int ds4_gpu_routed_moe_batch_tensor(
             !g_imatrix_capture_mode &&
             !use_q4_batch_expert_table &&
             !use_iq2_batch_selected_addr &&
+            /* The IQ2_XXS MM_ID kernel corrupts gate/up rows at the 32-token
+             * dispatch boundary on pre-M5 Metal.  The generic ID matvec path
+             * is byte-layout compatible and remains accurate for arbitrary
+             * batch sizes, so keep IQ2 on that path until the tiled kernel is
+             * independently proven against the scalar decoder. */
+            gate_type != DS4_METAL_TENSOR_IQ2_XXS &&
             n_tokens >= 32u &&
             ds4_gpu_mul_mm_id_map0_name(n_expert) != NULL;
         /*
