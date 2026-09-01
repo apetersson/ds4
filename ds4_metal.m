@@ -1699,6 +1699,37 @@ static void ds4_gpu_model_views_clear(void) {
     g_model_view_count = 0;
 }
 
+/* Replace one model's view set without discarding auxiliary GGUF mappings.
+ * DeepSeek V4 vision keeps its encoder in a separate mmap. SSD streaming
+ * remaps receiver spans between prefill stages, so clearing the global view
+ * table here would also unmap the vision encoder before visual routing. */
+static void ds4_gpu_model_views_remove_map(
+        const void *model_map,
+        uint64_t model_size) {
+    uint32_t out = 0;
+    for (uint32_t i = 0; i < g_model_view_count; i++) {
+        if (g_model_views[i].model_map == model_map &&
+            g_model_views[i].model_size == model_size) {
+            g_model_views[i].buffer = nil;
+            g_model_views[i].model_map = NULL;
+            g_model_views[i].model_size = 0;
+            g_model_views[i].model_offset = 0;
+            g_model_views[i].bytes = 0;
+            continue;
+        }
+        if (out != i) g_model_views[out] = g_model_views[i];
+        out++;
+    }
+    for (uint32_t i = out; i < g_model_view_count; i++) {
+        g_model_views[i].buffer = nil;
+        g_model_views[i].model_map = NULL;
+        g_model_views[i].model_size = 0;
+        g_model_views[i].model_offset = 0;
+        g_model_views[i].bytes = 0;
+    }
+    g_model_view_count = out;
+}
+
 static void ds4_gpu_model_residency_clear(void) {
 #if TARGET_OS_OSX
     if (@available(macOS 15.0, *)) {
@@ -11377,7 +11408,7 @@ int ds4_gpu_set_model_map_spans(
         max_tensor_bytes = ds4_gpu_effective_model_max_tensor_bytes(model_size, max_tensor_bytes);
 
         ds4_gpu_model_residency_clear();
-        ds4_gpu_model_views_clear();
+        ds4_gpu_model_views_remove_map(model_map, model_size);
 
         uint64_t mapped_total = 0;
         uint64_t first_offset = UINT64_MAX;
@@ -11385,7 +11416,7 @@ int ds4_gpu_set_model_map_spans(
             if (offsets[i] > model_size || sizes[i] == 0 || sizes[i] > model_size - offsets[i]) {
                 fprintf(stderr, "ds4: Metal model span %u is outside the GGUF mapping\n", i);
                 ds4_gpu_model_residency_clear();
-                ds4_gpu_model_views_clear();
+                ds4_gpu_model_views_remove_map(model_map, model_size);
                 return 0;
             }
             if (offsets[i] < first_offset) first_offset = offsets[i];
@@ -11399,13 +11430,13 @@ int ds4_gpu_set_model_map_spans(
                                               true,
                                               &mapped_total)) {
                 ds4_gpu_model_residency_clear();
-                ds4_gpu_model_views_clear();
+                ds4_gpu_model_views_remove_map(model_map, model_size);
                 return 0;
             }
         }
         if (!ds4_gpu_finish_model_views(t0, mapped_total, first_offset)) {
             ds4_gpu_model_residency_clear();
-            ds4_gpu_model_views_clear();
+            ds4_gpu_model_views_remove_map(model_map, model_size);
             return 0;
         }
         g_model_map_ptr = model_map;
