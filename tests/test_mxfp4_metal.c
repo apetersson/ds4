@@ -1038,7 +1038,8 @@ static float dot_q2(const block_q2_k *row, const float *x) {
 }
 
 static int test_mixed_iq2_q2(void) {
-    enum { MAX_TOKENS = 5 };
+    enum { MAX_TOKENS = 48 };
+    static const uint32_t token_cases[] = { 1u, 5u, 6u, 7u, 8u, 31u, 32u, 48u };
     const uint64_t page = (uint64_t)getpagesize();
     const uint64_t gate_row_bytes = sizeof(block_iq2_xxs);
     const uint64_t gate_expert_bytes = DIM * gate_row_bytes;
@@ -1091,7 +1092,10 @@ static int test_mixed_iq2_q2(void) {
     const uint64_t down_blocks_per_row =
         down_row_bytes / sizeof(block_q2_k);
 
-    for (uint32_t n_tokens = 1; ok && n_tokens <= MAX_TOKENS; n_tokens++) {
+    for (size_t case_i = 0;
+         ok && case_i < sizeof(token_cases) / sizeof(token_cases[0]);
+         case_i++) {
+        const uint32_t n_tokens = token_cases[case_i];
         const uint64_t pair_rows = (uint64_t)n_tokens * N_EXPERT;
         const uint64_t pair_values = pair_rows * DIM;
         const uint64_t out_values = (uint64_t)n_tokens * DIM;
@@ -1209,7 +1213,9 @@ static int test_mixed_iq2_q2(void) {
 
     ds4_gpu_cleanup();
     free(model);
-    fprintf(stderr, "mixed IQ2/Q2 Metal tokens 1-5: %s\n", ok ? "PASS" : "FAIL");
+    fprintf(stderr,
+            "mixed IQ2/Q2 Metal tokens 1,5,6,7,8,31,32,48: %s\n",
+            ok ? "PASS" : "FAIL");
     return ok;
 }
 
