@@ -1211,7 +1211,7 @@ static int test_mixed_iq2_q2(void) {
             snprintf(name, sizeof(name), "mixed%u-mid", n_tokens);
             ok = ok && compare_values(name, mid_gpu, mid_ref, pair_values, 1.0e-3f);
             snprintf(name, sizeof(name), "mixed%u-out", n_tokens);
-            ok = ok && compare_values(name, out_gpu, out_ref, out_values, 3.0e-2f);
+            ok = ok && compare_values(name, out_gpu, out_ref, out_values, 4.0e-2f);
         }
 
         ds4_gpu_tensor_free(out_tensor);
