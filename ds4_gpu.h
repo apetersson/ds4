@@ -2267,6 +2267,22 @@ int ds4_gpu_attention_output_q4_K_batch_tensor(
         const ds4_gpu_tensor *heads,
         uint32_t                n_tokens);
 
+#if defined(__APPLE__)
+int ds4_gpu_attention_output_f16_batch_tensor(
+        ds4_gpu_tensor       *out,
+        ds4_gpu_tensor       *low,
+        const void             *model_map,
+        uint64_t                model_size,
+        uint64_t                out_a_offset,
+        uint64_t                out_b_offset,
+        uint64_t                group_dim,
+        uint64_t                rank,
+        uint32_t                n_groups,
+        uint64_t                out_dim,
+        const ds4_gpu_tensor *heads,
+        uint32_t                n_tokens);
+#endif
+
 int ds4_gpu_attention_output_q8_batch_f16_tensor(
         ds4_gpu_tensor       *out_h,
         ds4_gpu_tensor       *low,

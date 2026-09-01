@@ -26845,6 +26845,26 @@ static bool metal_graph_attention_output_dense_quant_batch(
             return true;
         }
     }
+#if defined(__APPLE__)
+    if (out_a->type == DS4_TENSOR_F16 &&
+        out_b->type == DS4_TENSOR_F16 &&
+        n_tokens >= 32u) {
+        if (ds4_gpu_attention_output_f16_batch_tensor(out,
+                                                      low,
+                                                      model->map,
+                                                      model->size,
+                                                      out_a->abs_offset,
+                                                      out_b->abs_offset,
+                                                      group_dim,
+                                                      rank,
+                                                      n_groups,
+                                                      out_dim,
+                                                      heads,
+                                                      n_tokens) != 0) {
+            return true;
+        }
+    }
+#endif
 
     const uint64_t heads_row_elems = (uint64_t)n_groups * group_dim;
     const uint64_t low_row_elems = (uint64_t)n_groups * rank;
