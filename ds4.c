@@ -30845,7 +30845,30 @@ static bool metal_graph_encode_layer_ffn_batch(
     if (ok) {
 #ifdef __APPLE__
         if (layer->ffn_exp_probs_b_vl) {
-            ok = ds4_gpu_router_select_batch_vl_tensor(
+            /* The Vision selector consumes the transformed probabilities in
+             * batch_router_probs. Populate them through the ordinary router
+             * path first, then overwrite selection/weights for visual rows
+             * with bias_vl. */
+            ok = ds4_gpu_router_select_batch_tensor(
+                metal_graph_batch_router_selected(g),
+                metal_graph_batch_router_weights(g),
+                metal_graph_batch_router_probs(g),
+                model->map,
+                model->size,
+                layer->ffn_exp_probs_b ? layer->ffn_exp_probs_b->abs_offset : 0,
+                layer->ffn_gate_tid2eid ? layer->ffn_gate_tid2eid->abs_offset : 0,
+                layer->ffn_gate_tid2eid ? (uint32_t)layer->ffn_gate_tid2eid->dim[1] : 0,
+                0,
+                0,
+                layer->ffn_exp_probs_b != NULL,
+                layer->ffn_gate_tid2eid != NULL,
+                metal_graph_batch_router_logits(g),
+                router_tokens,
+                DS4_N_EXPERT,
+                DS4_N_EXPERT_USED,
+                DS4_EXPERT_WEIGHT_SCALE,
+                n_tokens) != 0;
+            if (ok) ok = ds4_gpu_router_select_batch_vl_tensor(
                 metal_graph_batch_router_selected(g),
                 metal_graph_batch_router_weights(g),
                 metal_graph_batch_router_probs(g),
