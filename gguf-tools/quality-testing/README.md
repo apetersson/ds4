@@ -202,3 +202,26 @@ Output fields:
   local top-N for the same position.
 - `api_top_mae`: local-vs-API logprob MAE over mapped API top alternatives.
 - `api_pair_rate`: pairwise ordering agreement among mapped API alternatives.
+
+## 6. Full-Logit KL Diagnostics
+
+When both local variants can expose the same full-vocabulary logit checkpoint,
+compare their next-token distributions directly:
+
+```sh
+python3 gguf-tools/quality-testing/compare_logits_kl.py \
+  /path/to/native-logits.json /path/to/quant-logits.json \
+  --label controlled-prompt
+```
+
+The comparator accepts DS4 `--dump-logits` JSON or little-endian raw float32
+vectors (`--format f32`). It reports directional KL in nats and bits,
+Jensen-Shannon divergence, total variation, entropy, argmax probabilities,
+top-K overlap, and centered logit RMSE. Only compare logits with identical
+tokenizers, rendered prompts, prefixes, vocabulary ordering, and runtime
+semantics. KL is prompt- and token-position-specific; do not present one
+checkpoint as a model-wide score.
+
+See [`reports/vision-exp-headroom128-kl.md`](../../reports/vision-exp-headroom128-kl.md)
+for the controlled text and semantic-vision measurements of the no-iMatrix
+Vision-Exp Headroom128 quant.
