@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
+#import <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
 #include <stdint.h>
 #include <inttypes.h>
@@ -357,6 +358,10 @@ static id<MTLBuffer> g_indexer_topk_buffer;
 static id<MTLBuffer> g_indexed_topk_buffer;
 static id<MTLBuffer> g_f16_round_scratch_buffer;
 static id<MTLBuffer> g_raw_store_round_buffer;
+static id<MTLBuffer> g_mps_narrow_input_buffer;
+static id<MTLBuffer> g_mps_narrow_output_buffer;
+static MPSMatrixMultiplication *g_mps_narrow_mm;
+static uint32_t g_mps_narrow_tokens;
 static id<MTLBuffer> g_moe_gate_scratch_buffer;
 static id<MTLBuffer> g_moe_down_scratch_buffer;
 static id<MTLBuffer> g_moe_id_map_buffer;
@@ -551,6 +556,8 @@ static NSUInteger g_indexer_topk_bytes;
 static NSUInteger g_indexed_topk_bytes;
 static NSUInteger g_f16_round_scratch_bytes;
 static NSUInteger g_raw_store_round_bytes;
+static NSUInteger g_mps_narrow_input_bytes;
+static NSUInteger g_mps_narrow_output_bytes;
 static NSUInteger g_moe_gate_scratch_bytes;
 static NSUInteger g_moe_down_scratch_bytes;
 static NSUInteger g_moe_id_map_bytes;
@@ -10454,6 +10461,10 @@ void ds4_gpu_cleanup(void) {
         g_stream_expert_validate_status_buffer = nil;
         g_f16_round_scratch_buffer = nil;
         g_raw_store_round_buffer = nil;
+        g_mps_narrow_input_buffer = nil;
+        g_mps_narrow_output_buffer = nil;
+        g_mps_narrow_mm = nil;
+        g_mps_narrow_tokens = 0;
         g_moe_gate_scratch_buffer = nil;
         g_moe_down_scratch_buffer = nil;
         g_moe_id_map_buffer = nil;
@@ -10495,6 +10506,8 @@ void ds4_gpu_cleanup(void) {
         g_indexed_topk_bytes = 0;
         g_f16_round_scratch_bytes = 0;
         g_raw_store_round_bytes = 0;
+        g_mps_narrow_input_bytes = 0;
+        g_mps_narrow_output_bytes = 0;
         g_moe_gate_scratch_bytes = 0;
         g_moe_down_scratch_bytes = 0;
         g_moe_id_map_bytes = 0;
@@ -19539,6 +19552,97 @@ int ds4_gpu_shared_gate_up_swiglu_q8_0_rows_scalar_tensor(
     return 1;
 }
 
+static int ds4_gpu_encode_mps_f16_narrow_prefill(
+        id<MTLCommandBuffer> cb,
+        id<MTLBuffer>        weights,
+        NSUInteger           weights_offset,
+        id<MTLBuffer>        x,
+        NSUInteger           x_offset,
+        id<MTLBuffer>        out,
+        NSUInteger           out_offset,
+        uint32_t             n_tok) {
+    const uint32_t in_dim = 4096u;
+    const uint32_t out_dim = 256u;
+    const uint64_t input_count = (uint64_t)n_tok * in_dim;
+    const uint64_t output_count = (uint64_t)n_tok * out_dim;
+    if (!cb || !weights || !x || !out || n_tok == 0 ||
+        input_count > UINT32_MAX || output_count > UINT32_MAX) {
+        return 0;
+    }
+    const NSUInteger input_bytes =
+        (NSUInteger)input_count * sizeof(uint16_t);
+    const NSUInteger output_bytes =
+        (NSUInteger)output_count * sizeof(uint16_t);
+    if (!ds4_gpu_ensure_scratch_buffer(&g_mps_narrow_input_buffer,
+                                       &g_mps_narrow_input_bytes,
+                                       input_bytes,
+                                       "ds4_mps_narrow_input") ||
+        !ds4_gpu_ensure_scratch_buffer(&g_mps_narrow_output_buffer,
+                                       &g_mps_narrow_output_bytes,
+                                       output_bytes,
+                                       "ds4_mps_narrow_output") ||
+        !ds4_gpu_encode_cpy_f32_f16_1d(cb,
+                                        x,
+                                        x_offset,
+                                        g_mps_narrow_input_buffer,
+                                        0,
+                                        (uint32_t)input_count)) {
+        return 0;
+    }
+    ds4_gpu_close_batch_encoder();
+
+    MPSMatrixDescriptor *x_desc =
+        [MPSMatrixDescriptor matrixDescriptorWithRows:n_tok
+                                               columns:in_dim
+                                              rowBytes:in_dim * sizeof(uint16_t)
+                                              dataType:MPSDataTypeFloat16];
+    MPSMatrixDescriptor *weight_desc =
+        [MPSMatrixDescriptor matrixDescriptorWithRows:out_dim
+                                               columns:in_dim
+                                              rowBytes:in_dim * sizeof(uint16_t)
+                                              dataType:MPSDataTypeFloat16];
+    MPSMatrixDescriptor *out_desc =
+        [MPSMatrixDescriptor matrixDescriptorWithRows:n_tok
+                                               columns:out_dim
+                                              rowBytes:out_dim * sizeof(uint16_t)
+                                              dataType:MPSDataTypeFloat16];
+    MPSMatrix *x_matrix =
+        [[MPSMatrix alloc] initWithBuffer:g_mps_narrow_input_buffer
+                              descriptor:x_desc];
+    MPSMatrix *weight_matrix =
+        [[MPSMatrix alloc] initWithBuffer:weights
+                                  offset:weights_offset
+                              descriptor:weight_desc];
+    MPSMatrix *out_matrix =
+        [[MPSMatrix alloc] initWithBuffer:g_mps_narrow_output_buffer
+                              descriptor:out_desc];
+    if (!x_matrix || !weight_matrix || !out_matrix) return 0;
+
+    if (!g_mps_narrow_mm || g_mps_narrow_tokens != n_tok) {
+        g_mps_narrow_mm = [[MPSMatrixMultiplication alloc]
+            initWithDevice:g_device
+            transposeLeft:NO
+            transposeRight:YES
+            resultRows:n_tok
+            resultColumns:out_dim
+            interiorColumns:in_dim
+            alpha:1.0
+            beta:0.0];
+        g_mps_narrow_tokens = n_tok;
+    }
+    if (!g_mps_narrow_mm) return 0;
+    [g_mps_narrow_mm encodeToCommandBuffer:cb
+                                leftMatrix:x_matrix
+                               rightMatrix:weight_matrix
+                              resultMatrix:out_matrix];
+    return ds4_gpu_encode_cpy_f16_f32_1d(cb,
+                                          g_mps_narrow_output_buffer,
+                                          0,
+                                          out,
+                                          out_offset,
+                                          (uint32_t)output_count);
+}
+
 int ds4_gpu_matmul_f16_tensor(
         ds4_gpu_tensor       *out,
         const void             *model_map,
@@ -19582,6 +19686,32 @@ int ds4_gpu_matmul_f16_tensor(
         int owned = 0;
         id<MTLCommandBuffer> cb = ds4_gpu_command_buffer(&owned);
         if (!cb) return 0;
+
+        /*
+         * MPS wins on M1 for these small-output F16 projections after paying
+         * the F32/F16 conversion cost.  Wider projections remain on ds4's
+         * concurrent Metal encoder, where serializing through MPS is slower.
+         */
+        const bool use_mps_narrow_prefill =
+            !g_quality_mode && in_dim == 4096u && out_dim == 256u &&
+            n_tok >= 32u &&
+            getenv("DS4_METAL_DISABLE_MPS_F16_NARROW_PREFILL") == NULL &&
+            (ds4_gpu_device_name_contains("M1") ||
+             getenv("DS4_METAL_ENABLE_MPS_F16_NARROW_PREFILL") != NULL);
+        if (use_mps_narrow_prefill) {
+            if (!ds4_gpu_encode_mps_f16_narrow_prefill(cb,
+                                                       wbuf,
+                                                       (NSUInteger)inner_offset,
+                                                       xbuf,
+                                                       ds4_gpu_tensor_offset(x),
+                                                       outbuf,
+                                                       ds4_gpu_tensor_offset(out),
+                                                       (uint32_t)n_tok)) {
+                return 0;
+            }
+            return ds4_gpu_finish_command_buffer(
+                cb, owned, "MPS F16 narrow prefill matmul");
+        }
 
         if (n_tok == 1) {
             ds4_gpu_f16_matvec_args mv_args = ds4_gpu_make_f16_mv_args(in_dim, out_dim);
