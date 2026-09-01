@@ -1096,6 +1096,7 @@ static int test_mixed_iq2_q2(void) {
          ok && case_i < sizeof(token_cases) / sizeof(token_cases[0]);
          case_i++) {
         const uint32_t n_tokens = token_cases[case_i];
+        const bool expect_mid_f16 = n_tokens >= 32u;
         const uint64_t pair_rows = (uint64_t)n_tokens * N_EXPERT;
         const uint64_t pair_values = pair_rows * DIM;
         const uint64_t out_values = (uint64_t)n_tokens * DIM;
@@ -1106,9 +1107,10 @@ static int test_mixed_iq2_q2(void) {
         float *gate_gpu = calloc((size_t)pair_values, sizeof(float));
         float *up_gpu = calloc((size_t)pair_values, sizeof(float));
         float *mid_gpu = calloc((size_t)pair_values, sizeof(float));
+        _Float16 *mid_gpu_f16 = calloc((size_t)pair_values, sizeof(_Float16));
         float *out_gpu = calloc((size_t)out_values, sizeof(float));
         if (!gate_ref || !up_ref || !mid_ref || !out_ref ||
-            !gate_gpu || !up_gpu || !mid_gpu || !out_gpu) {
+            !gate_gpu || !up_gpu || !mid_gpu || !mid_gpu_f16 || !out_gpu) {
             ok = 0;
         }
 
@@ -1126,6 +1128,15 @@ static int test_mixed_iq2_q2(void) {
                     const float gate = fminf(gate_ref[value], 7.0f);
                     const float up = fmaxf(-7.0f, fminf(up_ref[value], 7.0f));
                     mid_ref[value] = gate / (1.0f + expf(-gate)) * up * weights[pair];
+                }
+            }
+            if (expect_mid_f16) {
+                for (uint32_t slot = 0; slot < N_EXPERT; slot++) {
+                    const uint64_t pair = (uint64_t)token * N_EXPERT + slot;
+                    for (uint32_t i = 0; i < DIM; i++) {
+                        const uint64_t value = pair * DIM + i;
+                        mid_ref[value] = (float)(_Float16)mid_ref[value];
+                    }
                 }
             }
             for (uint32_t row = 0; row < DIM; row++) {
@@ -1172,13 +1183,23 @@ static int test_mixed_iq2_q2(void) {
             down_expert_bytes, down_row_bytes, DIM, DIM, DIM,
             selected_tensor, weights_tensor, N_TOTAL_EXPERT, N_EXPERT,
             7.0f, x_tensor, 0u, n_tokens, &mid_is_f16, true);
-        ok = ok && !mid_is_f16;
+        ok = ok && mid_is_f16 == expect_mid_f16;
         ok = ok && ds4_gpu_tensor_read(
             gate_tensor, 0, gate_gpu, pair_values * sizeof(float));
         ok = ok && ds4_gpu_tensor_read(
             up_tensor, 0, up_gpu, pair_values * sizeof(float));
-        ok = ok && ds4_gpu_tensor_read(
-            mid_tensor, 0, mid_gpu, pair_values * sizeof(float));
+        if (ok && expect_mid_f16) {
+            ok = ds4_gpu_tensor_read(
+                mid_tensor, 0, mid_gpu_f16,
+                pair_values * sizeof(mid_gpu_f16[0])) != 0;
+            for (uint64_t i = 0; ok && i < pair_values; i++) {
+                mid_gpu[i] = (float)mid_gpu_f16[i];
+            }
+        } else if (ok) {
+            ok = ds4_gpu_tensor_read(
+                mid_tensor, 0, mid_gpu,
+                pair_values * sizeof(float)) != 0;
+        }
         ok = ok && ds4_gpu_tensor_read(
             out_tensor, 0, out_gpu, out_values * sizeof(float));
         if (ok) {
@@ -1188,7 +1209,7 @@ static int test_mixed_iq2_q2(void) {
             snprintf(name, sizeof(name), "mixed%u-up", n_tokens);
             ok = ok && compare_values(name, up_gpu, up_ref, pair_values, 2.0e-4f);
             snprintf(name, sizeof(name), "mixed%u-mid", n_tokens);
-            ok = ok && compare_values(name, mid_gpu, mid_ref, pair_values, 2.0e-4f);
+            ok = ok && compare_values(name, mid_gpu, mid_ref, pair_values, 1.0e-3f);
             snprintf(name, sizeof(name), "mixed%u-out", n_tokens);
             ok = ok && compare_values(name, out_gpu, out_ref, out_values, 1.0e-2f);
         }
@@ -1202,6 +1223,7 @@ static int test_mixed_iq2_q2(void) {
         ds4_gpu_tensor_free(selected_tensor);
         ds4_gpu_tensor_free(x_tensor);
         free(out_gpu);
+        free(mid_gpu_f16);
         free(mid_gpu);
         free(up_gpu);
         free(gate_gpu);
