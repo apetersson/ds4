@@ -78,6 +78,7 @@ typedef struct {
     int decode_consistency_tokens;
     const char *perplexity_file_path;
     const char *imatrix_dataset_path;
+    const char *imatrix_vision_manifest_path;
     const char *imatrix_output_path;
     int imatrix_max_prompts;
     int imatrix_max_tokens;
@@ -2082,6 +2083,8 @@ static cli_config parse_options(int argc, char **argv) {
             c.gen.perplexity_file_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--imatrix-dataset")) {
             c.gen.imatrix_dataset_path = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--imatrix-vision-manifest")) {
+            c.gen.imatrix_vision_manifest_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--imatrix-out")) {
             c.gen.imatrix_output_path = need_arg(&i, argc, argv, arg);
             c.engine.backend = DS4_BACKEND_METAL;
@@ -2143,12 +2146,18 @@ static cli_config parse_options(int argc, char **argv) {
     if (c.engine.directional_steering_file && !directional_steering_scale_set) {
         c.engine.directional_steering_ffn = 1.0f;
     }
-    if (c.gen.imatrix_output_path && !c.gen.imatrix_dataset_path) {
-        fprintf(stderr, "ds4: --imatrix-out requires --imatrix-dataset\n");
+    if (c.gen.imatrix_dataset_path && c.gen.imatrix_vision_manifest_path) {
+        fprintf(stderr, "ds4: choose one imatrix dataset mode\n");
         exit(2);
     }
-    if (c.gen.imatrix_dataset_path && !c.gen.imatrix_output_path) {
-        fprintf(stderr, "ds4: --imatrix-dataset requires --imatrix-out\n");
+    if (c.gen.imatrix_output_path && !c.gen.imatrix_dataset_path &&
+        !c.gen.imatrix_vision_manifest_path) {
+        fprintf(stderr, "ds4: --imatrix-out requires an imatrix dataset\n");
+        exit(2);
+    }
+    if ((c.gen.imatrix_dataset_path || c.gen.imatrix_vision_manifest_path) &&
+        !c.gen.imatrix_output_path) {
+        fprintf(stderr, "ds4: imatrix collection requires --imatrix-out\n");
         exit(2);
     }
     if (c.gen.imatrix_min_expert_samples < 0) {
@@ -2316,13 +2325,24 @@ int main(int argc, char **argv) {
     if (cfg.inspect) {
         ds4_engine_summary(engine);
     } else if (cfg.gen.imatrix_output_path) {
-        rc = ds4_engine_collect_imatrix(engine,
-                                        cfg.gen.imatrix_dataset_path,
-                                        cfg.gen.imatrix_output_path,
-                                        cfg.gen.ctx_size,
-                                        cfg.gen.imatrix_max_prompts,
-                                        cfg.gen.imatrix_max_tokens,
-                                        cfg.gen.imatrix_min_expert_samples);
+        if (cfg.gen.imatrix_vision_manifest_path) {
+            rc = ds4_engine_collect_vision_imatrix(
+                    engine,
+                    cfg.gen.imatrix_vision_manifest_path,
+                    cfg.gen.imatrix_output_path,
+                    cfg.gen.ctx_size,
+                    cfg.gen.imatrix_max_prompts,
+                    cfg.gen.imatrix_max_tokens,
+                    cfg.gen.imatrix_min_expert_samples);
+        } else {
+            rc = ds4_engine_collect_imatrix(engine,
+                                            cfg.gen.imatrix_dataset_path,
+                                            cfg.gen.imatrix_output_path,
+                                            cfg.gen.ctx_size,
+                                            cfg.gen.imatrix_max_prompts,
+                                            cfg.gen.imatrix_max_tokens,
+                                            cfg.gen.imatrix_min_expert_samples);
+        }
     } else if (cfg.gen.perplexity_file_path) {
         rc = run_perplexity_file(engine, &cfg);
     } else if (cfg.gen.prompt == NULL) {

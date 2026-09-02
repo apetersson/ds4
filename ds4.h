@@ -338,6 +338,17 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
                                int max_prompts,
                                int max_tokens,
                                int min_expert_samples);
+/* Collect routed receiver statistics from a TSV manifest containing
+ * case-id, prompt-file, and comma-separated image paths. Each image is
+ * encoded by the loaded vision model and replayed through the receiver's
+ * native visual-token and visual-router path. */
+int ds4_engine_collect_vision_imatrix(ds4_engine *e,
+                                      const char *manifest_path,
+                                      const char *output_path,
+                                      int ctx_size,
+                                      int max_prompts,
+                                      int max_tokens,
+                                      int min_expert_samples);
 void ds4_engine_dump_tokens(ds4_engine *e, const ds4_tokens *tokens);
 int ds4_dump_text_tokenization(const char *model_path, const char *text, FILE *fp);
 int ds4_dump_chat_tokenization(const char *model_path,

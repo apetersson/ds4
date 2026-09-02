@@ -57448,6 +57448,324 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
 #endif
 }
 
+int ds4_engine_collect_vision_imatrix(ds4_engine *e,
+                                      const char *manifest_path,
+                                      const char *output_path,
+                                      int ctx_size,
+                                      int max_prompts,
+                                      int max_tokens,
+                                      int min_expert_samples) {
+#ifdef DS4_NO_GPU
+    (void)e;
+    (void)manifest_path;
+    (void)output_path;
+    (void)ctx_size;
+    (void)max_prompts;
+    (void)max_tokens;
+    (void)min_expert_samples;
+    fprintf(stderr,
+            "ds4: vision imatrix collection requires a graph backend build\n");
+    return 1;
+#else
+    if (!e || !manifest_path || !output_path) return 1;
+    if (e->backend != DS4_BACKEND_METAL || !e->metal_ready) {
+        fprintf(stderr,
+                "ds4: vision imatrix collection currently requires --metal\n");
+        return 1;
+    }
+    if (!g_ds4_flash_vision_exp || !e->vision_ready ||
+        e->vision_kind != DS4_VISION_DEEPSEEK4) {
+        fprintf(stderr,
+                "ds4: vision imatrix requires the pinned DeepSeek V4 Flash "
+                "Vision-Exp receiver and --vision\n");
+        return 1;
+    }
+    if (!e->vision_model.map || e->vision_model.size == 0) {
+        fprintf(stderr, "ds4: DeepSeek Vision-Exp weights are not mapped\n");
+        return 1;
+    }
+    if (ctx_size <= 0) ctx_size = 32768;
+
+    FILE *manifest = fopen(manifest_path, "rb");
+    if (!manifest) {
+        fprintf(stderr,
+                "ds4: failed to open vision imatrix manifest %s: %s\n",
+                manifest_path, strerror(errno));
+        return 1;
+    }
+
+    const ds4_model *model = &e->model;
+    const ds4_weights *weights = &e->weights;
+    const uint32_t prefill_cap =
+        metal_graph_prefill_cap_for_prompt(ctx_size, e->prefill_chunk);
+    const uint32_t raw_cap =
+        metal_graph_raw_cap_for_context(ctx_size, prefill_cap);
+    ds4_gpu_graph g;
+    bool ok = metal_graph_alloc_raw_cap(&g, weights, &weights->layer[0],
+                                        raw_cap, (uint32_t)ctx_size,
+                                        prefill_cap, false, NULL, false, NULL);
+    if (!ok) {
+        fprintf(stderr,
+                "ds4: failed to allocate vision imatrix Metal graph runtime\n");
+        fclose(manifest);
+        return 1;
+    }
+    g.quality = e->quality;
+    g.ssd_streaming = e->ssd_streaming;
+    g.ssd_streaming_cold = e->ssd_streaming_cold;
+    g.streaming_preload_experts = e->ssd_streaming_preload_experts;
+    g.power_percent = (uint32_t)e->power_percent;
+    g.vision_model_map = e->vision_model.map;
+    g.vision_model_size = e->vision_model.size;
+    g.deepseek4_vision_weights = &e->deepseek4_vision_weights;
+
+    ds4_imatrix_collector collector;
+    if (!imatrix_collector_init(&collector, prefill_cap, manifest_path)) {
+        fprintf(stderr, "ds4: failed to allocate vision imatrix collector\n");
+        metal_graph_free(&g);
+        fclose(manifest);
+        return 1;
+    }
+
+    fprintf(stderr,
+            "ds4: collecting DeepSeek Vision-Exp routed imatrix from %s "
+            "(layers=%u experts=%u ctx=%d chunk=%u bias_vl=enabled)\n",
+            manifest_path, DS4_N_LAYER, DS4_N_EXPERT, ctx_size, prefill_cap);
+
+    bool sample_target_reached = false;
+    int prompts_done = 0;
+    int tokens_done = 0;
+    uint64_t visual_tokens_done = 0;
+    uint64_t manifest_line = 0;
+    char *line = NULL;
+    size_t line_cap = 0;
+    while (ok && getline(&line, &line_cap, manifest) >= 0) {
+        manifest_line++;
+        char *newline = strpbrk(line, "\r\n");
+        if (newline) *newline = '\0';
+        if (!line[0] || line[0] == '#') continue;
+
+        char *field_save = NULL;
+        char *case_id = strtok_r(line, "\t", &field_save);
+        char *prompt_path = strtok_r(NULL, "\t", &field_save);
+        char *image_list = strtok_r(NULL, "\t", &field_save);
+        char *extra = strtok_r(NULL, "\t", &field_save);
+        if (!case_id || !case_id[0] || !prompt_path || !prompt_path[0] ||
+            !image_list || !image_list[0] || extra) {
+            fprintf(stderr,
+                    "ds4: malformed vision imatrix manifest line %llu\n",
+                    (unsigned long long)manifest_line);
+            ok = false;
+            break;
+        }
+
+        size_t image_count = 1;
+        for (const char *p = image_list; *p; p++) {
+            if (*p == ',') image_count++;
+        }
+        if (image_count == 0 || image_count > 16) {
+            fprintf(stderr,
+                    "ds4: vision case %s has invalid image count %zu\n",
+                    case_id, image_count);
+            ok = false;
+            break;
+        }
+
+        char *prompt_text = NULL;
+        size_t prompt_bytes = 0;
+        if (!imatrix_read_text_file(prompt_path, &prompt_text, &prompt_bytes)) {
+            ok = false;
+            break;
+        }
+        (void)prompt_bytes;
+
+        ds4_vision_embedding *embeddings =
+            xcalloc(image_count, sizeof(*embeddings));
+        ds4_vision_span *spans = xcalloc(image_count, sizeof(*spans));
+        const char **text_parts =
+            xcalloc(image_count + 1u, sizeof(*text_parts));
+        for (size_t i = 0; i < image_count; i++) text_parts[i] = "";
+        text_parts[image_count] = prompt_text;
+
+        size_t encoded = 0;
+        char image_error[256] = {0};
+        char *image_save = NULL;
+        char *image_path = strtok_r(image_list, ",", &image_save);
+        while (image_path && encoded < image_count) {
+            if (!image_path[0] ||
+                !ds4_engine_vision_encode_file(e, image_path,
+                                               &embeddings[encoded],
+                                               image_error,
+                                               sizeof(image_error))) {
+                fprintf(stderr,
+                        "ds4: vision case %s image encode failed: %s\n",
+                        case_id,
+                        image_error[0] ? image_error : image_path);
+                ok = false;
+                break;
+            }
+            encoded++;
+            image_path = strtok_r(NULL, ",", &image_save);
+        }
+        if (ok && encoded != image_count) {
+            fprintf(stderr,
+                    "ds4: vision case %s image-list count mismatch\n",
+                    case_id);
+            ok = false;
+        }
+
+        token_vec prompt = {0};
+        if (ok) {
+            ds4_chat_begin(e, &prompt);
+            if (!ds4_chat_append_multimodal_message(
+                    e, &prompt, "user", text_parts, embeddings, image_count,
+                    spans, image_error, sizeof(image_error))) {
+                fprintf(stderr,
+                        "ds4: vision case %s prompt assembly failed: %s\n",
+                        case_id, image_error);
+                ok = false;
+            } else {
+                ds4_chat_append_assistant_prefix(e, &prompt, DS4_THINK_NONE);
+            }
+        }
+
+        uint64_t case_visual_tokens = 0;
+        for (size_t i = 0; i < image_count; i++) {
+            case_visual_tokens += spans[i].embedding.token_count;
+        }
+        if (ok && case_visual_tokens == 0) {
+            fprintf(stderr,
+                    "ds4: vision case %s produced no visual tokens\n",
+                    case_id);
+            ok = false;
+        }
+        if (ok && prompt.len > ctx_size) {
+            fprintf(stderr,
+                    "ds4: vision case %s has %d tokens, exceeding ctx=%d\n",
+                    case_id, prompt.len, ctx_size);
+            ok = false;
+        }
+
+        bool stop_for_token_limit = false;
+        if (ok && max_tokens > 0 &&
+            (tokens_done >= max_tokens ||
+             prompt.len > max_tokens - tokens_done)) {
+            if (prompts_done == 0) {
+                fprintf(stderr,
+                        "ds4: first vision case has %d tokens, exceeding "
+                        "--imatrix-max-tokens=%d\n",
+                        prompt.len, max_tokens);
+                ok = false;
+            } else {
+                stop_for_token_limit = true;
+            }
+        }
+
+        if (ok && !stop_for_token_limit) {
+            if (!metal_graph_reset_prefill_state(&g)) {
+                fprintf(stderr,
+                        "ds4: failed to reset vision imatrix graph state\n");
+                ok = false;
+            } else {
+                g.prefill_vision_spans = spans;
+                g.prefill_vision_span_count = image_count;
+                if ((uint32_t)prompt.len > prefill_cap) {
+                    ok = metal_graph_prefill_chunked_range(
+                            &g, model, weights, &prompt, 0,
+                            (uint32_t)prompt.len, NULL, false,
+                            NULL, NULL, NULL, NULL, &collector,
+                            NULL, NULL, NULL);
+                } else {
+                    ok = metal_graph_prefill_layer_major(
+                            &g, model, weights, &prompt, 0,
+                            (uint32_t)prompt.len, NULL, false,
+                            &collector, NULL, NULL);
+                }
+                g.prefill_vision_spans = NULL;
+                g.prefill_vision_span_count = 0;
+                if (!ok) {
+                    fprintf(stderr,
+                            "ds4: vision imatrix prefill failed at case %s\n",
+                            case_id);
+                }
+            }
+        }
+
+        if (ok && !stop_for_token_limit) {
+            prompts_done++;
+            tokens_done += prompt.len;
+            visual_tokens_done += case_visual_tokens;
+            sample_target_reached = min_expert_samples > 0 &&
+                imatrix_collector_min_samples(&collector, weights,
+                                              DS4_N_LAYER) >=
+                    (uint32_t)min_expert_samples;
+            fprintf(stderr,
+                    "ds4: vision imatrix cases=%d tokens=%d visual=%llu "
+                    "routes=%llu min_samples=%u\r",
+                    prompts_done, tokens_done,
+                    (unsigned long long)visual_tokens_done,
+                    (unsigned long long)collector.observed_routes,
+                    imatrix_collector_min_samples(&collector, weights,
+                                                 DS4_N_LAYER));
+            fflush(stderr);
+        }
+
+        token_vec_free(&prompt);
+        for (size_t i = 0; i < image_count; i++) {
+            ds4_vision_embedding_free(&embeddings[i]);
+            ds4_vision_embedding_free(&spans[i].embedding);
+        }
+        free(text_parts);
+        free(spans);
+        free(embeddings);
+        free(prompt_text);
+
+        if (!ok || stop_for_token_limit || sample_target_reached) break;
+        if (max_prompts > 0 && prompts_done >= max_prompts) break;
+        if (max_tokens > 0 && tokens_done >= max_tokens) break;
+    }
+    fputc('\n', stderr);
+    free(line);
+    if (fclose(manifest) != 0) {
+        fprintf(stderr,
+                "ds4: failed to close vision imatrix manifest %s: %s\n",
+                manifest_path, strerror(errno));
+        ok = false;
+    }
+
+    if (ok) {
+        imatrix_collector_report_coverage(&collector, weights, DS4_N_LAYER);
+        if (prompts_done == 0 || visual_tokens_done == 0 ||
+            collector.observed_routes == 0) {
+            fprintf(stderr,
+                    "ds4: refusing to write a vision imatrix without visual "
+                    "receiver observations\n");
+            ok = false;
+        } else if (min_expert_samples > 0 && !sample_target_reached) {
+            fprintf(stderr,
+                    "ds4: vision imatrix minimum expert sample target %d "
+                    "was not reached\n",
+                    min_expert_samples);
+            ok = false;
+        }
+    }
+    if (ok) ok = imatrix_collector_save(&collector, weights, output_path);
+    if (ok) {
+        fprintf(stderr,
+                "ds4: wrote vision imatrix %s from %d cases, %d tokens, "
+                "%llu visual tokens, %llu routed expert observations "
+                "(bias_vl=enabled)\n",
+                output_path, prompts_done, tokens_done,
+                (unsigned long long)visual_tokens_done,
+                (unsigned long long)collector.observed_routes);
+    }
+
+    imatrix_collector_free(&collector);
+    metal_graph_free(&g);
+    return ok ? 0 : 1;
+#endif
+}
+
 #ifndef DS4_NO_GPU
 static bool ds4_session_greedy_splitkv_replay_exact(
         ds4_session *s,
