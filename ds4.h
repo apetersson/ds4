@@ -460,6 +460,14 @@ int ds4_sample_logits(const float *logits, int n_vocab, float temperature,
                       int top_k, float top_p, float min_p, uint64_t *rng);
 int ds4_session_sample(ds4_session *s, float temperature, int top_k, float top_p, float min_p, uint64_t *rng);
 #ifdef DS4_TEST_HOOKS
+bool ds4_test_imatrix_read_text_file(const char *path,
+                                     size_t max_bytes,
+                                     size_t *len_out);
+bool ds4_test_imatrix_parse_vision_manifest_line(char *line,
+                                                 size_t *image_count,
+                                                 char *err,
+                                                 size_t errlen);
+bool ds4_test_imatrix_counter_add(uint64_t *counter, uint64_t amount);
 int ds4_test_sample_logits(const float *logits, uint32_t n_vocab,
                            float temperature, int top_k,
                            float top_p, float min_p, uint64_t *rng,

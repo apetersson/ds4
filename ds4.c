@@ -17705,10 +17705,10 @@ static bool metal_graph_alloc_raw_cap(
         bool                    enable_mtp,
         const int              *placement,
         bool                    cuda_tensor_parallel,
+        int                     dspark_exec_tier,
         const ds4_gpu_graph    *shared_prefill_workspace) {
-    const int saved_dspark_exec_tier = g->dspark_exec_tier;
     memset(g, 0, sizeof(*g));
-    g->dspark_exec_tier = saved_dspark_exec_tier;
+    g->dspark_exec_tier = dspark_exec_tier;
     g->owns_prefill_workspace = shared_prefill_workspace == NULL;
     g->cpu_router_norm = xmalloc((size_t)DS4_N_EMBD * sizeof(g->cpu_router_norm[0]));
     g->active_tier = placement ? -1 : 0;
@@ -18348,7 +18348,7 @@ static bool metal_graph_alloc(
     /* single-tier convenience wrapper; placement=NULL routes
      * all per-layer allocations to tier 0. */
     return metal_graph_alloc_raw_cap(g, weights, layer, DS4_N_SWA, DS4_N_SWA,
-                                     1, false, NULL, false, NULL);
+                                     1, false, NULL, false, 0, NULL);
 }
 
 static bool metal_graph_install_model_spans(
@@ -38079,7 +38079,8 @@ static int metal_graph_prompt_logits_test(
     /* diagnostic single-tier callsite; placement=NULL. */
     bool ok = metal_graph_alloc_raw_cap(&g, weights, &weights->layer[0],
                                         raw_cap, (uint32_t)ctx_size,
-                                        (uint32_t)n_test, false, NULL, false, NULL);
+                                        (uint32_t)n_test, false, NULL, false,
+                                        0, NULL);
     if (!ok) {
         metal_graph_free(&g);
         fprintf(stderr, "ds4: failed to initialize Metal graph prompt test runtime\n");
@@ -38327,8 +38328,20 @@ static bool table_get(const str_i32_table *t, const char *ptr, uint64_t len, int
 }
 
 static void token_vec_push(token_vec *tv, int token) {
+    if (!tv || tv->len < 0 || tv->cap < 0 || tv->len > tv->cap) {
+        ds4_die("invalid token vector state");
+    }
     if (tv->len == tv->cap) {
-        tv->cap = tv->cap ? tv->cap * 2 : 64;
+        if (tv->len == INT_MAX) ds4_die("token vector capacity overflow");
+        int next_cap = tv->cap ? tv->cap : 64;
+        if (next_cap <= tv->len) {
+            next_cap = tv->cap > INT_MAX / 2 ? INT_MAX : tv->cap * 2;
+        }
+        if (next_cap <= tv->len ||
+            (size_t)next_cap > SIZE_MAX / sizeof(tv->v[0])) {
+            ds4_die("token vector allocation overflow");
+        }
+        tv->cap = next_cap;
         tv->v = xrealloc(tv->v, (size_t)tv->cap * sizeof(tv->v[0]));
     }
     tv->v[tv->len++] = token;
@@ -53106,7 +53119,8 @@ static int generate_metal_graph_raw_swa(
     /* diagnostic single-tier callsite; placement=NULL. */
     bool ok = metal_graph_alloc_raw_cap(&g, weights, &weights->layer[0],
                                         raw_cap, (uint32_t)ctx_size,
-                                        prefill_cap, false, NULL, false, NULL);
+                                        prefill_cap, false, NULL, false, 0,
+                                        NULL);
     if (!ok) {
         fprintf(stderr, "ds4: failed to allocate GPU graph runtime\n");
         return 1;
@@ -57117,8 +57131,10 @@ int ds4_dump_chat_tokenization(const char *model_path,
     return 0;
 }
 
-#ifndef DS4_NO_GPU
-static bool imatrix_read_text_file(const char *path, char **out, size_t *len_out) {
+static bool imatrix_read_text_file(const char *path,
+                                   size_t max_bytes,
+                                   char **out,
+                                   size_t *len_out) {
     *out = NULL;
     *len_out = 0;
     struct stat st;
@@ -57128,6 +57144,13 @@ static bool imatrix_read_text_file(const char *path, char **out, size_t *len_out
     }
     if (st.st_size < 0 || (uint64_t)st.st_size > SIZE_MAX - 1) {
         fprintf(stderr, "ds4: imatrix dataset is too large: %s\n", path);
+        return false;
+    }
+    if (max_bytes != 0 && (uint64_t)st.st_size > (uint64_t)max_bytes) {
+        fprintf(stderr,
+                "ds4: imatrix prompt %s is %llu bytes, exceeding the "
+                "%zu-byte pre-tokenization limit\n",
+                path, (unsigned long long)st.st_size, max_bytes);
         return false;
     }
     FILE *fp = fopen(path, "rb");
@@ -57171,6 +57194,91 @@ static char *imatrix_find_marker(char *dataset, char *cursor, const char *marker
     return NULL;
 }
 
+static bool imatrix_counter_add(uint64_t *counter,
+                                uint64_t amount,
+                                const char *label) {
+    if (!counter || UINT64_MAX - *counter < amount) {
+        fprintf(stderr, "ds4: imatrix %s counter overflow\n", label);
+        return false;
+    }
+    *counter += amount;
+    return true;
+}
+
+typedef struct {
+    char *case_id;
+    char *prompt_path;
+    char *image_list;
+    size_t image_count;
+} imatrix_vision_manifest_fields;
+
+static bool imatrix_parse_vision_manifest_line(
+        char *line,
+        imatrix_vision_manifest_fields *fields,
+        char *err,
+        size_t errlen) {
+    if (!line || !fields) return false;
+    memset(fields, 0, sizeof(*fields));
+    char *field_save = NULL;
+    fields->case_id = strtok_r(line, "\t", &field_save);
+    fields->prompt_path = strtok_r(NULL, "\t", &field_save);
+    fields->image_list = strtok_r(NULL, "\t", &field_save);
+    char *extra = strtok_r(NULL, "\t", &field_save);
+    if (!fields->case_id || !fields->case_id[0] ||
+        !fields->prompt_path || !fields->prompt_path[0] ||
+        !fields->image_list || !fields->image_list[0] || extra) {
+        if (err && errlen) snprintf(err, errlen, "expected exactly 3 non-empty TSV fields");
+        return false;
+    }
+    fields->image_count = 1;
+    for (const char *p = fields->image_list; *p; p++) {
+        if (*p == ',') {
+            if (p == fields->image_list || p[-1] == ',' || p[1] == '\0') {
+                if (err && errlen) {
+                    snprintf(err, errlen, "image list contains an empty path");
+                }
+                return false;
+            }
+            fields->image_count++;
+        }
+    }
+    if (fields->image_count > 16) {
+        if (err && errlen) snprintf(err, errlen, "image count %zu is outside 1..16", fields->image_count);
+        return false;
+    }
+    return true;
+}
+
+#ifdef DS4_TEST_HOOKS
+bool ds4_test_imatrix_read_text_file(const char *path,
+                                     size_t max_bytes,
+                                     size_t *len_out) {
+    char *text = NULL;
+    size_t len = 0;
+    const bool ok = imatrix_read_text_file(path, max_bytes, &text, &len);
+    free(text);
+    if (len_out) *len_out = ok ? len : 0;
+    return ok;
+}
+
+bool ds4_test_imatrix_parse_vision_manifest_line(char *line,
+                                                 size_t *image_count,
+                                                 char *err,
+                                                 size_t errlen) {
+    imatrix_vision_manifest_fields fields;
+    const bool ok = imatrix_parse_vision_manifest_line(line, &fields,
+                                                       err, errlen);
+    if (image_count) *image_count = ok ? fields.image_count : 0;
+    return ok;
+}
+
+bool ds4_test_imatrix_counter_add(uint64_t *counter, uint64_t amount) {
+    return imatrix_counter_add(counter, amount, "test");
+}
+#endif
+
+#ifndef DS4_NO_GPU
+
 static int ds4_engine_collect_glm_imatrix(
         ds4_engine *e,
         char       *dataset,
@@ -57203,8 +57311,8 @@ static int ds4_engine_collect_glm_imatrix(
             dataset_path, DS4_N_LAYER, DS4_N_EXPERT, ctx_size);
 
     bool ok = true;
-    int prompts_done = 0;
-    int tokens_done = 0;
+    uint64_t prompts_done = 0;
+    uint64_t tokens_done = 0;
     bool sample_target_reached = false;
     char *cursor = dataset;
     const char *marker_lit = "===== DS4_IMATRIX_PROMPT";
@@ -57227,8 +57335,13 @@ static int ds4_engine_collect_glm_imatrix(
             token_vec prompt = {0};
             ds4_tokenize_rendered_chat(e, prompt_text, &prompt);
             if (prompt.len > ctx_size) prompt.len = ctx_size;
-            if (max_tokens > 0 && prompt.len > max_tokens - tokens_done) {
-                prompt.len = max_tokens - tokens_done;
+            if (max_tokens > 0) {
+                const uint64_t remaining =
+                    tokens_done >= (uint64_t)max_tokens ? 0u :
+                    (uint64_t)max_tokens - tokens_done;
+                if ((uint64_t)prompt.len > remaining) {
+                    prompt.len = (int)remaining;
+                }
             }
             if (prompt.len > 0) {
                 if (!glm_graph_reset_kda_state(&g)) {
@@ -57247,13 +57360,22 @@ static int ds4_engine_collect_glm_imatrix(
                                                  false);
                 }
                 if (!ok) {
-                    fprintf(stderr, "ds4: GLM imatrix failed at prompt %d\n",
-                            prompts_done + 1);
-                } else {
-                    prompts_done++;
-                    tokens_done += prompt.len;
                     fprintf(stderr,
-                            "ds4: GLM imatrix prompts=%d tokens=%d routes=%llu "
+                            "ds4: GLM imatrix failed at prompt %" PRIu64 "\n",
+                            prompts_done + 1u);
+                } else {
+                    ok = imatrix_counter_add(&prompts_done, 1u, "prompt") &&
+                         imatrix_counter_add(&tokens_done,
+                                             (uint64_t)prompt.len,
+                                             "token");
+                    if (!ok) {
+                        token_vec_free(&prompt);
+                        *end = saved;
+                        break;
+                    }
+                    fprintf(stderr,
+                            "ds4: GLM imatrix prompts=%" PRIu64
+                            " tokens=%" PRIu64 " routes=%llu "
                             "min_samples=%u\r",
                             prompts_done,
                             tokens_done,
@@ -57275,8 +57397,8 @@ static int ds4_engine_collect_glm_imatrix(
         if (sample_target_reached) break;
         if (!next) break;
         cursor = next;
-        if (max_prompts > 0 && prompts_done >= max_prompts) break;
-        if (max_tokens > 0 && tokens_done >= max_tokens) break;
+        if (max_prompts > 0 && prompts_done >= (uint64_t)max_prompts) break;
+        if (max_tokens > 0 && tokens_done >= (uint64_t)max_tokens) break;
     }
     fputc('\n', stderr);
 
@@ -57298,7 +57420,8 @@ static int ds4_engine_collect_glm_imatrix(
     }
     if (ok) {
         fprintf(stderr,
-                "ds4: wrote GLM imatrix %s from %d prompts, %d tokens, "
+                "ds4: wrote GLM imatrix %s from %" PRIu64
+                " prompts, %" PRIu64 " tokens, "
                 "%llu routes\n",
                 output_path,
                 prompts_done,
@@ -57338,7 +57461,7 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
 
     char *dataset = NULL;
     size_t dataset_len = 0;
-    if (!imatrix_read_text_file(dataset_path, &dataset, &dataset_len)) return 1;
+    if (!imatrix_read_text_file(dataset_path, 0, &dataset, &dataset_len)) return 1;
 
     if (DS4_MODEL_FAMILY == DS4_MODEL_FAMILY_GLM_DSA) {
         const int rc = ds4_engine_collect_glm_imatrix(e,
@@ -57364,7 +57487,8 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
     /* diagnostic single-tier callsite; placement=NULL. */
     bool ok = metal_graph_alloc_raw_cap(&g, weights, &weights->layer[0],
                                         raw_cap, (uint32_t)ctx_size,
-                                        prefill_cap, false, NULL, false, NULL);
+                                        prefill_cap, false, NULL, false, 0,
+                                        NULL);
     if (!ok) {
         fprintf(stderr, "ds4: failed to allocate imatrix Metal graph runtime\n");
         free(dataset);
@@ -57388,8 +57512,8 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
             "ds4: collecting routed-MoE imatrix from %s (model=%s, layers=%u, experts=%u, ctx=%d, chunk=%u)\n",
             dataset_path, DS4_MODEL_SHAPE_NAME, DS4_N_LAYER, DS4_N_EXPERT, ctx_size, prefill_cap);
 
-    int prompts_done = 0;
-    int tokens_done = 0;
+    uint64_t prompts_done = 0;
+    uint64_t tokens_done = 0;
     bool sample_target_reached = false;
     char *cursor = dataset;
     const char *marker_lit = "===== DS4_IMATRIX_PROMPT";
@@ -57412,8 +57536,13 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
             token_vec prompt = {0};
             ds4_tokenize_rendered_chat(e, prompt_text, &prompt);
             if (prompt.len > ctx_size) prompt.len = ctx_size;
-            if (max_tokens > 0 && prompt.len > max_tokens - tokens_done) {
-                prompt.len = max_tokens - tokens_done;
+            if (max_tokens > 0) {
+                const uint64_t remaining =
+                    tokens_done >= (uint64_t)max_tokens ? 0u :
+                    (uint64_t)max_tokens - tokens_done;
+                if ((uint64_t)prompt.len > remaining) {
+                    prompt.len = (int)remaining;
+                }
             }
             if (prompt.len > 0) {
                 if (!metal_graph_reset_prefill_state(&g)) {
@@ -57437,13 +57566,22 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
                                                          NULL, NULL);
                 }
                 if (!ok) {
-                    fprintf(stderr, "ds4: imatrix prefill failed at prompt %d\n", prompts_done + 1);
+                    fprintf(stderr,
+                            "ds4: imatrix prefill failed at prompt %" PRIu64 "\n",
+                            prompts_done + 1u);
                     token_vec_free(&prompt);
                     *end = saved;
                     break;
                 }
-                prompts_done++;
-                tokens_done += prompt.len;
+                ok = imatrix_counter_add(&prompts_done, 1u, "prompt") &&
+                     imatrix_counter_add(&tokens_done,
+                                         (uint64_t)prompt.len,
+                                         "token");
+                if (!ok) {
+                    token_vec_free(&prompt);
+                    *end = saved;
+                    break;
+                }
                 sample_target_reached = min_expert_samples > 0 &&
                     imatrix_collector_min_samples(&collector,
                                                  weights,
@@ -57451,7 +57589,8 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
                         (uint32_t)min_expert_samples;
                 if (prompts_done % 10 == 0) {
                     fprintf(stderr,
-                            "ds4: imatrix prompts=%d tokens=%d routes=%llu "
+                            "ds4: imatrix prompts=%" PRIu64
+                            " tokens=%" PRIu64 " routes=%llu "
                             "min_samples=%u\r",
                             prompts_done,
                             tokens_done,
@@ -57468,8 +57607,8 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
         if (sample_target_reached) break;
         if (!next) break;
         cursor = next;
-        if (max_prompts > 0 && prompts_done >= max_prompts) break;
-        if (max_tokens > 0 && tokens_done >= max_tokens) break;
+        if (max_prompts > 0 && prompts_done >= (uint64_t)max_prompts) break;
+        if (max_tokens > 0 && tokens_done >= (uint64_t)max_tokens) break;
     }
     fputc('\n', stderr);
 
@@ -57487,7 +57626,9 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
         ok = imatrix_collector_save(&collector, weights, output_path);
         if (ok) {
             fprintf(stderr,
-                    "ds4: wrote imatrix %s from %d prompts, %d tokens, %llu routed expert observations\n",
+                    "ds4: wrote imatrix %s from %" PRIu64
+                    " prompts, %" PRIu64
+                    " tokens, %llu routed expert observations\n",
                     output_path,
                     prompts_done,
                     tokens_done,
@@ -57540,6 +57681,18 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
     }
     if (ctx_size <= 0) ctx_size = 32768;
 
+    /* Reject pathological trace inputs before reading or tokenizing them.
+     * The 64-byte-per-context-token allowance is deliberately generous for
+     * UTF-8 and long tokenizer merges, while the floor keeps small-context
+     * smoke tests practical. */
+    size_t max_prompt_bytes = 1024u * 1024u;
+    if ((uint64_t)ctx_size <= (uint64_t)SIZE_MAX / 64u) {
+        const size_t ctx_prompt_bytes = (size_t)ctx_size * 64u;
+        if (ctx_prompt_bytes > max_prompt_bytes) {
+            max_prompt_bytes = ctx_prompt_bytes;
+        }
+    }
+
     FILE *manifest = fopen(manifest_path, "rb");
     if (!manifest) {
         fprintf(stderr,
@@ -57557,7 +57710,8 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
     ds4_gpu_graph g;
     bool ok = metal_graph_alloc_raw_cap(&g, weights, &weights->layer[0],
                                         raw_cap, (uint32_t)ctx_size,
-                                        prefill_cap, false, NULL, false, NULL);
+                                        prefill_cap, false, NULL, false, 0,
+                                        NULL);
     if (!ok) {
         fprintf(stderr,
                 "ds4: failed to allocate vision imatrix Metal graph runtime\n");
@@ -57592,8 +57746,8 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
             manifest_path, DS4_N_LAYER, DS4_N_EXPERT, ctx_size, prefill_cap);
 
     bool sample_target_reached = false;
-    int prompts_done = 0;
-    int tokens_done = 0;
+    uint64_t prompts_done = 0;
+    uint64_t tokens_done = 0;
     uint64_t visual_tokens_done = 0;
     uint64_t manifest_line = 0;
     char *line = NULL;
@@ -57604,35 +57758,26 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
         if (newline) *newline = '\0';
         if (!line[0] || line[0] == '#') continue;
 
-        char *field_save = NULL;
-        char *case_id = strtok_r(line, "\t", &field_save);
-        char *prompt_path = strtok_r(NULL, "\t", &field_save);
-        char *image_list = strtok_r(NULL, "\t", &field_save);
-        char *extra = strtok_r(NULL, "\t", &field_save);
-        if (!case_id || !case_id[0] || !prompt_path || !prompt_path[0] ||
-            !image_list || !image_list[0] || extra) {
+        imatrix_vision_manifest_fields fields;
+        char manifest_error[128] = {0};
+        if (!imatrix_parse_vision_manifest_line(line, &fields,
+                                                manifest_error,
+                                                sizeof(manifest_error))) {
             fprintf(stderr,
-                    "ds4: malformed vision imatrix manifest line %llu\n",
-                    (unsigned long long)manifest_line);
+                    "ds4: malformed vision imatrix manifest line %llu: %s\n",
+                    (unsigned long long)manifest_line, manifest_error);
             ok = false;
             break;
         }
-
-        size_t image_count = 1;
-        for (const char *p = image_list; *p; p++) {
-            if (*p == ',') image_count++;
-        }
-        if (image_count == 0 || image_count > 16) {
-            fprintf(stderr,
-                    "ds4: vision case %s has invalid image count %zu\n",
-                    case_id, image_count);
-            ok = false;
-            break;
-        }
+        char *case_id = fields.case_id;
+        char *prompt_path = fields.prompt_path;
+        char *image_list = fields.image_list;
+        const size_t image_count = fields.image_count;
 
         char *prompt_text = NULL;
         size_t prompt_bytes = 0;
-        if (!imatrix_read_text_file(prompt_path, &prompt_text, &prompt_bytes)) {
+        if (!imatrix_read_text_file(prompt_path, max_prompt_bytes,
+                                    &prompt_text, &prompt_bytes)) {
             ok = false;
             break;
         }
@@ -57707,8 +57852,8 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
 
         bool stop_for_token_limit = false;
         if (ok && max_tokens > 0 &&
-            (tokens_done >= max_tokens ||
-             prompt.len > max_tokens - tokens_done)) {
+            (tokens_done >= (uint64_t)max_tokens ||
+             (uint64_t)prompt.len > (uint64_t)max_tokens - tokens_done)) {
             if (prompts_done == 0) {
                 fprintf(stderr,
                         "ds4: first vision case has %d tokens, exceeding "
@@ -57751,15 +57896,32 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
         }
 
         if (ok && !stop_for_token_limit) {
-            prompts_done++;
-            tokens_done += prompt.len;
-            visual_tokens_done += case_visual_tokens;
+            ok = imatrix_counter_add(&prompts_done, 1u, "case") &&
+                 imatrix_counter_add(&tokens_done,
+                                     (uint64_t)prompt.len,
+                                     "token") &&
+                 imatrix_counter_add(&visual_tokens_done,
+                                     case_visual_tokens,
+                                     "visual token");
+            if (!ok) {
+                token_vec_free(&prompt);
+                for (size_t i = 0; i < image_count; i++) {
+                    ds4_vision_embedding_free(&embeddings[i]);
+                    ds4_vision_embedding_free(&spans[i].embedding);
+                }
+                free(text_parts);
+                free(spans);
+                free(embeddings);
+                free(prompt_text);
+                break;
+            }
             sample_target_reached = min_expert_samples > 0 &&
                 imatrix_collector_min_samples(&collector, weights,
                                               DS4_N_LAYER) >=
                     (uint32_t)min_expert_samples;
             fprintf(stderr,
-                    "ds4: vision imatrix cases=%d tokens=%d visual=%llu "
+                    "ds4: vision imatrix cases=%" PRIu64
+                    " tokens=%" PRIu64 " visual=%llu "
                     "routes=%llu min_samples=%u\r",
                     prompts_done, tokens_done,
                     (unsigned long long)visual_tokens_done,
@@ -57793,8 +57955,8 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
         free(prompt_text);
 
         if (!ok || stop_for_token_limit || sample_target_reached) break;
-        if (max_prompts > 0 && prompts_done >= max_prompts) break;
-        if (max_tokens > 0 && tokens_done >= max_tokens) break;
+        if (max_prompts > 0 && prompts_done >= (uint64_t)max_prompts) break;
+        if (max_tokens > 0 && tokens_done >= (uint64_t)max_tokens) break;
     }
     fputc('\n', stderr);
     free(line);
@@ -57827,7 +57989,8 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
     if (ok) {
         remove(checkpoint_path);
         fprintf(stderr,
-                "ds4: wrote vision imatrix %s from %d cases, %d tokens, "
+                "ds4: wrote vision imatrix %s from %" PRIu64
+                " cases, %" PRIu64 " tokens, "
                 "%llu visual tokens, %llu routed expert observations "
                 "(bias_vl=enabled)\n",
                 output_path, prompts_done, tokens_done,
@@ -64894,12 +65057,12 @@ int ds4_session_create(ds4_session **out, ds4_engine *e, int ctx_size) {
         e->shared_prefill_workspace_ready
             ? &e->shared_prefill_workspace
             : NULL;
-    s->graph.dspark_exec_tier = e->multi_tier ? e->dspark_exec_tier : 0;
     if (!metal_graph_alloc_raw_cap(&s->graph, &e->weights, shape_layer,
                                    raw_cap, (uint32_t)ctx_size, s->prefill_cap,
                                    need_spec_verifier,
                                    placement,
                                    e->cuda_tensor_parallel,
+                                   e->multi_tier ? e->dspark_exec_tier : 0,
                                    shared_prefill_workspace))
     {
         free(s);
