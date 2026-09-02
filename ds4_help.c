@@ -285,6 +285,9 @@ static void print_cli_diagnostics(FILE *fp, const help_colors *c) {
     opt(fp, c, "--perplexity-file FILE", "Score raw text with teacher-forced NLL.");
     opt(fp, c, "--imatrix-dataset FILE", "Rendered prompt dataset for imatrix collection.");
     opt(fp, c, "--imatrix-vision-manifest FILE", "TSV image/prompt manifest for vision imatrix collection.");
+    opt(fp, c, "--imatrix-text-max-prompts N", "Text prompt cap in combined text+vision collection.");
+    opt(fp, c, "--imatrix-text-max-tokens N", "Text token cap in combined text+vision collection.");
+    opt(fp, c, "--imatrix-text-prompt-tokens N", "Per-prompt text token cap in combined collection.");
     opt(fp, c, "--imatrix-out FILE", "Write llama-compatible routed-MoE imatrix .dat.");
     opt(fp, c, "--imatrix-max-prompts N", "Stop imatrix collection after N prompts.");
     opt(fp, c, "--imatrix-max-tokens N", "Stop imatrix collection after N prompt tokens.");

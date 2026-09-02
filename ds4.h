@@ -343,9 +343,13 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
  * encoded by the loaded vision model and replayed through the receiver's
  * native visual-token and visual-router path. */
 int ds4_engine_collect_vision_imatrix(ds4_engine *e,
+                                      const char *text_dataset_path,
                                       const char *manifest_path,
                                       const char *output_path,
                                       int ctx_size,
+                                      int text_max_prompts,
+                                      int text_max_tokens,
+                                      int text_prompt_tokens,
                                       int max_prompts,
                                       int max_tokens,
                                       int min_expert_samples);

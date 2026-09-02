@@ -80,6 +80,9 @@ typedef struct {
     const char *imatrix_dataset_path;
     const char *imatrix_vision_manifest_path;
     const char *imatrix_output_path;
+    int imatrix_text_max_prompts;
+    int imatrix_text_max_tokens;
+    int imatrix_text_prompt_tokens;
     int imatrix_max_prompts;
     int imatrix_max_tokens;
     int imatrix_min_expert_samples;
@@ -2085,6 +2088,15 @@ static cli_config parse_options(int argc, char **argv) {
             c.gen.imatrix_dataset_path = need_arg(&i, argc, argv, arg);
         } else if (!strcmp(arg, "--imatrix-vision-manifest")) {
             c.gen.imatrix_vision_manifest_path = need_arg(&i, argc, argv, arg);
+        } else if (!strcmp(arg, "--imatrix-text-max-prompts")) {
+            c.gen.imatrix_text_max_prompts = parse_int(
+                    need_arg(&i, argc, argv, arg), arg);
+        } else if (!strcmp(arg, "--imatrix-text-max-tokens")) {
+            c.gen.imatrix_text_max_tokens = parse_int(
+                    need_arg(&i, argc, argv, arg), arg);
+        } else if (!strcmp(arg, "--imatrix-text-prompt-tokens")) {
+            c.gen.imatrix_text_prompt_tokens = parse_int(
+                    need_arg(&i, argc, argv, arg), arg);
         } else if (!strcmp(arg, "--imatrix-out")) {
             c.gen.imatrix_output_path = need_arg(&i, argc, argv, arg);
             c.engine.backend = DS4_BACKEND_METAL;
@@ -2146,10 +2158,6 @@ static cli_config parse_options(int argc, char **argv) {
     if (c.engine.directional_steering_file && !directional_steering_scale_set) {
         c.engine.directional_steering_ffn = 1.0f;
     }
-    if (c.gen.imatrix_dataset_path && c.gen.imatrix_vision_manifest_path) {
-        fprintf(stderr, "ds4: choose one imatrix dataset mode\n");
-        exit(2);
-    }
     if (c.gen.imatrix_output_path && !c.gen.imatrix_dataset_path &&
         !c.gen.imatrix_vision_manifest_path) {
         fprintf(stderr, "ds4: --imatrix-out requires an imatrix dataset\n");
@@ -2162,6 +2170,21 @@ static cli_config parse_options(int argc, char **argv) {
     }
     if (c.gen.imatrix_min_expert_samples < 0) {
         fprintf(stderr, "ds4: --imatrix-min-expert-samples must not be negative\n");
+        exit(2);
+    }
+    if (c.gen.imatrix_text_max_prompts < 0 ||
+        c.gen.imatrix_text_max_tokens < 0 ||
+        c.gen.imatrix_text_prompt_tokens < 0) {
+        fprintf(stderr, "ds4: imatrix text limits must not be negative\n");
+        exit(2);
+    }
+    if ((c.gen.imatrix_text_max_prompts ||
+         c.gen.imatrix_text_max_tokens ||
+         c.gen.imatrix_text_prompt_tokens) &&
+        (!c.gen.imatrix_dataset_path ||
+         !c.gen.imatrix_vision_manifest_path)) {
+        fprintf(stderr,
+                "ds4: imatrix text limits require combined text+vision collection\n");
         exit(2);
     }
     if (c.gen.perplexity_file_path && c.gen.prompt) {
@@ -2328,9 +2351,13 @@ int main(int argc, char **argv) {
         if (cfg.gen.imatrix_vision_manifest_path) {
             rc = ds4_engine_collect_vision_imatrix(
                     engine,
+                    cfg.gen.imatrix_dataset_path,
                     cfg.gen.imatrix_vision_manifest_path,
                     cfg.gen.imatrix_output_path,
                     cfg.gen.ctx_size,
+                    cfg.gen.imatrix_text_max_prompts,
+                    cfg.gen.imatrix_text_max_tokens,
+                    cfg.gen.imatrix_text_prompt_tokens,
                     cfg.gen.imatrix_max_prompts,
                     cfg.gen.imatrix_max_tokens,
                     cfg.gen.imatrix_min_expert_samples);

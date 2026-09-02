@@ -35342,7 +35342,7 @@ static void imatrix_collector_report_progress_coverage(
         }
     }
     fprintf(stderr,
-            "ds4: vision imatrix checkpoint coverage nonzero=%u/%u "
+            "ds4: imatrix checkpoint coverage nonzero=%u/%u "
             "(%.2f%%) ge4=%u ge8=%u\n",
             covered, possible,
             possible ? 100.0 * (double)covered / (double)possible : 0.0,
@@ -57644,17 +57644,25 @@ int ds4_engine_collect_imatrix(ds4_engine *e,
 }
 
 int ds4_engine_collect_vision_imatrix(ds4_engine *e,
+                                      const char *text_dataset_path,
                                       const char *manifest_path,
                                       const char *output_path,
                                       int ctx_size,
+                                      int text_max_prompts,
+                                      int text_max_tokens,
+                                      int text_prompt_tokens,
                                       int max_prompts,
                                       int max_tokens,
                                       int min_expert_samples) {
 #ifdef DS4_NO_GPU
     (void)e;
+    (void)text_dataset_path;
     (void)manifest_path;
     (void)output_path;
     (void)ctx_size;
+    (void)text_max_prompts;
+    (void)text_max_tokens;
+    (void)text_prompt_tokens;
     (void)max_prompts;
     (void)max_tokens;
     (void)min_expert_samples;
@@ -57701,6 +57709,15 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
         return 1;
     }
 
+    char *text_dataset = NULL;
+    size_t text_dataset_len = 0;
+    if (text_dataset_path &&
+        !imatrix_read_text_file(text_dataset_path, 0,
+                                &text_dataset, &text_dataset_len)) {
+        fclose(manifest);
+        return 1;
+    }
+
     const ds4_model *model = &e->model;
     const ds4_weights *weights = &e->weights;
     const uint32_t prefill_cap =
@@ -57715,6 +57732,7 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
     if (!ok) {
         fprintf(stderr,
                 "ds4: failed to allocate vision imatrix Metal graph runtime\n");
+        free(text_dataset);
         fclose(manifest);
         return 1;
     }
@@ -57731,6 +57749,7 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
     if (!imatrix_collector_init(&collector, prefill_cap, manifest_path)) {
         fprintf(stderr, "ds4: failed to allocate vision imatrix collector\n");
         metal_graph_free(&g);
+        free(text_dataset);
         fclose(manifest);
         return 1;
     }
@@ -57740,7 +57759,122 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
     snprintf(checkpoint_path, output_path_len + sizeof(".partial"),
              "%s.partial", output_path);
 
-    fprintf(stderr,
+    uint64_t text_prompts_done = 0;
+    uint64_t text_tokens_done = 0;
+    if (text_dataset) {
+        fprintf(stderr,
+                "ds4: collecting combined text stratum from %s "
+                "(max_prompts=%d max_tokens=%d prompt_tokens=%d)\n",
+                text_dataset_path, text_max_prompts, text_max_tokens,
+                text_prompt_tokens);
+        char *cursor = text_dataset;
+        const char *marker_lit = "===== DS4_IMATRIX_PROMPT";
+        while (ok && *cursor) {
+            char *start = cursor;
+            char *marker = imatrix_find_marker(text_dataset, cursor,
+                                               marker_lit);
+            if (marker) {
+                char *nl = strchr(marker, '\n');
+                if (!nl) break;
+                start = nl + 1;
+            } else if (text_prompts_done != 0) {
+                break;
+            }
+
+            char *next = imatrix_find_marker(text_dataset, start,
+                                             marker_lit);
+            char *end = next ? next : text_dataset + text_dataset_len;
+            const char saved = *end;
+            char *prompt_text = imatrix_trim_block(start, end);
+            if (prompt_text[0] != '\0') {
+                token_vec prompt = {0};
+                ds4_tokenize_rendered_chat(e, prompt_text, &prompt);
+                if (prompt.len > ctx_size) prompt.len = ctx_size;
+                if (text_prompt_tokens > 0 &&
+                    prompt.len > text_prompt_tokens) {
+                    prompt.len = text_prompt_tokens;
+                }
+                if (text_max_tokens > 0) {
+                    const uint64_t remaining =
+                        text_tokens_done >= (uint64_t)text_max_tokens ? 0u :
+                        (uint64_t)text_max_tokens - text_tokens_done;
+                    if ((uint64_t)prompt.len > remaining) {
+                        prompt.len = (int)remaining;
+                    }
+                }
+                if (prompt.len > 0) {
+                    if (!metal_graph_reset_prefill_state(&g)) {
+                        fprintf(stderr,
+                                "ds4: failed to reset combined text "
+                                "imatrix graph state\n");
+                        ok = false;
+                    } else if ((uint32_t)prompt.len > prefill_cap) {
+                        ok = metal_graph_prefill_chunked_range(
+                                &g, model, weights, &prompt, 0,
+                                (uint32_t)prompt.len, NULL, false,
+                                NULL, NULL, NULL, NULL, &collector,
+                                NULL, NULL, NULL);
+                    } else {
+                        ok = metal_graph_prefill_layer_major(
+                                &g, model, weights, &prompt, 0,
+                                (uint32_t)prompt.len, NULL, false,
+                                &collector, NULL, NULL);
+                    }
+                    if (!ok) {
+                        fprintf(stderr,
+                                "ds4: combined text imatrix prefill failed "
+                                "at prompt %" PRIu64 "\n",
+                                text_prompts_done + 1u);
+                    } else {
+                        ok = imatrix_counter_add(&text_prompts_done, 1u,
+                                                 "text prompt") &&
+                             imatrix_counter_add(&text_tokens_done,
+                                                 (uint64_t)prompt.len,
+                                                 "text token");
+                    }
+                    if (ok) {
+                        fprintf(stderr,
+                                "ds4: combined text imatrix prompts=%" PRIu64
+                                " tokens=%" PRIu64 " routes=%llu\r",
+                                text_prompts_done, text_tokens_done,
+                                (unsigned long long)
+                                    collector.observed_routes);
+                        fflush(stderr);
+                    }
+                }
+                token_vec_free(&prompt);
+            }
+            *end = saved;
+            if (!ok || !next) break;
+            cursor = next;
+            if (text_max_prompts > 0 &&
+                text_prompts_done >= (uint64_t)text_max_prompts) break;
+            if (text_max_tokens > 0 &&
+                text_tokens_done >= (uint64_t)text_max_tokens) break;
+        }
+        fputc('\n', stderr);
+        if (ok && (text_prompts_done == 0 || text_tokens_done == 0)) {
+            fprintf(stderr,
+                    "ds4: refusing combined imatrix without text receiver "
+                    "observations\n");
+            ok = false;
+        }
+        if (ok) {
+            imatrix_collector_report_progress_coverage(
+                    &collector, weights, DS4_N_LAYER);
+            ok = imatrix_collector_save_atomic(
+                    &collector, weights, checkpoint_path);
+            if (ok) {
+                fprintf(stderr,
+                        "ds4: checkpointed combined text stratum to %s\n",
+                        checkpoint_path);
+            }
+        }
+    }
+
+    const uint64_t text_routes_done = collector.observed_routes;
+
+    if (ok) fprintf(stderr,
             "ds4: collecting DeepSeek Vision-Exp routed imatrix from %s "
             "(layers=%u experts=%u ctx=%d chunk=%u bias_vl=enabled)\n",
             manifest_path, DS4_N_LAYER, DS4_N_EXPERT, ctx_size, prefill_cap);
@@ -57990,17 +58124,22 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
         remove(checkpoint_path);
         fprintf(stderr,
                 "ds4: wrote vision imatrix %s from %" PRIu64
-                " cases, %" PRIu64 " tokens, "
-                "%llu visual tokens, %llu routed expert observations "
+                " text prompts/%" PRIu64 " text tokens and %" PRIu64
+                " vision cases/%" PRIu64 " vision tokens, "
+                "%llu visual tokens, %llu text routes, "
+                "%llu total routed expert observations "
                 "(bias_vl=enabled)\n",
-                output_path, prompts_done, tokens_done,
+                output_path, text_prompts_done, text_tokens_done,
+                prompts_done, tokens_done,
                 (unsigned long long)visual_tokens_done,
+                (unsigned long long)text_routes_done,
                 (unsigned long long)collector.observed_routes);
     }
 
     free(checkpoint_path);
     imatrix_collector_free(&collector);
     metal_graph_free(&g);
+    free(text_dataset);
     return ok ? 0 : 1;
 #endif
 }
