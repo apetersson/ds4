@@ -35274,6 +35274,30 @@ static bool imatrix_collector_save(
     return true;
 }
 
+static bool imatrix_collector_save_atomic(
+        const ds4_imatrix_collector *c,
+        const ds4_weights           *weights,
+        const char                  *path) {
+    const size_t path_len = strlen(path);
+    char *tmp_path = xmalloc(path_len + sizeof(".tmp"));
+    snprintf(tmp_path, path_len + sizeof(".tmp"), "%s.tmp", path);
+    if (!imatrix_collector_save(c, weights, tmp_path)) {
+        remove(tmp_path);
+        free(tmp_path);
+        return false;
+    }
+    if (rename(tmp_path, path) != 0) {
+        fprintf(stderr,
+                "ds4: failed to publish imatrix output %s: %s\n",
+                path, strerror(errno));
+        remove(tmp_path);
+        free(tmp_path);
+        return false;
+    }
+    free(tmp_path);
+    return true;
+}
+
 static uint32_t imatrix_collector_min_samples(
         const ds4_imatrix_collector *c,
         const ds4_weights           *weights,
@@ -35293,6 +35317,36 @@ static uint32_t imatrix_collector_min_samples(
         }
     }
     return found ? min_samples : 0;
+}
+
+static void imatrix_collector_report_progress_coverage(
+        const ds4_imatrix_collector *c,
+        const ds4_weights           *weights,
+        uint32_t                     layer_limit) {
+    uint32_t possible = 0;
+    uint32_t covered = 0;
+    uint32_t at_least_four = 0;
+    uint32_t at_least_eight = 0;
+    if (layer_limit > DS4_N_LAYER) layer_limit = DS4_N_LAYER;
+    for (uint32_t il = 0; il < layer_limit; il++) {
+        if (!weights->layer[il].ffn_gate_exps) continue;
+        for (uint32_t expert = 0; expert < DS4_N_EXPERT; expert++) {
+            uint32_t samples = c->gate_up_count[il][expert];
+            if (c->down_count[il][expert] < samples) {
+                samples = c->down_count[il][expert];
+            }
+            possible++;
+            if (samples > 0) covered++;
+            if (samples >= 4) at_least_four++;
+            if (samples >= 8) at_least_eight++;
+        }
+    }
+    fprintf(stderr,
+            "ds4: vision imatrix checkpoint coverage nonzero=%u/%u "
+            "(%.2f%%) ge4=%u ge8=%u\n",
+            covered, possible,
+            possible ? 100.0 * (double)covered / (double)possible : 0.0,
+            at_least_four, at_least_eight);
 }
 
 static void imatrix_collector_report_coverage(
@@ -57527,6 +57581,11 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
         return 1;
     }
 
+    const size_t output_path_len = strlen(output_path);
+    char *checkpoint_path = xmalloc(output_path_len + sizeof(".partial"));
+    snprintf(checkpoint_path, output_path_len + sizeof(".partial"),
+             "%s.partial", output_path);
+
     fprintf(stderr,
             "ds4: collecting DeepSeek Vision-Exp routed imatrix from %s "
             "(layers=%u experts=%u ctx=%d chunk=%u bias_vl=enabled)\n",
@@ -57708,6 +57767,19 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
                     imatrix_collector_min_samples(&collector, weights,
                                                  DS4_N_LAYER));
             fflush(stderr);
+            if (prompts_done % 25 == 0 && !sample_target_reached) {
+                fputc('\n', stderr);
+                imatrix_collector_report_progress_coverage(
+                        &collector, weights, DS4_N_LAYER);
+                if (!imatrix_collector_save_atomic(
+                            &collector, weights, checkpoint_path)) {
+                    ok = false;
+                } else {
+                    fprintf(stderr,
+                            "ds4: checkpointed vision imatrix to %s\n",
+                            checkpoint_path);
+                }
+            }
         }
 
         token_vec_free(&prompt);
@@ -57749,8 +57821,11 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
             ok = false;
         }
     }
-    if (ok) ok = imatrix_collector_save(&collector, weights, output_path);
     if (ok) {
+        ok = imatrix_collector_save_atomic(&collector, weights, output_path);
+    }
+    if (ok) {
+        remove(checkpoint_path);
         fprintf(stderr,
                 "ds4: wrote vision imatrix %s from %d cases, %d tokens, "
                 "%llu visual tokens, %llu routed expert observations "
@@ -57760,6 +57835,7 @@ int ds4_engine_collect_vision_imatrix(ds4_engine *e,
                 (unsigned long long)collector.observed_routes);
     }
 
+    free(checkpoint_path);
     imatrix_collector_free(&collector);
     metal_graph_free(&g);
     return ok ? 0 : 1;
